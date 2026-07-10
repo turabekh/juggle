@@ -45,6 +45,11 @@ class Booking(UUIDPkMixin, TimestampMixin, Base):
     payment_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("payment.id", ondelete="SET NULL"), index=True, nullable=True
     )
+    # The seat hold this booking consumes — links the booking back to the seats
+    # it occupies, so confirm/cancel act on the exact hold deterministically.
+    seat_hold_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("seat_hold.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     status: Mapped[BookingStatus] = mapped_column(
         Enum(BookingStatus, name="booking_status"), default=BookingStatus.pending, nullable=False
     )

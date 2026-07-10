@@ -46,6 +46,9 @@ class Payment(UUIDPkMixin, TimestampMixin, Base):
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(
         String(64), unique=True, nullable=True
     )
+    # Cart-level idempotency: a repeated checkout with the same key returns the
+    # same payment/order instead of double-charging (PRD §7.4, §12).
+    idempotency_key: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     application_fee_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="aud", nullable=False)
