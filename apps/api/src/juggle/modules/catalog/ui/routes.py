@@ -119,10 +119,12 @@ def list_program_sessions(
     return [schemas.SessionOut.model_validate(s) for s in sessions]
 
 
-@router.get("/sessions/{session_id}", response_model=schemas.SessionOut)
-def get_session_detail(session_id: uuid.UUID, session: SessionDep) -> schemas.SessionOut:
-    """Public session detail — only for sessions in a published program."""
-    found = service.get_public_session(session, session_id)
+@router.get("/sessions/{session_id}", response_model=schemas.SessionDetailOut)
+def get_session_detail(
+    session_id: uuid.UUID, session: SessionDep
+) -> schemas.SessionDetailOut:
+    """Public listing detail — only for sessions in a published program."""
+    found = service.get_public_session_detail(session, session_id)
     if found is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
-    return schemas.SessionOut.model_validate(found)
+    return found

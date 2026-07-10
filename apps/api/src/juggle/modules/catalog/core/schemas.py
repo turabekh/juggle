@@ -88,3 +88,16 @@ class SessionOut(BaseModel):
     session_type: str
     drop_off: bool
     status: str
+
+
+class SessionDetailOut(SessionOut):
+    """Public listing-detail view (PRD §7.2): the session plus the program,
+    provider, and venue context a parent needs before booking."""
+
+    title: str
+    category: str
+    description: str | None
+    organisation_name: str
+    venue_name: str
+    suburb: str | None
+    postcode: str | None

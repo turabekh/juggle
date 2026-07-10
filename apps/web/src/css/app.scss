@@ -1,0 +1,98 @@
+// ---------------------------------------------------------------------------
+// Juggle design tokens + global styles. Kept small and systematic so the app
+// reads as one cohesive product (see components for local styles).
+// ---------------------------------------------------------------------------
+:root {
+  --jg-ink: #1e2233;
+  --jg-ink-soft: #5b6172;
+  --jg-ink-faint: #8b90a0;
+  --jg-line: #e8eaf0;
+  --jg-surface: #ffffff;
+  --jg-canvas: #f6f7fb;
+  --jg-primary: #3b6fe0;
+  --jg-primary-tint: #eaf0fd;
+  --jg-coral: #ff7a59;
+  --jg-coral-tint: #fff0eb;
+
+  --jg-shadow-sm: 0 1px 2px rgba(24, 30, 54, 0.06), 0 1px 3px rgba(24, 30, 54, 0.05);
+  --jg-shadow-md: 0 6px 18px rgba(24, 30, 54, 0.08);
+  --jg-shadow-lg: 0 18px 48px rgba(24, 30, 54, 0.14);
+
+  --jg-radius: 16px;
+  --jg-radius-lg: 22px;
+  --jg-gap: 16px;
+
+  --jg-maxw: 1120px;
+}
+
+html,
+body {
+  background: var(--jg-canvas);
+  color: var(--jg-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+// Display font for headings — gives the brand some warmth/personality.
+h1, h2, h3, h4, h5, .jg-display {
+  font-family: 'Fraunces', 'Inter', serif;
+  letter-spacing: -0.01em;
+  color: var(--jg-ink);
+}
+
+.jg-page {
+  max-width: var(--jg-maxw);
+  margin: 0 auto;
+  padding: 28px 20px 72px;
+}
+
+.jg-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--jg-primary);
+}
+
+// A soft card surface used throughout.
+.jg-card {
+  background: var(--jg-surface);
+  border: 1px solid var(--jg-line);
+  border-radius: var(--jg-radius);
+  box-shadow: var(--jg-shadow-sm);
+  transition: box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease;
+}
+.jg-card--hover:hover {
+  box-shadow: var(--jg-shadow-md);
+  transform: translateY(-2px);
+  border-color: #dde1ec;
+}
+
+.jg-muted { color: var(--jg-ink-soft); }
+.jg-faint { color: var(--jg-ink-faint); }
+
+// Rounded, tactile buttons.
+.q-btn {
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+// Chips used as filter/summary pills.
+.jg-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: var(--jg-primary-tint);
+  color: var(--jg-primary);
+}
+.jg-pill--warm { background: var(--jg-coral-tint); color: #d8532f; }
+.jg-pill--muted { background: #eef0f5; color: var(--jg-ink-soft); }
+
+@media (prefers-reduced-motion: reduce) {
+  .jg-card, .q-btn { transition: none !important; }
+}

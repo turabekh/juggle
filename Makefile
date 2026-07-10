@@ -38,5 +38,17 @@ check: lint typecheck contracts test ## Everything CI runs
 migrate: ## Apply migrations
 	cd $(API) && uv run alembic upgrade head
 
+seed: ## Seed the local DB with demo marketplace data
+	cd $(API) && uv run python scripts/seed_demo.py
+
+web-install: ## Install frontend deps
+	cd apps/web && npm install
+
+web-dev: ## Run the Quasar dev server (proxies /api to :8000)
+	cd apps/web && npm run dev
+
+web-build: ## Typecheck + build the frontend
+	cd apps/web && npm run build
+
 revision: ## Autogenerate a migration: make revision m="add sessions"
 	cd $(API) && uv run alembic revision --autogenerate -m "$(m)"

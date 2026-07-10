@@ -1,0 +1,29 @@
+{
+  "name": "juggle-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Juggle — parent-facing marketplace PWA (Quasar + Vue 3)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@quasar/extras": "^1.16.12",
+    "axios": "^1.7.7",
+    "pinia": "^2.2.4",
+    "quasar": "^2.17.1",
+    "vue": "^3.5.12",
+    "vue-router": "^4.4.5"
+  },
+  "devDependencies": {
+    "@quasar/vite-plugin": "^1.8.0",
+    "@vitejs/plugin-vue": "^5.1.4",
+    "sass-embedded": "^1.80.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vue-tsc": "^2.1.10"
+  }
+}

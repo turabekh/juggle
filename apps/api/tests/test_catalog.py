@@ -78,7 +78,13 @@ def test_provider_can_build_and_publish_a_program(client: TestClient) -> None:
 
     public = client.get(f"/api/v1/catalog/sessions/{session_id}")
     assert public.status_code == 200
-    assert public.json()["seats_remaining"] == 12
+    detail = public.json()
+    assert detail["seats_remaining"] == 12
+    # Enriched listing-detail context (PRD §7.2).
+    assert detail["title"] == "Art Camp"
+    assert detail["organisation_name"]
+    assert detail["venue_name"] == "Community Hall"
+    assert detail["suburb"] == "Perth"
 
 
 def test_non_member_cannot_create_program(client: TestClient) -> None:

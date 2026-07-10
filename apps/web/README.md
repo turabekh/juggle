@@ -1,35 +1,64 @@
 # Juggle Web (Quasar PWA)
 
-Parent-facing marketplace **and** the admin console, built as a Quasar (Vue 3)
-app with SSR for SEO on listing pages and an installable PWA shell (PRD §12).
-Admin lives behind admin-role auth as a separate surface within this app
-(PRD §10.4).
+Parent-facing marketplace for Juggle — a Vite + Vue 3 (TypeScript) + Quasar SPA.
 
-## Scaffolding (not yet generated)
-
-The Quasar app is scaffolded with the official CLI once we start the frontend
-milestone (it is interactive / network-dependent, so it is intentionally not
-committed as an empty shell yet):
+## Run it
 
 ```bash
-npm i -g @quasar/cli
-cd apps/web
-npm init quasar@latest .    # choose: Vue 3, TypeScript, Vite, SSR + PWA, Pinia, ESLint/Prettier
+# 1. Backend (from repo root): start Postgres, migrate, seed demo data, run API
+make db && make migrate && make seed && make dev      # API on :8000
+
+# 2. Frontend (this app)
+make web-install     # or: cd apps/web && npm install
+make web-dev         # Quasar dev server on http://localhost:9000
 ```
 
-Planned structure once generated:
+The dev server proxies `/api` → `http://localhost:8000`, so no CORS setup is
+needed. `make seed` populates an approved provider with published sessions across
+Perth suburbs so the marketplace isn't empty.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Vite dev server (port 9000, `/api` proxied to the backend) |
+| `npm run build` | `vue-tsc` typecheck + production build to `dist/` |
+| `npm run typecheck` | Type-check only |
+| `npm run preview` | Serve the production build |
+
+## Structure
 
 ```
-apps/web/
-├── quasar.config.ts
-├── src/
-│   ├── pages/          # discovery, listing detail, checkout, bookings, admin/*
-│   ├── layouts/        # public shell, admin shell
-│   ├── components/
-│   ├── stores/         # Pinia (auth, cart, search filters)
-│   └── boot/           # axios client → /api/v1, auth guard
-└── src-pwa/            # service worker, manifest
+src/
+├── main.ts               # app bootstrap (Quasar plugins, Pinia, router)
+├── App.vue
+├── router/               # routes + auth guard
+├── layouts/MainLayout.vue# header / nav / footer shell
+├── pages/                # Discover, SessionDetail, Cart, Checkout, Bookings,
+│                         #   Account, Login, Signup, NotFound
+├── components/           # SessionCard, EmptyState
+├── stores/               # Pinia: auth, cart (persisted)
+├── lib/                  # api (typed client), types, format, sessionMemo
+└── css/                  # quasar.variables.scss (brand), app.scss (tokens)
 ```
 
-The API base URL for local dev is `http://localhost:8000/api/v1`; set the API's
-`JUGGLE_CORS_ORIGINS` to include the Quasar dev server (`http://localhost:9000`).
+**Design system:** brand tokens live in `src/css/quasar.variables.scss` (Quasar
+theme) and `src/css/app.scss` (CSS custom properties — colours, spacing, shadows,
+radii, the `.jg-card` / `.jg-pill` primitives). Headings use Fraunces, body Inter.
+
+**API layer:** `src/lib/api.ts` is the single typed client. The auth token is held
+in a module variable (set by the auth store) and injected via an interceptor, so
+there's no store↔client import cycle.
+
+## Flow
+
+Discover (PostGIS search + filters) → Session detail (pick kids → hold seats) →
+Cart → Checkout (checkout + confirm) → My bookings. Auth-gated routes redirect to
+sign-in and back.
+
+## Not yet built (follow-ups)
+
+- Admin console surface (approvals, config, impersonation UI) — the API exists.
+- SSR for SEO on listing pages (PRD §12) — currently SPA.
+- PWA service worker / installability, offline shell.
+- Map view; reviews/waitlists (P1).

@@ -18,7 +18,7 @@ from juggle.modules.catalog.core.models import (
     Venue,
 )
 from juggle.modules.catalog.core.models import Session as ProgramSession
-from juggle.modules.catalog.core.schemas import SessionCreate
+from juggle.modules.catalog.core.schemas import SessionCreate, SessionDetailOut
 from juggle.modules.org.core import service as org_service
 from juggle.modules.org.core.models import OrgStatus
 
@@ -177,3 +177,40 @@ def get_public_session(db: Session, session_id: uuid.UUID) -> ProgramSession | N
     if session.status is SessionStatus.cancelled:
         return None
     return session
+
+
+def get_public_session_detail(
+    db: Session, session_id: uuid.UUID
+) -> SessionDetailOut | None:
+    """Enriched public listing detail (program + provider + venue context)."""
+    session = get_public_session(db, session_id)
+    if session is None:
+        return None
+    program = db.get(Program, session.program_id)
+    venue = db.get(Venue, session.venue_id)
+    if program is None or venue is None:
+        return None
+    org = org_service.get_organisation(db, program.organisation_id)
+    return SessionDetailOut(
+        id=session.id,
+        program_id=session.program_id,
+        venue_id=session.venue_id,
+        starts_at=session.starts_at,
+        ends_at=session.ends_at,
+        capacity=session.capacity,
+        seats_taken=session.seats_taken,
+        seats_remaining=session.seats_remaining,
+        price_cents=session.price_cents,
+        age_min=session.age_min,
+        age_max=session.age_max,
+        session_type=session.session_type.value,
+        drop_off=session.drop_off,
+        status=session.status.value,
+        title=program.title,
+        category=program.category,
+        description=program.description,
+        organisation_name=org.name if org is not None else "",
+        venue_name=venue.name,
+        suburb=venue.suburb,
+        postcode=venue.postcode,
+    )

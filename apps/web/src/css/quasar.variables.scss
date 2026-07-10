@@ -1,0 +1,19 @@
+// Juggle brand — a warm, trustworthy palette for a family marketplace.
+$primary:   #3B6FE0; // confident friendly blue (trust)
+$secondary: #FF7A59; // warm coral (energy / accents)
+$accent:    #F4B740; // sunny yellow (sparingly)
+
+$dark:      #1E2233;
+$dark-page: #12141f;
+
+$positive:  #2FA98C;
+$negative:  #E5484D;
+$info:      #4C9AFF;
+$warning:   #F0A431;
+
+$typography-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+  Roboto, Helvetica, Arial, sans-serif;
+
+// Softer, roomier feel than Material defaults.
+$generic-border-radius: 16px;
+$button-border-radius: 12px;
