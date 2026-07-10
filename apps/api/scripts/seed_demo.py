@@ -74,7 +74,9 @@ def _seed() -> None:
             for (name, suburb, postcode, lat, lng) in VENUES
         ]
 
-        base = datetime(2026, 9, 29, 9, 0, tzinfo=UTC)  # WA spring holidays
+        # 9:00am Perth (AWST, UTC+8) == 01:00 UTC. Stored in UTC; the frontend
+        # renders in the viewer's local time.
+        base = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)  # WA spring holidays
         session_count = 0
         for i, (title, category, desc, price, amin, amax, vidx, dtype) in enumerate(PROGRAMS):
             program = catalog_service.create_program(

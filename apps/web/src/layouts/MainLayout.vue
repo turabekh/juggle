@@ -1,5 +1,5 @@
 <template>
-  <q-layout view="hHh lpR fFf">
+  <q-layout view="hHh lpR fff">
     <q-header class="jg-header">
       <div class="jg-header__inner">
         <router-link :to="{ name: 'discover' }" class="jg-brand" aria-label="Juggle home">
