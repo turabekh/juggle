@@ -18,6 +18,7 @@ class OrgOut(BaseModel):
     name: str
     slug: str
     status: str
+    abn: str | None = None
     created_at: datetime
 
 

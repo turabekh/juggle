@@ -219,6 +219,7 @@ export interface Org {
   name: string
   slug: string
   status: OrgStatus
+  abn: string | null
   created_at: string
 }
 
@@ -277,6 +278,34 @@ export interface SessionCancelResult {
   cancelled_bookings: number
   refunded_payments: number
   reliability_score: number
+}
+
+export type VerificationStatus = 'pending' | 'verified' | 'rejected' | 'expired'
+
+export interface WwccRecord {
+  id: string
+  staff_name: string
+  wwcc_number: string
+  expiry_date: string
+  status: VerificationStatus
+  created_at: string
+}
+
+export interface InsuranceDoc {
+  id: string
+  file_ref: string
+  expiry_date: string | null
+  status: VerificationStatus
+  created_at: string
+}
+
+export interface OrgVerifications {
+  organisation_id: string
+  name: string
+  status: OrgStatus
+  abn: string | null
+  wwcc: WwccRecord[]
+  insurance: InsuranceDoc[]
 }
 
 export interface SessionCreateInput {

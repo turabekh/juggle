@@ -14,6 +14,55 @@
         This organisation is suspended and cannot publish listings.
       </p>
 
+      <!-- Compliance & verification -->
+      <section class="jg-card q-pa-lg q-mt-lg">
+        <div class="text-h6 q-mb-xs">Compliance &amp; verification</div>
+        <p class="jg-muted text-caption q-mb-md">
+          Required for parent trust. Our team verifies these before you go live.
+        </p>
+
+        <div class="jg-comp-abn">
+          <q-input v-model="abnDraft" outlined dense label="ABN" style="max-width: 260px" />
+          <q-btn unelevated no-caps color="primary" label="Save ABN" :disable="abnDraft === (org.abn ?? '')" :loading="savingAbn" @click="saveAbn" />
+        </div>
+
+        <div class="row q-col-gutter-lg q-mt-md">
+          <div class="col-12 col-sm-6">
+            <div class="row items-center justify-between q-mb-xs">
+              <span class="text-weight-600">Working with Children (WWCC)</span>
+              <q-btn flat dense no-caps color="primary" icon="add" label="Add" @click="showWwcc = true" />
+            </div>
+            <div v-if="wwcc.length" class="jg-vlist">
+              <div v-for="w in wwcc" :key="w.id" class="jg-vrow">
+                <div>
+                  <div class="text-weight-500">{{ w.staff_name }}</div>
+                  <div class="jg-faint text-caption">{{ w.wwcc_number }} · exp {{ w.expiry_date }}</div>
+                </div>
+                <q-chip dense square :color="vColor(w.status)" text-color="white" :label="w.status" />
+              </div>
+            </div>
+            <div v-else class="jg-faint text-caption">No staff checks added.</div>
+          </div>
+
+          <div class="col-12 col-sm-6">
+            <div class="row items-center justify-between q-mb-xs">
+              <span class="text-weight-600">Public liability insurance</span>
+              <q-btn flat dense no-caps color="primary" icon="add" label="Add" @click="showInsurance = true" />
+            </div>
+            <div v-if="insurance.length" class="jg-vlist">
+              <div v-for="d in insurance" :key="d.id" class="jg-vrow">
+                <div>
+                  <div class="text-weight-500 ellipsis" style="max-width: 220px">{{ d.file_ref }}</div>
+                  <div class="jg-faint text-caption">{{ d.expiry_date ? `exp ${d.expiry_date}` : 'no expiry' }}</div>
+                </div>
+                <q-chip dense square :color="vColor(d.status)" text-color="white" :label="d.status" />
+              </div>
+            </div>
+            <div v-else class="jg-faint text-caption">No certificate added.</div>
+          </div>
+        </div>
+      </section>
+
       <!-- Venues -->
       <section class="q-mt-lg">
         <div class="row items-center justify-between q-mb-sm">
@@ -99,17 +148,48 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <!-- Add WWCC dialog -->
+    <q-dialog v-model="showWwcc">
+      <q-card style="min-width: 360px; border-radius: 18px">
+        <q-card-section><div class="text-h6">Add WWCC record</div></q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-input v-model="wwccForm.staff_name" outlined dense label="Staff member name" autofocus />
+          <q-input v-model="wwccForm.wwcc_number" outlined dense label="WWCC number" />
+          <q-input v-model="wwccForm.expiry_date" outlined dense type="date" label="Expiry date" stack-label />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn unelevated no-caps color="primary" label="Add" :loading="saving" :disable="!wwccValid" @click="addWwcc" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- Add insurance dialog -->
+    <q-dialog v-model="showInsurance">
+      <q-card style="min-width: 360px; border-radius: 18px">
+        <q-card-section><div class="text-h6">Add insurance certificate</div></q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-input v-model="insForm.file_ref" outlined dense label="Certificate link / reference" autofocus hint="Paste a link to your certificate" />
+          <q-input v-model="insForm.expiry_date" outlined dense type="date" label="Expiry date (optional)" stack-label />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn unelevated no-caps color="primary" label="Add" :loading="saving" :disable="!insForm.file_ref" @click="addInsurance" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useQuasar } from 'quasar'
 
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
 import { CATEGORIES, categoryMeta } from '@/lib/format'
-import type { Org, Program, Venue } from '@/lib/types'
+import type { InsuranceDoc, Org, Program, Venue, WwccRecord } from '@/lib/types'
 
 const props = defineProps<{ id: string }>()
 const $q = useQuasar()
@@ -117,27 +197,86 @@ const $q = useQuasar()
 const org = ref<Org | null>(null)
 const venues = ref<Venue[]>([])
 const programs = ref<Program[]>([])
+const wwcc = ref<WwccRecord[]>([])
+const insurance = ref<InsuranceDoc[]>([])
 const saving = ref(false)
+const savingAbn = ref(false)
+const abnDraft = ref('')
 const showVenue = ref(false)
 const showProgram = ref(false)
+const showWwcc = ref(false)
+const showInsurance = ref(false)
 
 const categoryOptions = CATEGORIES.map((c) => ({ label: c.label, value: c.value }))
 const venueForm = reactive({ name: '', suburb: '', postcode: '', latitude: null as number | null, longitude: null as number | null })
 const programForm = reactive({ title: '', category: 'art', description: '' })
+const wwccForm = reactive({ staff_name: '', wwcc_number: '', expiry_date: '' })
+const insForm = reactive({ file_ref: '', expiry_date: '' })
+
+const wwccValid = computed(() => wwccForm.staff_name && wwccForm.wwcc_number && wwccForm.expiry_date)
 
 function statusColor(s: string): string {
   return { pending: 'warning', approved: 'positive', suspended: 'grey-6' }[s] ?? 'grey'
+}
+function vColor(s: string): string {
+  return { pending: 'warning', verified: 'positive', rejected: 'negative', expired: 'grey-6' }[s] ?? 'grey'
 }
 
 async function load(): Promise<void> {
   try {
     org.value = await api.org.get(props.id)
-    ;[venues.value, programs.value] = await Promise.all([
+    abnDraft.value = org.value.abn ?? ''
+    ;[venues.value, programs.value, wwcc.value, insurance.value] = await Promise.all([
       api.catalog.venues(props.id),
       api.catalog.programs(props.id),
+      api.org.wwcc(props.id),
+      api.org.insurance(props.id),
     ])
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
+  }
+}
+
+async function saveAbn(): Promise<void> {
+  savingAbn.value = true
+  try {
+    org.value = await api.org.setAbn(props.id, abnDraft.value)
+    $q.notify({ type: 'positive', message: 'ABN saved' })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    savingAbn.value = false
+  }
+}
+
+async function addWwcc(): Promise<void> {
+  saving.value = true
+  try {
+    await api.org.addWwcc(props.id, { ...wwccForm })
+    showWwcc.value = false
+    Object.assign(wwccForm, { staff_name: '', wwcc_number: '', expiry_date: '' })
+    wwcc.value = await api.org.wwcc(props.id)
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    saving.value = false
+  }
+}
+
+async function addInsurance(): Promise<void> {
+  saving.value = true
+  try {
+    await api.org.addInsurance(props.id, {
+      file_ref: insForm.file_ref,
+      expiry_date: insForm.expiry_date || null,
+    })
+    showInsurance.value = false
+    Object.assign(insForm, { file_ref: '', expiry_date: '' })
+    insurance.value = await api.org.insurance(props.id)
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    saving.value = false
   }
 }
 
@@ -194,4 +333,15 @@ onMounted(load)
   text-decoration: none;
   color: inherit;
 }
+.jg-comp-abn { display: flex; align-items: center; gap: 10px; }
+.jg-vlist { display: flex; flex-direction: column; gap: 8px; }
+.jg-vrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--jg-line);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

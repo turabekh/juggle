@@ -70,6 +70,18 @@ h1, h2, h3, h4, h5, .jg-display {
 
 .jg-muted { color: var(--jg-ink-soft); }
 .jg-faint { color: var(--jg-ink-faint); }
+.jg-link { color: var(--jg-primary); font-weight: 600; text-decoration: none; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.jg-vlist { display: flex; flex-direction: column; gap: 8px; }
+.jg-vrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--jg-line);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
 
 // Rounded, tactile buttons.
 .q-btn {

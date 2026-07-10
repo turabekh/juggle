@@ -15,10 +15,12 @@ import type {
   ImpersonationMode,
   ImpersonationSession,
   ImpersonationToken,
+  InsuranceDoc,
   Order,
   Org,
   OrgAdmin,
   OrgStatus,
+  OrgVerifications,
   Program,
   RosterOut,
   SearchFilters,
@@ -32,6 +34,8 @@ import type {
   User,
   UserSummary,
   Venue,
+  VerificationStatus,
+  WwccRecord,
 } from '@/lib/types'
 
 let authToken: string | null = null
@@ -172,6 +176,32 @@ export const api = {
       const { data } = await http.post<Org>('/org', { name })
       return data
     },
+    async setAbn(orgId: string, abn: string): Promise<Org> {
+      const { data } = await http.put<Org>(`/org/${orgId}/abn`, { abn })
+      return data
+    },
+    async wwcc(orgId: string): Promise<WwccRecord[]> {
+      const { data } = await http.get<WwccRecord[]>(`/org/${orgId}/wwcc`)
+      return data
+    },
+    async addWwcc(
+      orgId: string,
+      payload: { staff_name: string; wwcc_number: string; expiry_date: string },
+    ): Promise<WwccRecord> {
+      const { data } = await http.post<WwccRecord>(`/org/${orgId}/wwcc`, payload)
+      return data
+    },
+    async insurance(orgId: string): Promise<InsuranceDoc[]> {
+      const { data } = await http.get<InsuranceDoc[]>(`/org/${orgId}/insurance`)
+      return data
+    },
+    async addInsurance(
+      orgId: string,
+      payload: { file_ref: string; expiry_date?: string | null },
+    ): Promise<InsuranceDoc> {
+      const { data } = await http.post<InsuranceDoc>(`/org/${orgId}/insurance`, payload)
+      return data
+    },
   },
   roster: {
     async forSession(sessionId: string): Promise<RosterOut> {
@@ -244,6 +274,18 @@ export const api = {
     },
     async suspendOrg(id: string): Promise<OrgAdmin> {
       const { data } = await http.post<OrgAdmin>(`/admin/orgs/${id}/suspend`)
+      return data
+    },
+    async orgVerifications(id: string): Promise<OrgVerifications> {
+      const { data } = await http.get<OrgVerifications>(`/admin/orgs/${id}/verifications`)
+      return data
+    },
+    async verifyWwcc(id: string, status: VerificationStatus): Promise<WwccRecord> {
+      const { data } = await http.post<WwccRecord>(`/admin/wwcc/${id}/verify`, { status })
+      return data
+    },
+    async verifyInsurance(id: string, status: VerificationStatus): Promise<InsuranceDoc> {
+      const { data } = await http.post<InsuranceDoc>(`/admin/insurance/${id}/verify`, { status })
       return data
     },
     async refund(paymentId: string, reason: string): Promise<Order> {
