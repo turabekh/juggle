@@ -297,6 +297,22 @@ def confirm(
             total_cents=payment.amount_cents,
             gateway=email_gateway,
         )
+
+    # Accrue each provider's net earnings to a payout, due after the session runs.
+    delay_days = config_service.payout_delay_days(db)
+    fee_rate = config_service.platform_fee_rate(db)
+    for booking in _bookings_for_payment(db, payment.id):
+        session_obj = db.get(CatalogSession, booking.session_id)
+        if session_obj is None:
+            continue
+        gross = booking.unit_price_cents * len(_child_names(db, booking.id))
+        payments_service.accrue_payout(
+            db,
+            organisation_id=booking.organisation_id,
+            session_id=session_obj.id,
+            net_cents=payments_service.provider_net_cents(gross, fee_rate),
+            scheduled_for=session_obj.ends_at + timedelta(days=delay_days),
+        )
     return _order_view(db, payment)
 
 

@@ -33,6 +33,12 @@ class RefundResult:
     status: str
 
 
+@dataclass(frozen=True)
+class TransferResult:
+    id: str
+    status: str
+
+
 class PaymentGateway(Protocol):
     def create_payment_intent(
         self,
@@ -46,6 +52,8 @@ class PaymentGateway(Protocol):
     def confirm(self, intent_id: str) -> PaymentConfirmResult: ...
 
     def refund(self, intent_id: str, amount_cents: int) -> RefundResult: ...
+
+    def transfer(self, *, destination: str | None, amount_cents: int) -> TransferResult: ...
 
 
 class FakeGateway:
@@ -75,6 +83,10 @@ class FakeGateway:
 
     def refund(self, intent_id: str, amount_cents: int) -> RefundResult:
         return RefundResult(id=f"re_fake_{uuid.uuid4().hex}", status="succeeded")
+
+    def transfer(self, *, destination: str | None, amount_cents: int) -> TransferResult:
+        # Real impl: Stripe transfer to the provider's connected account.
+        return TransferResult(id=f"tr_fake_{uuid.uuid4().hex}", status="paid")
 
 
 _fake_gateway = FakeGateway()

@@ -27,7 +27,9 @@ from juggle.modules.org.core.models import (
     VerificationStatus,
     WwccRecord,
 )
+from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import PaymentGateway
+from juggle.modules.payments.core.models import Payout, PayoutStatus
 from juggle.security import create_impersonation_token
 
 
@@ -53,6 +55,10 @@ class ImpersonationNotFound(Exception):
 
 class VerificationNotFound(Exception):
     """No such WWCC / insurance record."""
+
+
+class PayoutNotFound(Exception):
+    """No such payout."""
 
 
 class InvalidMode(Exception):
@@ -140,6 +146,44 @@ def verify_insurance(
         detail={"status": status.value},
     )
     return doc
+
+
+# --- Payouts ops (PRD §8.4, §10.2) -----------------------------------------
+
+def run_payouts(
+    db: Session, *, actor_id: uuid.UUID, gateway: PaymentGateway
+) -> tuple[int, int]:
+    released, total = payments_service.release_due_payouts(db, gateway=gateway)
+    audit_service.record(
+        db,
+        action="admin.payouts.run",
+        actor_id=actor_id,
+        entity_type="payout",
+        detail={"released": released, "total_cents": total},
+    )
+    return released, total
+
+
+def list_payouts(db: Session, status: PayoutStatus) -> list[Payout]:
+    return payments_service.list_payouts_by_status(db, status)
+
+
+def set_payout_hold(
+    db: Session, *, payout_id: uuid.UUID, held: bool, actor_id: uuid.UUID
+) -> Payout:
+    new_status = PayoutStatus.held if held else PayoutStatus.scheduled
+    payout = payments_service.set_payout_status(db, payout_id, new_status)
+    if payout is None:
+        raise PayoutNotFound(str(payout_id))
+    audit_service.record(
+        db,
+        action="admin.payout.hold" if held else "admin.payout.release",
+        actor_id=actor_id,
+        entity_type="payout",
+        entity_id=str(payout_id),
+        detail={"status": new_status.value},
+    )
+    return payout
 
 
 # --- Bookings console (PRD §10.2) ------------------------------------------

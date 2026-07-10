@@ -14,6 +14,8 @@ from juggle.modules.booking.core.schemas import OrderOut
 from juggle.modules.org.core.models import OrgStatus, VerificationStatus
 from juggle.modules.org.core.schemas import InsuranceOut, WwccOut
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
+from juggle.modules.payments.core.models import PayoutStatus
+from juggle.modules.payments.core.schemas import PayoutOut, PayoutRunResult
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -144,6 +146,54 @@ def refund_payment(
         )
     except service.PaymentNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment not found") from exc
+
+
+# --- Payouts ops ------------------------------------------------------------
+
+@router.get("/payouts", response_model=list[PayoutOut])
+def list_payouts(
+    admin: CurrentAdmin,
+    session: SessionDep,
+    status_filter: Annotated[
+        Literal["scheduled", "paid", "held", "reversed"], Query(alias="status")
+    ] = "scheduled",
+) -> list[PayoutOut]:
+    payouts = service.list_payouts(session, PayoutStatus(status_filter))
+    return [PayoutOut.model_validate(p) for p in payouts]
+
+
+@router.post("/payouts/run", response_model=PayoutRunResult)
+def run_payouts(
+    admin: CurrentAdmin, session: SessionDep, gateway: GatewayDep
+) -> PayoutRunResult:
+    released, total = service.run_payouts(session, actor_id=admin.user_id, gateway=gateway)
+    return PayoutRunResult(released=released, total_cents=total)
+
+
+@router.post("/payouts/{payout_id}/hold", response_model=PayoutOut)
+def hold_payout(
+    payout_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep
+) -> PayoutOut:
+    try:
+        payout = service.set_payout_hold(
+            session, payout_id=payout_id, held=True, actor_id=admin.user_id
+        )
+    except service.PayoutNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payout not found") from exc
+    return PayoutOut.model_validate(payout)
+
+
+@router.post("/payouts/{payout_id}/release", response_model=PayoutOut)
+def release_payout(
+    payout_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep
+) -> PayoutOut:
+    try:
+        payout = service.set_payout_hold(
+            session, payout_id=payout_id, held=False, actor_id=admin.user_id
+        )
+    except service.PayoutNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payout not found") from exc
+    return PayoutOut.model_validate(payout)
 
 
 # --- Impersonation ----------------------------------------------------------

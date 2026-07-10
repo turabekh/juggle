@@ -8,13 +8,23 @@ module is wired (M7) it is a module constant.
 """
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from juggle.modules.config.core import service as config_service
+from juggle.modules.org.core import service as org_service
 from juggle.modules.payments.core.gateway import PaymentGateway
-from juggle.modules.payments.core.models import Payment, PaymentStatus
+from juggle.modules.payments.core.models import Payment, PaymentStatus, Payout, PayoutStatus
+
+
+class NotOrgMember(Exception):
+    """Caller is not a member of the organisation."""
+
+
+class PayoutNotFound(Exception):
+    """No such payout."""
 
 
 def application_fee_cents(amount_cents: int, fee_rate: float) -> int:
@@ -92,3 +102,94 @@ def refund(db: Session, payment: Payment, *, gateway: PaymentGateway) -> Payment
     payment.status = PaymentStatus.refunded
     db.flush()
     return payment
+
+
+# --- Payouts (PRD §8.4) -----------------------------------------------------
+
+def provider_net_cents(gross_cents: int, fee_rate: float) -> int:
+    """What the provider earns after the platform commission."""
+    return gross_cents - application_fee_cents(gross_cents, fee_rate)
+
+
+def accrue_payout(
+    db: Session,
+    *,
+    organisation_id: uuid.UUID,
+    session_id: uuid.UUID,
+    net_cents: int,
+    scheduled_for: datetime,
+) -> Payout:
+    """Add a provider's net earnings for a session to its (single) scheduled
+    payout, creating it if needed. Paid on/after ``scheduled_for``."""
+    payout = db.scalar(
+        select(Payout).where(
+            Payout.session_id == session_id, Payout.status == PayoutStatus.scheduled
+        )
+    )
+    if payout is None:
+        payout = Payout(
+            organisation_id=organisation_id,
+            session_id=session_id,
+            amount_cents=0,
+            status=PayoutStatus.scheduled,
+            scheduled_for=scheduled_for,
+        )
+        db.add(payout)
+        db.flush()
+    payout.amount_cents += net_cents
+    db.flush()
+    return payout
+
+
+def list_org_payouts(
+    db: Session, *, organisation_id: uuid.UUID, actor_id: uuid.UUID
+) -> list[Payout]:
+    if org_service.get_member(db, organisation_id, actor_id) is None:
+        raise NotOrgMember(str(organisation_id))
+    return list(
+        db.scalars(
+            select(Payout)
+            .where(Payout.organisation_id == organisation_id)
+            .order_by(Payout.scheduled_for)
+        )
+    )
+
+
+def list_payouts_by_status(db: Session, status: PayoutStatus) -> list[Payout]:
+    return list(
+        db.scalars(select(Payout).where(Payout.status == status).order_by(Payout.scheduled_for))
+    )
+
+
+def set_payout_status(
+    db: Session, payout_id: uuid.UUID, status: PayoutStatus
+) -> Payout | None:
+    payout = db.get(Payout, payout_id)
+    if payout is None:
+        return None
+    payout.status = status
+    db.flush()
+    return payout
+
+
+def release_due_payouts(
+    db: Session, *, gateway: PaymentGateway, now: datetime | None = None
+) -> tuple[int, int]:
+    """Pay out every scheduled payout whose time has come. Returns (count, total)."""
+    moment = now or datetime.now(UTC)
+    due = db.scalars(
+        select(Payout).where(
+            Payout.status == PayoutStatus.scheduled,
+            Payout.scheduled_for <= moment,
+        )
+    ).all()
+    total = 0
+    for payout in due:
+        org = org_service.get_organisation(db, payout.organisation_id)
+        destination = org.stripe_account_id if org is not None else None
+        result = gateway.transfer(destination=destination, amount_cents=payout.amount_cents)
+        payout.stripe_transfer_id = result.id
+        payout.status = PayoutStatus.paid
+        total += payout.amount_cents
+    db.flush()
+    return len(due), total

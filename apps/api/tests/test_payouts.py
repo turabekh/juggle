@@ -1,0 +1,165 @@
+"""Payouts (PRD §8.4): confirming a booking accrues the provider's net earnings
+to a scheduled payout; an admin releases due payouts; hold/release works."""
+
+import uuid
+from collections.abc import Callable
+
+from fastapi.testclient import TestClient
+
+
+def _auth(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _signup(client: TestClient) -> str:
+    email = f"u-{uuid.uuid4().hex[:8]}@example.com"
+    return client.post(
+        "/api/v1/identity/signup", json={"email": email, "password": "supersecret"}
+    ).json()["access_token"]
+
+
+def _org_with_session(
+    client: TestClient, owner: str, *, price_cents: int, starts: str, ends: str
+) -> tuple[str, str]:
+    org_id = client.post(
+        "/api/v1/org", headers=_auth(owner), json={"name": f"Org {uuid.uuid4().hex[:5]}"}
+    ).json()["id"]
+    venue_id = client.post(
+        "/api/v1/catalog/venues",
+        headers=_auth(owner),
+        json={"organisation_id": org_id, "name": "Hall"},
+    ).json()["id"]
+    program_id = client.post(
+        "/api/v1/catalog/programs",
+        headers=_auth(owner),
+        json={"organisation_id": org_id, "title": "Camp", "category": "art"},
+    ).json()["id"]
+    session_id = client.post(
+        f"/api/v1/catalog/programs/{program_id}/sessions",
+        headers=_auth(owner),
+        json={
+            "venue_id": venue_id,
+            "starts_at": starts,
+            "ends_at": ends,
+            "capacity": 5,
+            "price_cents": price_cents,
+            "age_min": 4,
+            "age_max": 12,
+        },
+    ).json()["id"]
+    client.post(f"/api/v1/catalog/programs/{program_id}/publish", headers=_auth(owner))
+    return org_id, session_id
+
+
+def _book_and_pay(client: TestClient, guardian: str, session_id: str) -> None:
+    hold_id = client.post(
+        "/api/v1/inventory/holds",
+        headers=_auth(guardian),
+        json={"session_id": session_id, "quantity": 1},
+    ).json()["id"]
+    child_id = client.post(
+        "/api/v1/identity/children",
+        headers=_auth(guardian),
+        json={"first_name": "Kid", "date_of_birth": "2018-01-01"},
+    ).json()["id"]
+    order = client.post(
+        "/api/v1/booking/checkout",
+        headers=_auth(guardian),
+        json={
+            "idempotency_key": f"key-{uuid.uuid4().hex}",
+            "items": [{"hold_id": hold_id, "children": [{"child_id": child_id}]}],
+        },
+    ).json()
+    client.post(f"/api/v1/booking/payments/{order['payment_id']}/confirm", headers=_auth(guardian))
+
+
+def test_confirm_accrues_net_payout(client: TestClient) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    # A past session so its payout is already due (ends before now).
+    org_id, session_id = _org_with_session(
+        client, owner, price_cents=10000, starts="2026-01-05T01:00:00Z", ends="2026-01-05T07:00:00Z"
+    )
+    _book_and_pay(client, guardian, session_id)
+
+    payouts = client.get(
+        "/api/v1/payments/payouts", headers=_auth(owner), params={"organisation_id": org_id}
+    )
+    assert payouts.status_code == 200
+    rows = payouts.json()
+    assert len(rows) == 1
+    # $100 gross - 10% fee = $90 net to the provider.
+    assert rows[0]["amount_cents"] == 9000
+    assert rows[0]["status"] == "scheduled"
+
+    # Two bookings on the same session accumulate into one payout.
+    _book_and_pay(client, _signup(client), session_id)
+    rows = client.get(
+        "/api/v1/payments/payouts", headers=_auth(owner), params={"organisation_id": org_id}
+    ).json()
+    assert len(rows) == 1
+    assert rows[0]["amount_cents"] == 18000
+
+
+def test_admin_runs_due_payouts(client: TestClient, make_admin: Callable[[], str]) -> None:
+    owner, guardian, admin = _signup(client), _signup(client), make_admin()
+    _, session_id = _org_with_session(
+        client, owner, price_cents=8000, starts="2026-01-05T01:00:00Z", ends="2026-01-05T07:00:00Z"
+    )
+    _book_and_pay(client, guardian, session_id)
+
+    run = client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
+    assert run.status_code == 200
+    assert run.json()["released"] == 1
+    assert run.json()["total_cents"] == 7200  # 8000 - 10%
+
+    # Now it's paid, not scheduled.
+    scheduled = client.get(
+        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "scheduled"}
+    ).json()
+    assert scheduled == []
+    paid = client.get(
+        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "paid"}
+    ).json()
+    assert any(p["amount_cents"] == 7200 for p in paid)
+
+
+def test_future_payout_not_released(client: TestClient, make_admin: Callable[[], str]) -> None:
+    owner, guardian, admin = _signup(client), _signup(client), make_admin()
+    # Session far in the future → payout not yet due.
+    _, session_id = _org_with_session(
+        client, owner, price_cents=5000, starts="2027-12-01T01:00:00Z", ends="2027-12-01T07:00:00Z"
+    )
+    _book_and_pay(client, guardian, session_id)
+    run = client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
+    assert run.json()["released"] == 0
+
+
+def test_hold_blocks_release(client: TestClient, make_admin: Callable[[], str]) -> None:
+    owner, guardian, admin = _signup(client), _signup(client), make_admin()
+    _, session_id = _org_with_session(
+        client, owner, price_cents=6000, starts="2026-01-05T01:00:00Z", ends="2026-01-05T07:00:00Z"
+    )
+    _book_and_pay(client, guardian, session_id)
+    scheduled = client.get(
+        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "scheduled"}
+    ).json()
+    payout_id = scheduled[0]["id"]
+
+    client.post(f"/api/v1/admin/payouts/{payout_id}/hold", headers=_auth(admin))
+    run = client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
+    assert run.json()["released"] == 0  # held payouts aren't paid
+
+    client.post(f"/api/v1/admin/payouts/{payout_id}/release", headers=_auth(admin))
+    run = client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
+    assert run.json()["released"] == 1
+
+
+def test_payouts_require_membership(client: TestClient) -> None:
+    owner, outsider = _signup(client), _signup(client)
+    org_id, _ = _org_with_session(
+        client, owner, price_cents=5000, starts="2026-01-05T01:00:00Z", ends="2026-01-05T07:00:00Z"
+    )
+    resp = client.get(
+        "/api/v1/payments/payouts", headers=_auth(outsider), params={"organisation_id": org_id}
+    )
+    assert resp.status_code == 403

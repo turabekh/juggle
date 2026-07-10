@@ -15,6 +15,22 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
+@router.get("/payouts", response_model=list[schemas.PayoutOut])
+def list_payouts(
+    organisation_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
+) -> list[schemas.PayoutOut]:
+    """A provider's payouts for one org (member-gated)."""
+    try:
+        payouts = service.list_org_payouts(
+            session, organisation_id=organisation_id, actor_id=principal.user_id
+        )
+    except service.NotOrgMember as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Not a member of this organisation"
+        ) from exc
+    return [schemas.PayoutOut.model_validate(p) for p in payouts]
+
+
 @router.get("/{payment_id}", response_model=schemas.PaymentOut)
 def get_payment(
     payment_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
