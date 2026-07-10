@@ -10,7 +10,8 @@ services:
       POSTGRES_PASSWORD: juggle
       POSTGRES_DB: juggle
     ports:
-      - "5432:5432"
+      # Host 5433 to avoid clashing with any local Postgres on 5432.
+      - "5433:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:

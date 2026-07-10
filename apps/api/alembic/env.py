@@ -1,14 +1,18 @@
 """Alembic environment — pulls the DB URL from app settings and Base metadata.
 
-Model modules are imported so ``Base.metadata`` is fully populated for
-autogenerate. As modules gain real tables, add their ``core.models`` import here.
+``juggle.models`` is imported so ``Base.metadata`` is fully populated for
+autogenerate. Reflection is pinned to the ``public`` schema so the PostGIS
+image's tiger/topology extension tables (which sit on the DB search_path) don't
+get swept into migrations.
 """
 
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from geoalchemy2 import alembic_helpers
+from sqlalchemy import create_engine, pool
 
+import juggle.models  # noqa: F401  — registers every module's models on Base.metadata
 from juggle.db import Base
 from juggle.settings import get_settings
 
@@ -17,9 +21,6 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
-
-# Import model modules for autogenerate as they are implemented, e.g.:
-# from juggle.modules.catalog.core import models as _catalog_models  # noqa: F401
 
 target_metadata = Base.metadata
 
@@ -30,19 +31,33 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_item=alembic_helpers.render_item,
+        include_object=alembic_helpers.include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    # Pin search_path to public at connect time (via libpq options) so the
+    # PostGIS image's tiger/topology schemas don't leak into reflection/DDL.
+    # Doing it here — rather than a mid-transaction SET — avoids opening a
+    # transaction before Alembic manages one (which would roll the run back).
+    connectable = create_engine(
+        get_settings().database_url,
         poolclass=pool.NullPool,
+        connect_args={"options": "-csearch_path=public"},
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        # GeoAlchemy2 alembic helpers: render spatial types, create spatial
+        # indexes, and skip PostGIS-managed system tables during autogenerate.
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            process_revision_directives=alembic_helpers.writer,
+            render_item=alembic_helpers.render_item,
+            include_object=alembic_helpers.include_object,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

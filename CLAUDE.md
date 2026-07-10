@@ -12,7 +12,7 @@ Context for Claude Code working in this repository. Read it before making change
 
 The full product spec — requirement IDs, phasing, edge cases, acceptance criteria — is in **`docs/juggle-prd.md`**. It is the source of truth; this file is the engineering orientation on top of it.
 
-> **Status:** Pre-gate per the PRD (build is contingent on the August provider-sprint kill criteria). The repository is currently a **scaffold**: module architecture, tooling, and a booting API skeleton are in place; feature milestones are not yet built. Confirm milestone scope before implementing.
+> **Status:** Pre-gate per the PRD (build is contingent on the August provider-sprint kill criteria). Progress: module architecture, tooling, and a booting API skeleton are in place, and **M1 (data model)** is done — the 18 core tables across all modules exist with the capacity/oversell invariant enforced by DB constraint, plus the initial Alembic migration (`make migrate`). Module routers are still endpoint-less (feature milestones M2+ add them). Confirm milestone scope before implementing.
 
 > **Name:** "Juggle" is a placeholder pending an ASIC/trademark check (PRD D-01). The Python package is `juggle`. If the name changes, update the PRD, this file, the package, and `docker-compose.yml`.
 

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # Postgres / PostGIS
     database_url: str = Field(
-        default="postgresql+psycopg://juggle:juggle@localhost:5432/juggle",
+        default="postgresql+psycopg://juggle:juggle@localhost:5433/juggle",
         description="SQLAlchemy URL. Uses psycopg3 driver + PostGIS-enabled Postgres.",
     )
 
