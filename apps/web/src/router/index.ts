@@ -37,6 +37,39 @@ const router = createRouter({
         },
       ],
     },
+    {
+      path: '/admin',
+      component: () => import('@/layouts/AdminLayout.vue'),
+      meta: { requiresAdmin: true },
+      children: [
+        { path: '', redirect: { name: 'admin-approvals' } },
+        {
+          path: 'approvals',
+          name: 'admin-approvals',
+          component: () => import('@/pages/admin/AdminApprovalsPage.vue'),
+        },
+        {
+          path: 'config',
+          name: 'admin-config',
+          component: () => import('@/pages/admin/AdminConfigPage.vue'),
+        },
+        {
+          path: 'flags',
+          name: 'admin-flags',
+          component: () => import('@/pages/admin/AdminFlagsPage.vue'),
+        },
+        {
+          path: 'audit',
+          name: 'admin-audit',
+          component: () => import('@/pages/admin/AdminAuditPage.vue'),
+        },
+        {
+          path: 'impersonation',
+          name: 'admin-impersonation',
+          component: () => import('@/pages/admin/AdminImpersonationPage.vue'),
+        },
+      ],
+    },
     { path: '/login', name: 'login', component: () => import('@/pages/LoginPage.vue') },
     { path: '/signup', name: 'signup', component: () => import('@/pages/SignupPage.vue') },
     {
@@ -51,8 +84,11 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.ready) await auth.restore()
-  if (to.meta.requiresAuth && !auth.isAuthed) {
+  if ((to.meta.requiresAuth || to.meta.requiresAdmin) && !auth.isAuthed) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (to.meta.requiresAdmin && !auth.isAdmin) {
+    return { name: 'discover' }
   }
   return true
 })

@@ -52,6 +52,11 @@ def _seed() -> None:
             print("Demo data already present — nothing to do.")
             return
 
+        admin = identity_service.create_guardian(
+            db, email="admin@example.com", password="supersecret", full_name="Ops Admin"
+        )
+        admin.is_admin = True
+
         provider = identity_service.create_guardian(
             db, email=PROVIDER_EMAIL, password="supersecret", full_name="Demo Provider"
         )

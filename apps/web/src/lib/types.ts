@@ -135,3 +135,72 @@ export interface SearchFilters {
   session_type: 'half_day' | 'full_day' | null
   available_only: boolean
 }
+
+// --- Admin ------------------------------------------------------------------
+
+export type OrgStatus = 'pending' | 'approved' | 'suspended'
+
+export interface OrgAdmin {
+  id: string
+  name: string
+  slug: string
+  status: OrgStatus
+  reliability_score: number
+  abn: string | null
+  created_at: string
+}
+
+export interface SettingItem {
+  key: string
+  value: number
+  default: number
+  minimum: number
+  maximum: number
+  description: string
+}
+
+export interface SettingVersion {
+  version: number
+  is_current: boolean
+  note: string | null
+  changed_by_id: string | null
+  created_at: string
+}
+
+export interface Flag {
+  key: string
+  description: string | null
+  enabled: boolean
+  rollout_percentage: number
+  targeting: Record<string, unknown> | null
+}
+
+export interface AuditEvent {
+  id: string
+  actor_id: string | null
+  impersonated_id: string | null
+  action: string
+  entity_type: string | null
+  entity_id: string | null
+  detail: Record<string, unknown>
+  created_at: string
+}
+
+export type ImpersonationMode = 'view_as' | 'act_as'
+
+export interface ImpersonationToken {
+  session_id: string
+  token: string
+  mode: ImpersonationMode
+  expires_at: string
+}
+
+export interface ImpersonationSession {
+  id: string
+  impersonator_id: string
+  target_id: string
+  mode: ImpersonationMode
+  reason: string | null
+  expires_at: string
+  ended_at: string | null
+}

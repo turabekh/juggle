@@ -1,6 +1,16 @@
 <template>
   <q-layout view="hHh lpR fff">
     <q-header class="jg-header">
+      <!-- Impersonation banner — always visible while acting as another user (PRD §10.3). -->
+      <div v-if="auth.isImpersonating" class="jg-imp-banner">
+        <q-icon name="support_agent" size="18px" />
+        <span>
+          Support session — acting as <strong>{{ auth.user?.email }}</strong>
+          <span class="jg-imp-banner__mode">{{ auth.impersonationMode === 'view_as' ? 'view only' : 'can act' }}</span>
+        </span>
+        <q-btn dense no-caps flat color="white" label="Exit session" icon="logout" @click="exitImpersonation" />
+      </div>
+
       <div class="jg-header__inner">
         <router-link :to="{ name: 'discover' }" class="jg-brand" aria-label="Juggle home">
           <span class="jg-brand__mark">🤹</span>
@@ -55,6 +65,10 @@
                     <q-item-section avatar><q-icon name="face" /></q-item-section>
                     <q-item-section>My kids</q-item-section>
                   </q-item>
+                  <q-item v-if="auth.isAdmin" clickable v-close-popup :to="{ name: 'admin-approvals' }">
+                    <q-item-section avatar><q-icon name="admin_panel_settings" /></q-item-section>
+                    <q-item-section>Admin console</q-item-section>
+                  </q-item>
                   <q-separator />
                   <q-item clickable v-close-popup @click="signOut">
                     <q-item-section avatar><q-icon name="logout" /></q-item-section>
@@ -108,9 +122,33 @@ function signOut(): void {
   auth.logout()
   router.push({ name: 'discover' })
 }
+
+async function exitImpersonation(): Promise<void> {
+  await auth.exitImpersonation()
+  router.push({ name: 'admin-impersonation' })
+}
 </script>
 
 <style scoped>
+.jg-imp-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #1e2233;
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 6px 16px;
+}
+.jg-imp-banner__mode {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 12px;
+  font-weight: 600;
+}
 .jg-header {
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: saturate(1.4) blur(8px);

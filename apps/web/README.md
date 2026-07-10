@@ -56,9 +56,22 @@ Discover (PostGIS search + filters) → Session detail (pick kids → hold seats
 Cart → Checkout (checkout + confirm) → My bookings. Auth-gated routes redirect to
 sign-in and back.
 
+## Admin console
+
+Signed-in admins (`user_account.is_admin`) get an **Admin console** under `/admin`
+(also linked from the account menu). `make seed` creates `admin@example.com` /
+`supersecret`. Surfaces:
+
+- **Approvals** — approve/suspend providers (a suspended org can't publish).
+- **Configuration** — edit the runtime levers (fee %, TTLs, …), bounded & versioned.
+- **Feature flags** — create/toggle, rollout %, targeting.
+- **Audit log** — every consequential action, filterable, with the true actor.
+- **Impersonation** — start a view-as/act-as session; "Enter session" swaps to the
+  user's view with a persistent support banner; "Exit" restores the admin.
+
 ## Not yet built (follow-ups)
 
-- Admin console surface (approvals, config, impersonation UI) — the API exists.
 - SSR for SEO on listing pages (PRD §12) — currently SPA.
 - PWA service worker / installability, offline shell.
+- Provider self-serve console (onboarding, listings, roster) — API partially exists.
 - Map view; reviews/waitlists (P1).

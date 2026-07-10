@@ -93,6 +93,23 @@ h1, h2, h3, h4, h5, .jg-display {
 .jg-pill--warm { background: var(--jg-coral-tint); color: #d8532f; }
 .jg-pill--muted { background: #eef0f5; color: var(--jg-ink-soft); }
 
+// Admin console shared layout
+.jg-adminpage {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 26px 24px 60px;
+}
+.jg-adminpage__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.jg-adminpage__title { font-size: 26px; margin: 0 0 2px; }
+.jg-adminpage__tabs { margin: 8px 0 16px; border-bottom: 1px solid var(--jg-line); }
+.jg-adminpage__table { padding: 4px; }
+
 @media (prefers-reduced-motion: reduce) {
   .jg-card, .q-btn { transition: none !important; }
 }

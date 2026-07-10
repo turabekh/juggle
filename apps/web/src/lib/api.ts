@@ -4,15 +4,24 @@
 import axios, { type AxiosInstance } from 'axios'
 
 import type {
+  AuditEvent,
   Availability,
   Booking,
   Child,
   ChildCreate,
+  Flag,
   Hold,
+  ImpersonationMode,
+  ImpersonationSession,
+  ImpersonationToken,
   Order,
+  OrgAdmin,
+  OrgStatus,
   SearchFilters,
   SearchResults,
   SessionDetail,
+  SettingItem,
+  SettingVersion,
   TokenResponse,
   User,
 } from '@/lib/types'
@@ -128,6 +137,89 @@ export const api = {
     },
     async list(): Promise<Booking[]> {
       const { data } = await http.get<Booking[]>('/booking/bookings')
+      return data
+    },
+  },
+  admin: {
+    async orgs(status: OrgStatus): Promise<OrgAdmin[]> {
+      const { data } = await http.get<OrgAdmin[]>('/admin/orgs', { params: { status } })
+      return data
+    },
+    async approveOrg(id: string): Promise<OrgAdmin> {
+      const { data } = await http.post<OrgAdmin>(`/admin/orgs/${id}/approve`)
+      return data
+    },
+    async suspendOrg(id: string): Promise<OrgAdmin> {
+      const { data } = await http.post<OrgAdmin>(`/admin/orgs/${id}/suspend`)
+      return data
+    },
+    async refund(paymentId: string, reason: string): Promise<Order> {
+      const { data } = await http.post<Order>(`/admin/payments/${paymentId}/refund`, { reason })
+      return data
+    },
+    async impersonations(): Promise<ImpersonationSession[]> {
+      const { data } = await http.get<ImpersonationSession[]>('/admin/impersonations')
+      return data
+    },
+    async startImpersonation(
+      targetUserId: string,
+      mode: ImpersonationMode,
+      reason?: string,
+    ): Promise<ImpersonationToken> {
+      const { data } = await http.post<ImpersonationToken>('/admin/impersonations', {
+        target_user_id: targetUserId,
+        mode,
+        reason,
+      })
+      return data
+    },
+    async endImpersonation(id: string): Promise<void> {
+      await http.post(`/admin/impersonations/${id}/end`)
+    },
+  },
+  config: {
+    async list(): Promise<SettingItem[]> {
+      const { data } = await http.get<SettingItem[]>('/config')
+      return data
+    },
+    async update(key: string, value: number, note?: string): Promise<SettingItem> {
+      const { data } = await http.put<SettingItem>(`/config/${key}`, { value, note })
+      return data
+    },
+    async history(key: string): Promise<SettingVersion[]> {
+      const { data } = await http.get<SettingVersion[]>(`/config/${key}/history`)
+      return data
+    },
+  },
+  flags: {
+    async list(): Promise<Flag[]> {
+      const { data } = await http.get<Flag[]>('/flags')
+      return data
+    },
+    async upsert(
+      key: string,
+      payload: {
+        enabled: boolean
+        rollout_percentage: number
+        targeting?: Record<string, unknown> | null
+        description?: string | null
+      },
+    ): Promise<Flag> {
+      const { data } = await http.put<Flag>(`/flags/${key}`, payload)
+      return data
+    },
+  },
+  audit: {
+    async list(params: {
+      action?: string
+      entity_type?: string
+      limit?: number
+      offset?: number
+    }): Promise<AuditEvent[]> {
+      const clean = Object.fromEntries(
+        Object.entries(params).filter(([, v]) => v !== undefined && v !== ''),
+      )
+      const { data } = await http.get<AuditEvent[]>('/audit', { params: clean })
       return data
     },
   },
