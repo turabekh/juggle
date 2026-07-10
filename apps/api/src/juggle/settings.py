@@ -30,7 +30,8 @@ class Settings(BaseSettings):
     )
 
     # Auth (JWT) — real values injected via env in every non-local environment.
-    jwt_secret: str = Field(default="dev-insecure-change-me")
+    # Default is ≥32 bytes so local dev doesn't trip pyjwt's weak-key warning.
+    jwt_secret: str = Field(default="dev-insecure-secret-change-me-in-prod-0123456789")
     jwt_algorithm: str = Field(default="HS256")
     access_token_ttl_minutes: int = Field(default=30)
 

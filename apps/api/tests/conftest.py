@@ -7,6 +7,7 @@ still runs the pure-unit tests without Docker.
 from collections.abc import Iterator
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.orm import Session
 
@@ -44,3 +45,21 @@ def db(engine: Engine) -> Iterator[Session]:
         if transaction.is_active:
             transaction.rollback()
         connection.close()
+
+
+@pytest.fixture
+def client(db: Session) -> Iterator[TestClient]:
+    """TestClient whose requests all run in the per-test rolled-back session.
+
+    Overrides ``get_session`` so route handlers share the ``db`` transaction —
+    data written by one request is visible to the next, then discarded.
+    """
+    from juggle.db import get_session
+    from juggle.main import app
+
+    app.dependency_overrides[get_session] = lambda: db
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.pop(get_session, None)
