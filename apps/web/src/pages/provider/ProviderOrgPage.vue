@@ -108,6 +108,28 @@
         </div>
         <EmptyState v-else icon="event_note" title="No programs yet" subtitle="Create a program, then add sessions to it." />
       </section>
+
+      <!-- Earnings -->
+      <section class="q-mt-xl">
+        <div class="row items-center justify-between q-mb-sm">
+          <h2 class="text-h6 q-my-none">Earnings</h2>
+          <span v-if="scheduledTotal > 0" class="jg-pill">{{ money(scheduledTotal) }} upcoming</span>
+        </div>
+        <div v-if="payouts.length" class="jg-list">
+          <div v-for="p in payouts" :key="p.id" class="jg-card jg-listrow">
+            <div>
+              <div class="text-weight-600">{{ money(p.amount_cents) }}</div>
+              <div class="jg-faint text-caption">
+                {{ p.status === 'paid' ? 'Paid' : p.scheduled_for ? `Due ${dayLabel(p.scheduled_for)}` : 'Scheduled' }}
+              </div>
+            </div>
+            <q-chip dense square :color="payoutColor(p.status)" text-color="white" :label="p.status" />
+          </div>
+        </div>
+        <div v-else class="jg-muted text-caption">
+          Earnings appear here after families book. You're paid a few days after each session.
+        </div>
+      </section>
     </template>
 
     <!-- Add venue dialog -->
@@ -188,8 +210,8 @@ import { useQuasar } from 'quasar'
 
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
-import { CATEGORIES, categoryMeta } from '@/lib/format'
-import type { InsuranceDoc, Org, Program, Venue, WwccRecord } from '@/lib/types'
+import { CATEGORIES, categoryMeta, dayLabel, money } from '@/lib/format'
+import type { InsuranceDoc, Org, Payout, Program, Venue, WwccRecord } from '@/lib/types'
 
 const props = defineProps<{ id: string }>()
 const $q = useQuasar()
@@ -199,6 +221,7 @@ const venues = ref<Venue[]>([])
 const programs = ref<Program[]>([])
 const wwcc = ref<WwccRecord[]>([])
 const insurance = ref<InsuranceDoc[]>([])
+const payouts = ref<Payout[]>([])
 const saving = ref(false)
 const savingAbn = ref(false)
 const abnDraft = ref('')
@@ -214,6 +237,9 @@ const wwccForm = reactive({ staff_name: '', wwcc_number: '', expiry_date: '' })
 const insForm = reactive({ file_ref: '', expiry_date: '' })
 
 const wwccValid = computed(() => wwccForm.staff_name && wwccForm.wwcc_number && wwccForm.expiry_date)
+const scheduledTotal = computed(() =>
+  payouts.value.filter((p) => p.status === 'scheduled').reduce((n, p) => n + p.amount_cents, 0),
+)
 
 function statusColor(s: string): string {
   return { pending: 'warning', approved: 'positive', suspended: 'grey-6' }[s] ?? 'grey'
@@ -221,17 +247,22 @@ function statusColor(s: string): string {
 function vColor(s: string): string {
   return { pending: 'warning', verified: 'positive', rejected: 'negative', expired: 'grey-6' }[s] ?? 'grey'
 }
+function payoutColor(s: string): string {
+  return { scheduled: 'primary', paid: 'positive', held: 'warning', reversed: 'grey-6' }[s] ?? 'grey'
+}
 
 async function load(): Promise<void> {
   try {
     org.value = await api.org.get(props.id)
     abnDraft.value = org.value.abn ?? ''
-    ;[venues.value, programs.value, wwcc.value, insurance.value] = await Promise.all([
-      api.catalog.venues(props.id),
-      api.catalog.programs(props.id),
-      api.org.wwcc(props.id),
-      api.org.insurance(props.id),
-    ])
+    ;[venues.value, programs.value, wwcc.value, insurance.value, payouts.value] =
+      await Promise.all([
+        api.catalog.venues(props.id),
+        api.catalog.programs(props.id),
+        api.org.wwcc(props.id),
+        api.org.insurance(props.id),
+        api.payments.payouts(props.id),
+      ])
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
   }

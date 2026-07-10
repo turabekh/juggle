@@ -22,6 +22,9 @@ import type {
   OrgAdmin,
   OrgStatus,
   OrgVerifications,
+  Payout,
+  PayoutRunResult,
+  PayoutStatus,
   Program,
   RosterOut,
   SearchFilters,
@@ -272,6 +275,14 @@ export const api = {
       return data
     },
   },
+  payments: {
+    async payouts(organisationId: string): Promise<Payout[]> {
+      const { data } = await http.get<Payout[]>('/payments/payouts', {
+        params: { organisation_id: organisationId },
+      })
+      return data
+    },
+  },
   admin: {
     async users(q: string): Promise<UserSummary[]> {
       const { data } = await http.get<UserSummary[]>('/admin/users', { params: { q } })
@@ -299,6 +310,22 @@ export const api = {
     },
     async verifyInsurance(id: string, status: VerificationStatus): Promise<InsuranceDoc> {
       const { data } = await http.post<InsuranceDoc>(`/admin/insurance/${id}/verify`, { status })
+      return data
+    },
+    async payouts(status: PayoutStatus): Promise<Payout[]> {
+      const { data } = await http.get<Payout[]>('/admin/payouts', { params: { status } })
+      return data
+    },
+    async runPayouts(): Promise<PayoutRunResult> {
+      const { data } = await http.post<PayoutRunResult>('/admin/payouts/run')
+      return data
+    },
+    async holdPayout(id: string): Promise<Payout> {
+      const { data } = await http.post<Payout>(`/admin/payouts/${id}/hold`)
+      return data
+    },
+    async releasePayout(id: string): Promise<Payout> {
+      const { data } = await http.post<Payout>(`/admin/payouts/${id}/release`)
       return data
     },
     async refund(paymentId: string, reason: string): Promise<Order> {

@@ -45,6 +45,7 @@ const router = useRouter()
 
 const nav = [
   { name: 'admin-approvals', label: 'Approvals', icon: 'verified' },
+  { name: 'admin-payouts', label: 'Payouts', icon: 'payments' },
   { name: 'admin-config', label: 'Configuration', icon: 'tune' },
   { name: 'admin-flags', label: 'Feature flags', icon: 'flag' },
   { name: 'admin-audit', label: 'Audit log', icon: 'receipt_long' },

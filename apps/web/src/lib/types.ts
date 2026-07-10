@@ -319,6 +319,22 @@ export interface OrgVerifications {
   insurance: InsuranceDoc[]
 }
 
+export type PayoutStatus = 'scheduled' | 'paid' | 'held' | 'reversed'
+
+export interface Payout {
+  id: string
+  organisation_id: string
+  session_id: string | null
+  amount_cents: number
+  status: PayoutStatus
+  scheduled_for: string | null
+}
+
+export interface PayoutRunResult {
+  released: number
+  total_cents: number
+}
+
 export interface SessionCreateInput {
   venue_id: string
   starts_at: string
