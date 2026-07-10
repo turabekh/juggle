@@ -63,3 +63,29 @@ def client(db: Session) -> Iterator[TestClient]:
             yield test_client
     finally:
         app.dependency_overrides.pop(get_session, None)
+
+
+@pytest.fixture
+def make_admin(client: TestClient, db: Session):  # noqa: ANN201 - returns a helper
+    """Returns a factory that signs up a user, flips is_admin in the shared
+    session, and returns an admin bearer token (the claim is set at login)."""
+    import uuid
+
+    from sqlalchemy import select
+
+    from juggle.modules.identity.core.models import UserAccount
+
+    def _factory() -> str:
+        email = f"admin-{uuid.uuid4().hex[:8]}@example.com"
+        client.post(
+            "/api/v1/identity/signup", json={"email": email, "password": "supersecret"}
+        )
+        user = db.scalar(select(UserAccount).where(UserAccount.email == email))
+        assert user is not None
+        user.is_admin = True
+        db.flush()
+        return client.post(
+            "/api/v1/identity/login", json={"email": email, "password": "supersecret"}
+        ).json()["access_token"]
+
+    return _factory

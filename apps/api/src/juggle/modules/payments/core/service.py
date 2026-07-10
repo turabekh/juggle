@@ -12,16 +12,14 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from juggle.modules.config.core import service as config_service
 from juggle.modules.payments.core.gateway import PaymentGateway
 from juggle.modules.payments.core.models import Payment, PaymentStatus
 
-# TODO(M7): source from config (platform fee %, bounded 0–20). GST on the fee is
-# a separate line handled at invoicing (D-02); this is the commission only.
-PLATFORM_FEE_RATE = 0.10
 
-
-def application_fee_cents(amount_cents: int) -> int:
-    return round(amount_cents * PLATFORM_FEE_RATE)
+def application_fee_cents(amount_cents: int, fee_rate: float) -> int:
+    # GST on the fee is a separate invoicing line (D-02); this is commission only.
+    return round(amount_cents * fee_rate)
 
 
 def create_payment(
@@ -33,7 +31,7 @@ def create_payment(
     gateway: PaymentGateway,
     currency: str = "aud",
 ) -> Payment:
-    fee = application_fee_cents(amount_cents)
+    fee = application_fee_cents(amount_cents, config_service.platform_fee_rate(db))
     intent = gateway.create_payment_intent(
         amount_cents=amount_cents,
         application_fee_cents=fee,

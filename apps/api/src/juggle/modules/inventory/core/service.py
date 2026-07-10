@@ -22,10 +22,8 @@ from sqlalchemy.orm import Session
 
 from juggle.modules.catalog.core.models import Session as ProgramSession
 from juggle.modules.catalog.core.models import SessionStatus
+from juggle.modules.config.core import service as config_service
 from juggle.modules.inventory.core.models import SeatHold, SeatHoldStatus
-
-# TODO(M7): source the TTL from the config module (runtime-editable per PRD §10.1).
-DEFAULT_HOLD_TTL_SECONDS = 900  # 15 minutes
 
 
 class SessionNotFound(Exception):
@@ -72,9 +70,11 @@ def hold_seats(
     session_id: uuid.UUID,
     held_by_id: uuid.UUID,
     quantity: int,
-    ttl_seconds: int = DEFAULT_HOLD_TTL_SECONDS,
+    ttl_seconds: int | None = None,
 ) -> tuple[SeatHold, ProgramSession]:
     now = datetime.now(UTC)
+    if ttl_seconds is None:
+        ttl_seconds = config_service.seat_hold_ttl_seconds(db)
     session_obj = _lock_session(db, session_id)
     if session_obj is None or session_obj.status is SessionStatus.cancelled:
         raise SessionNotFound(str(session_id))

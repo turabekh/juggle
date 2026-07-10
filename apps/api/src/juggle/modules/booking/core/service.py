@@ -35,6 +35,7 @@ from juggle.modules.booking.core.schemas import (
 from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.catalog.core.models import Program, SessionStatus
 from juggle.modules.catalog.core.models import Session as CatalogSession
+from juggle.modules.config.core import service as config_service
 from juggle.modules.identity.core.models import Child
 from juggle.modules.inventory.core import service as inventory_service
 from juggle.modules.inventory.core.models import SeatHold, SeatHoldStatus
@@ -43,9 +44,6 @@ from juggle.modules.org.core.models import OrgRole
 from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import PaymentGateway
 from juggle.modules.payments.core.models import Payment, PaymentStatus
-
-# How much a provider-initiated cancellation dents the org's reliability score.
-RELIABILITY_CANCELLATION_PENALTY = 0.1
 
 # The seat-hold window is extended to cover the payment step so a pending
 # booking's seats aren't reclaimed mid-checkout. TODO(M7): source from config.
@@ -213,7 +211,7 @@ def checkout(
                 )
             )
         # Extend the hold to cover the payment step (see module docstring).
-        hold.expires_at = now + timedelta(seconds=CHECKOUT_WINDOW_SECONDS)
+        hold.expires_at = now + timedelta(seconds=config_service.checkout_window_seconds(db))
 
     db.flush()
     return _order_view(db, payment)
@@ -331,7 +329,7 @@ def cancel_session(
         )
 
     updated = org_service.adjust_reliability(
-        db, program.organisation_id, -RELIABILITY_CANCELLATION_PENALTY
+        db, program.organisation_id, -config_service.reliability_cancellation_penalty(db)
     )
     db.flush()
     return SessionCancelResult(
