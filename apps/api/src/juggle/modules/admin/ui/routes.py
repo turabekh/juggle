@@ -11,7 +11,8 @@ from juggle.db import get_session
 from juggle.deps import CurrentAdmin
 from juggle.modules.admin.core import schemas, service
 from juggle.modules.booking.core.schemas import OrderOut
-from juggle.modules.org.core.models import OrgStatus
+from juggle.modules.org.core.models import OrgStatus, VerificationStatus
+from juggle.modules.org.core.schemas import InsuranceOut, WwccOut
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -63,6 +64,64 @@ def suspend_org(
     except service.OrgNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Organisation not found") from exc
     return schemas.OrgAdminOut.model_validate(org)
+
+
+# --- Provider verification review -------------------------------------------
+
+@router.get("/orgs/{org_id}/verifications", response_model=schemas.OrgVerifications)
+def org_verifications(
+    org_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep
+) -> schemas.OrgVerifications:
+    try:
+        org, wwcc, insurance = service.get_org_verifications(session, org_id)
+    except service.OrgNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Organisation not found") from exc
+    return schemas.OrgVerifications(
+        organisation_id=org.id,
+        name=org.name,
+        status=org.status.value,
+        abn=org.abn,
+        wwcc=[WwccOut.model_validate(r) for r in wwcc],
+        insurance=[InsuranceOut.model_validate(d) for d in insurance],
+    )
+
+
+@router.post("/wwcc/{wwcc_id}/verify", response_model=WwccOut)
+def verify_wwcc(
+    wwcc_id: uuid.UUID,
+    payload: schemas.VerifyRequest,
+    admin: CurrentAdmin,
+    session: SessionDep,
+) -> WwccOut:
+    try:
+        record = service.verify_wwcc(
+            session,
+            wwcc_id=wwcc_id,
+            status=VerificationStatus(payload.status),
+            actor_id=admin.user_id,
+        )
+    except service.VerificationNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Record not found") from exc
+    return WwccOut.model_validate(record)
+
+
+@router.post("/insurance/{insurance_id}/verify", response_model=InsuranceOut)
+def verify_insurance(
+    insurance_id: uuid.UUID,
+    payload: schemas.VerifyRequest,
+    admin: CurrentAdmin,
+    session: SessionDep,
+) -> InsuranceOut:
+    try:
+        doc = service.verify_insurance(
+            session,
+            insurance_id=insurance_id,
+            status=VerificationStatus(payload.status),
+            actor_id=admin.user_id,
+        )
+    except service.VerificationNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Record not found") from exc
+    return InsuranceOut.model_validate(doc)
 
 
 # --- Bookings console -------------------------------------------------------

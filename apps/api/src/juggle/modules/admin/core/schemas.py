@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from juggle.modules.org.core.schemas import InsuranceOut, WwccOut
+
 
 class OrgAdminOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -26,6 +28,19 @@ class UserSummary(BaseModel):
     email: str
     full_name: str | None
     is_admin: bool
+
+
+class OrgVerifications(BaseModel):
+    organisation_id: uuid.UUID
+    name: str
+    status: str
+    abn: str | None
+    wwcc: list[WwccOut]
+    insurance: list[InsuranceOut]
+
+
+class VerifyRequest(BaseModel):
+    status: Literal["pending", "verified", "rejected", "expired"]
 
 
 class RefundRequest(BaseModel):

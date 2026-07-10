@@ -20,7 +20,13 @@ from juggle.modules.config.core import service as config_service
 from juggle.modules.identity.core import service as identity_service
 from juggle.modules.identity.core.models import UserAccount
 from juggle.modules.org.core import service as org_service
-from juggle.modules.org.core.models import Organisation, OrgStatus
+from juggle.modules.org.core.models import (
+    InsuranceDoc,
+    Organisation,
+    OrgStatus,
+    VerificationStatus,
+    WwccRecord,
+)
 from juggle.modules.payments.core.gateway import PaymentGateway
 from juggle.security import create_impersonation_token
 
@@ -43,6 +49,10 @@ class CannotImpersonate(Exception):
 
 class ImpersonationNotFound(Exception):
     """No such impersonation session."""
+
+
+class VerificationNotFound(Exception):
+    """No such WWCC / insurance record."""
 
 
 class InvalidMode(Exception):
@@ -87,6 +97,49 @@ def suspend_org(db: Session, *, org_id: uuid.UUID, actor_id: uuid.UUID) -> Organ
     return _set_org_status(
         db, org_id=org_id, status=OrgStatus.suspended, actor_id=actor_id, action="admin.org.suspend"
     )
+
+
+def get_org_verifications(
+    db: Session, org_id: uuid.UUID
+) -> tuple[Organisation, list[WwccRecord], list[InsuranceDoc]]:
+    org = org_service.get_organisation(db, org_id)
+    if org is None:
+        raise OrgNotFound(str(org_id))
+    return org, org_service.list_wwcc(db, org_id), org_service.list_insurance(db, org_id)
+
+
+def verify_wwcc(
+    db: Session, *, wwcc_id: uuid.UUID, status: VerificationStatus, actor_id: uuid.UUID
+) -> WwccRecord:
+    record = org_service.set_wwcc_status(db, wwcc_id, status)
+    if record is None:
+        raise VerificationNotFound(str(wwcc_id))
+    audit_service.record(
+        db,
+        action="admin.wwcc.verify",
+        actor_id=actor_id,
+        entity_type="wwcc_record",
+        entity_id=str(wwcc_id),
+        detail={"status": status.value},
+    )
+    return record
+
+
+def verify_insurance(
+    db: Session, *, insurance_id: uuid.UUID, status: VerificationStatus, actor_id: uuid.UUID
+) -> InsuranceDoc:
+    doc = org_service.set_insurance_status(db, insurance_id, status)
+    if doc is None:
+        raise VerificationNotFound(str(insurance_id))
+    audit_service.record(
+        db,
+        action="admin.insurance.verify",
+        actor_id=actor_id,
+        entity_type="insurance_doc",
+        entity_id=str(insurance_id),
+        detail={"status": status.value},
+    )
+    return doc
 
 
 # --- Bookings console (PRD §10.2) ------------------------------------------
