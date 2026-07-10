@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# uv
+uv.lock
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Node / Quasar
+node_modules/
+apps/web/dist/
+apps/web/.quasar/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

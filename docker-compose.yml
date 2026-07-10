@@ -1,0 +1,38 @@
+# Juggle — local development stack.
+# Everything runs in Docker (PRD §12: "docker-compose everything").
+#   docker compose up        # start db + api
+#   docker compose up db     # just Postgres/PostGIS
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: juggle
+      POSTGRES_PASSWORD: juggle
+      POSTGRES_DB: juggle
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U juggle -d juggle"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      JUGGLE_DATABASE_URL: postgresql+psycopg://juggle:juggle@db:5432/juggle
+      JUGGLE_ENVIRONMENT: docker
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./apps/api/src:/app/src
+    command: uvicorn juggle.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  db_data:
