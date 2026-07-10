@@ -20,10 +20,15 @@ from juggle.modules.catalog.core.models import (
 from juggle.modules.catalog.core.models import Session as ProgramSession
 from juggle.modules.catalog.core.schemas import SessionCreate
 from juggle.modules.org.core import service as org_service
+from juggle.modules.org.core.models import OrgStatus
 
 
 class NotOrgMember(Exception):
     """The actor is not a member of the organisation they're acting on."""
+
+
+class OrgSuspended(Exception):
+    """A suspended organisation cannot publish listings."""
 
 
 class VenueNotFound(Exception):
@@ -105,6 +110,10 @@ def set_program_status(
     if program is None:
         raise ProgramNotFound(str(program_id))
     _require_member(db, program.organisation_id, actor_id)
+    if status is ProgramStatus.published:
+        org = org_service.get_organisation(db, program.organisation_id)
+        if org is not None and org.status is OrgStatus.suspended:
+            raise OrgSuspended(str(program.organisation_id))
     program.status = status
     db.flush()
     return program

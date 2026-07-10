@@ -29,10 +29,21 @@ def verify_password(raw: str, hashed: str) -> bool:
 
 @dataclass(frozen=True)
 class Principal:
-    """The authenticated caller, decoded from a JWT. No DB lookup involved."""
+    """The authenticated caller, decoded from a JWT. No DB lookup involved.
+
+    During impersonation the JWT carries the target user in ``sub`` and the real
+    admin in ``impersonator_id`` (PRD §10.3) — the true actor is never lost.
+    """
 
     user_id: uuid.UUID
     is_admin: bool
+    impersonator_id: uuid.UUID | None = None
+    impersonation_mode: str | None = None  # "view_as" | "act_as"
+    impersonation_session_id: uuid.UUID | None = None
+
+    @property
+    def is_impersonating(self) -> bool:
+        return self.impersonator_id is not None
 
 
 def create_access_token(user_id: uuid.UUID, is_admin: bool = False) -> str:
@@ -47,8 +58,40 @@ def create_access_token(user_id: uuid.UUID, is_admin: bool = False) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
+def create_impersonation_token(
+    *,
+    target_id: uuid.UUID,
+    impersonator_id: uuid.UUID,
+    mode: str,
+    session_id: uuid.UUID,
+    ttl_minutes: int,
+) -> str:
+    """A scoped, time-boxed token to act as ``target_id``. ``adm`` is forced
+    False so impersonation can never escalate to admin capabilities."""
+    settings = get_settings()
+    now = datetime.now(UTC)
+    payload = {
+        "sub": str(target_id),
+        "adm": False,
+        "imp": str(impersonator_id),
+        "mode": mode,
+        "isid": str(session_id),
+        "iat": now,
+        "exp": now + timedelta(minutes=ttl_minutes),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
 def decode_token(token: str) -> Principal:
     """Decode/verify a token. Raises ``jwt.PyJWTError`` on any problem."""
     settings = get_settings()
     data = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-    return Principal(user_id=uuid.UUID(data["sub"]), is_admin=bool(data.get("adm", False)))
+    impersonator = data.get("imp")
+    session_id = data.get("isid")
+    return Principal(
+        user_id=uuid.UUID(data["sub"]),
+        is_admin=bool(data.get("adm", False)),
+        impersonator_id=uuid.UUID(impersonator) if impersonator else None,
+        impersonation_mode=data.get("mode"),
+        impersonation_session_id=uuid.UUID(session_id) if session_id else None,
+    )

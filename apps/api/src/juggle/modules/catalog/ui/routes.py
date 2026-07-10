@@ -73,6 +73,10 @@ def publish_program(
         )
     except service.ProgramNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Program not found") from exc
+    except service.OrgSuspended as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Suspended organisations cannot publish"
+        ) from exc
     except service.NotOrgMember as exc:
         raise _forbid_non_member(exc) from exc
     return schemas.ProgramOut.model_validate(program)

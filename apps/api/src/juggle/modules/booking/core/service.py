@@ -271,6 +271,30 @@ def list_bookings(db: Session, guardian_id: uuid.UUID) -> list[BookingOut]:
     return [_booking_out(db, b) for b in bookings]
 
 
+def refund_order(
+    db: Session, *, payment_id: uuid.UUID, gateway: PaymentGateway
+) -> OrderOut:
+    """Refund a whole order (admin bookings-console action): refund the payment,
+    release every seat, and mark the bookings refunded. Idempotent."""
+    payment = payments_service.get_payment(db, payment_id)
+    if payment is None:
+        raise PaymentNotFound(str(payment_id))
+    if payment.status is PaymentStatus.refunded:
+        return _order_view(db, payment)
+
+    if payment.status is PaymentStatus.succeeded:
+        payments_service.refund(db, payment, gateway=gateway)
+    elif payment.status is PaymentStatus.pending:
+        payments_service.mark_failed(db, payment)
+
+    for booking in _bookings_for_payment(db, payment.id):
+        if booking.seat_hold_id is not None:
+            inventory_service.force_release(db, hold_id=booking.seat_hold_id)
+        booking.status = BookingStatus.refunded
+    db.flush()
+    return _order_view(db, payment)
+
+
 def cancel_session(
     db: Session, *, session_id: uuid.UUID, actor_id: uuid.UUID, gateway: PaymentGateway
 ) -> SessionCancelResult:

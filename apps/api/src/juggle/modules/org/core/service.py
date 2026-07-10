@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from juggle.modules.org.core.models import Organisation, OrgMember, OrgRole
+from juggle.modules.org.core.models import Organisation, OrgMember, OrgRole, OrgStatus
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 
@@ -49,6 +49,26 @@ def create_organisation(
 
 def get_organisation(session: Session, org_id: uuid.UUID) -> Organisation | None:
     return session.get(Organisation, org_id)
+
+
+def set_status(session: Session, org_id: uuid.UUID, status: OrgStatus) -> Organisation | None:
+    """Admin lifecycle transition (approve / suspend / reinstate)."""
+    org = session.get(Organisation, org_id)
+    if org is None:
+        return None
+    org.status = status
+    session.flush()
+    return org
+
+
+def list_by_status(session: Session, status: OrgStatus) -> list[Organisation]:
+    return list(
+        session.scalars(
+            select(Organisation)
+            .where(Organisation.status == status)
+            .order_by(Organisation.created_at)
+        )
+    )
 
 
 def adjust_reliability(

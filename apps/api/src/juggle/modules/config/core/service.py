@@ -27,6 +27,7 @@ KEY_CHECKOUT_WINDOW_SECONDS = "checkout_window_seconds"
 KEY_RELIABILITY_CANCELLATION_PENALTY = "reliability_cancellation_penalty"
 KEY_SEARCH_DEFAULT_RADIUS_KM = "search_default_radius_km"
 KEY_PAYOUT_DELAY_DAYS = "payout_delay_days"
+KEY_IMPERSONATION_TTL_MINUTES = "impersonation_ttl_minutes"
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,9 @@ REGISTRY: dict[str, SettingSpec] = {
     ),
     KEY_PAYOUT_DELAY_DAYS: SettingSpec(
         KEY_PAYOUT_DELAY_DAYS, 2, int, 0, 30, "Payout delay after session (days)"
+    ),
+    KEY_IMPERSONATION_TTL_MINUTES: SettingSpec(
+        KEY_IMPERSONATION_TTL_MINUTES, 30, int, 5, 480, "Impersonation session lifetime (minutes)"
     ),
 }
 
@@ -185,3 +189,7 @@ def search_default_radius_km(db: Session) -> float:
 
 def payout_delay_days(db: Session) -> int:
     return int(get_value(db, KEY_PAYOUT_DELAY_DAYS))
+
+
+def impersonation_ttl_minutes(db: Session) -> int:
+    return int(get_value(db, KEY_IMPERSONATION_TTL_MINUTES))
