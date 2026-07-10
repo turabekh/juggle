@@ -106,3 +106,9 @@ class Session(UUIDPkMixin, TimestampMixin, Base):
     status: Mapped[SessionStatus] = mapped_column(
         Enum(SessionStatus, name="session_status"), default=SessionStatus.scheduled, nullable=False
     )
+
+    @property
+    def seats_remaining(self) -> int:
+        """Live seats left — the core differentiator (PRD §7.1). Never stale
+        because ``seats_taken`` is mutated transactionally under a row lock."""
+        return self.capacity - self.seats_taken

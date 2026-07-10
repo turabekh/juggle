@@ -91,21 +91,26 @@ source_modules = [
 ]
 forbidden_modules = ["fastapi", "starlette"]
 
+# Modules form a strict acyclic layering: a module may import ONLY modules below
+# it, never above, and same-listing modules can't import each other. This bans
+# import cycles while allowing the real domain dependencies (catalog→org,
+# inventory→catalog, booking→catalog/inventory/payments, admin→everything).
+# Cross-module calls should go through the lower module's `core.service`.
 [[tool.importlinter.contracts]]
-name = "Modules are independent (no cross-module imports of internals)"
-type = "independence"
-modules = [
-    "juggle.modules.identity",
-    "juggle.modules.org",
-    "juggle.modules.catalog",
-    "juggle.modules.inventory",
+name = "Modules form an acyclic dependency layering (higher imports lower)"
+type = "layers"
+layers = [
+    "juggle.modules.admin",
+    "juggle.modules.notifications",
+    "juggle.modules.roster",
+    "juggle.modules.search",
     "juggle.modules.booking",
     "juggle.modules.payments",
-    "juggle.modules.roster",
-    "juggle.modules.notifications",
-    "juggle.modules.search",
-    "juggle.modules.admin",
-    "juggle.modules.config",
+    "juggle.modules.inventory",
+    "juggle.modules.catalog",
+    "juggle.modules.org",
+    "juggle.modules.identity",
     "juggle.modules.flags",
+    "juggle.modules.config",
     "juggle.modules.audit",
 ]
