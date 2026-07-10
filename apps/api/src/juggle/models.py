@@ -16,5 +16,6 @@ from juggle.modules.config.core import models as config_models  # noqa: F401
 from juggle.modules.flags.core import models as flags_models  # noqa: F401
 from juggle.modules.identity.core import models as identity_models  # noqa: F401
 from juggle.modules.inventory.core import models as inventory_models  # noqa: F401
+from juggle.modules.notifications.core import models as notifications_models  # noqa: F401
 from juggle.modules.org.core import models as org_models  # noqa: F401
 from juggle.modules.payments.core import models as payments_models  # noqa: F401

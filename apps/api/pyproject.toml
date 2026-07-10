@@ -101,7 +101,6 @@ name = "Modules form an acyclic dependency layering (higher imports lower)"
 type = "layers"
 layers = [
     "juggle.modules.admin",
-    "juggle.modules.notifications",
     "juggle.modules.roster",
     "juggle.modules.search",
     "juggle.modules.booking",
@@ -110,6 +109,7 @@ layers = [
     "juggle.modules.catalog",
     "juggle.modules.org",
     "juggle.modules.identity",
+    "juggle.modules.notifications",
     "juggle.modules.flags",
     "juggle.modules.config",
     "juggle.modules.audit",

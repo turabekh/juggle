@@ -34,6 +34,7 @@ class BookingOut(BaseModel):
     id: uuid.UUID
     session_id: uuid.UUID
     organisation_id: uuid.UUID
+    payment_id: uuid.UUID | None
     status: str
     unit_price_cents: int
     children: list[BookingChildOut]

@@ -3,18 +3,20 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from juggle.db import get_session
 from juggle.deps import CurrentPrincipal
 from juggle.modules.booking.core import schemas, service
+from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
 
 router = APIRouter(prefix="/booking", tags=["booking"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 GatewayDep = Annotated[PaymentGateway, Depends(get_payment_gateway)]
+EmailGatewayDep = Annotated[EmailGateway, Depends(get_email_gateway)]
 
 # Maps a checkout validation failure to (status_code, detail).
 _CHECKOUT_ERRORS: dict[type[Exception], tuple[int, str]] = {
@@ -59,10 +61,15 @@ def confirm(
     principal: CurrentPrincipal,
     session: SessionDep,
     gateway: GatewayDep,
+    email_gateway: EmailGatewayDep,
 ) -> schemas.OrderOut:
     try:
         return service.confirm(
-            session, payment_id=payment_id, guardian_id=principal.user_id, gateway=gateway
+            session,
+            payment_id=payment_id,
+            guardian_id=principal.user_id,
+            gateway=gateway,
+            email_gateway=email_gateway,
         )
     except service.PaymentNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment not found") from exc
@@ -89,6 +96,24 @@ def list_my_bookings(
     return service.list_bookings(session, principal.user_id)
 
 
+@router.get("/payments/{payment_id}/calendar.ics")
+def order_calendar(
+    payment_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
+) -> Response:
+    """Download the order's sessions as an .ics (add to calendar)."""
+    try:
+        ics = service.order_calendar(
+            session, payment_id=payment_id, guardian_id=principal.user_id
+        )
+    except service.PaymentNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found") from exc
+    return Response(
+        content=ics,
+        media_type="text/calendar",
+        headers={"Content-Disposition": 'attachment; filename="juggle-bookings.ics"'},
+    )
+
+
 @router.post(
     "/sessions/{session_id}/cancel", response_model=schemas.SessionCancelResult
 )
@@ -97,11 +122,16 @@ def cancel_session(
     principal: CurrentPrincipal,
     session: SessionDep,
     gateway: GatewayDep,
+    email_gateway: EmailGatewayDep,
 ) -> schemas.SessionCancelResult:
     """Provider cancels a session — refunds families and releases all seats."""
     try:
         return service.cancel_session(
-            session, session_id=session_id, actor_id=principal.user_id, gateway=gateway
+            session,
+            session_id=session_id,
+            actor_id=principal.user_id,
+            gateway=gateway,
+            email_gateway=email_gateway,
         )
     except service.SessionNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found") from exc
