@@ -87,3 +87,25 @@ def list_my_bookings(
     principal: CurrentPrincipal, session: SessionDep
 ) -> list[schemas.BookingOut]:
     return service.list_bookings(session, principal.user_id)
+
+
+@router.post(
+    "/sessions/{session_id}/cancel", response_model=schemas.SessionCancelResult
+)
+def cancel_session(
+    session_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+    gateway: GatewayDep,
+) -> schemas.SessionCancelResult:
+    """Provider cancels a session — refunds families and releases all seats."""
+    try:
+        return service.cancel_session(
+            session, session_id=session_id, actor_id=principal.user_id, gateway=gateway
+        )
+    except service.SessionNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found") from exc
+    except service.NotSessionOwner as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Only an owner can cancel this session"
+        ) from exc

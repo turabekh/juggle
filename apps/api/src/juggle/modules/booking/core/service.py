@@ -30,15 +30,22 @@ from juggle.modules.booking.core.schemas import (
     CheckoutChild,
     CheckoutItem,
     OrderOut,
+    SessionCancelResult,
 )
+from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.catalog.core.models import Program, SessionStatus
 from juggle.modules.catalog.core.models import Session as CatalogSession
 from juggle.modules.identity.core.models import Child
 from juggle.modules.inventory.core import service as inventory_service
 from juggle.modules.inventory.core.models import SeatHold, SeatHoldStatus
+from juggle.modules.org.core import service as org_service
+from juggle.modules.org.core.models import OrgRole
 from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import PaymentGateway
 from juggle.modules.payments.core.models import Payment, PaymentStatus
+
+# How much a provider-initiated cancellation dents the org's reliability score.
+RELIABILITY_CANCELLATION_PENALTY = 0.1
 
 # The seat-hold window is extended to cover the payment step so a pending
 # booking's seats aren't reclaimed mid-checkout. TODO(M7): source from config.
@@ -75,6 +82,14 @@ class PaymentNotFound(Exception):
 
 class PaymentNotPending(Exception):
     """Payment has already been finalised (succeeded/failed)."""
+
+
+class SessionNotFound(Exception):
+    """No such session."""
+
+
+class NotSessionOwner(Exception):
+    """Actor is not an owner of the organisation that runs this session."""
 
 
 def _age_at(dob: date, at: datetime) -> int:
@@ -256,3 +271,72 @@ def list_bookings(db: Session, guardian_id: uuid.UUID) -> list[BookingOut]:
         .order_by(Booking.created_at.desc())
     ).all()
     return [_booking_out(db, b) for b in bookings]
+
+
+def cancel_session(
+    db: Session, *, session_id: uuid.UUID, actor_id: uuid.UUID, gateway: PaymentGateway
+) -> SessionCancelResult:
+    """Provider-initiated session cancellation (PRD §8.3): cancel the session,
+    refund paid families, release all seats, and dent the org's reliability."""
+    session = catalog_service.get_session(db, session_id)
+    if session is None:
+        raise SessionNotFound(str(session_id))
+    program = catalog_service.get_program(db, session.program_id)
+    if program is None:
+        raise SessionNotFound(str(session_id))
+
+    member = org_service.get_member(db, program.organisation_id, actor_id)
+    if member is None or member.role is not OrgRole.owner:
+        raise NotSessionOwner(str(session_id))
+
+    org = org_service.get_organisation(db, program.organisation_id)
+    current_score = org.reliability_score if org is not None else 0.0
+    if session.status is SessionStatus.cancelled:
+        return SessionCancelResult(
+            session_id=session_id,
+            cancelled_bookings=0,
+            refunded_payments=0,
+            reliability_score=current_score,
+        )
+
+    session.status = SessionStatus.cancelled
+    bookings = list(
+        db.scalars(
+            select(Booking).where(
+                Booking.session_id == session_id,
+                Booking.status.in_([BookingStatus.pending, BookingStatus.confirmed]),
+            )
+        )
+    )
+
+    # Refund each distinct paid payment once; fail still-pending ones.
+    refunded = 0
+    for payment_id in {b.payment_id for b in bookings if b.payment_id is not None}:
+        payment = payments_service.get_payment(db, payment_id)
+        if payment is None:
+            continue
+        if payment.status is PaymentStatus.succeeded:
+            payments_service.refund(db, payment, gateway=gateway)
+            refunded += 1
+        elif payment.status is PaymentStatus.pending:
+            payments_service.mark_failed(db, payment)
+
+    for booking in bookings:
+        if booking.seat_hold_id is not None:
+            inventory_service.force_release(db, hold_id=booking.seat_hold_id)
+        booking.status = (
+            BookingStatus.refunded
+            if booking.status is BookingStatus.confirmed
+            else BookingStatus.cancelled
+        )
+
+    updated = org_service.adjust_reliability(
+        db, program.organisation_id, -RELIABILITY_CANCELLATION_PENALTY
+    )
+    db.flush()
+    return SessionCancelResult(
+        session_id=session_id,
+        cancelled_bookings=len(bookings),
+        refunded_payments=refunded,
+        reliability_score=updated.reliability_score if updated is not None else current_score,
+    )

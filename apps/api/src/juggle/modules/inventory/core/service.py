@@ -110,6 +110,22 @@ def release_hold(db: Session, *, hold_id: uuid.UUID, actor_id: uuid.UUID) -> Non
     db.flush()
 
 
+def force_release(db: Session, *, hold_id: uuid.UUID) -> None:
+    """Release a hold regardless of owner — for provider/admin session cancels.
+
+    Gives seats back for both active (pending) and consumed (confirmed) holds,
+    under the session row lock.
+    """
+    hold = db.get(SeatHold, hold_id)
+    if hold is None or hold.status in (SeatHoldStatus.released, SeatHoldStatus.expired):
+        return
+    session_obj = _lock_session(db, hold.session_id)
+    if session_obj is not None:
+        session_obj.seats_taken -= hold.quantity
+    hold.status = SeatHoldStatus.released
+    db.flush()
+
+
 def availability(db: Session, session_id: uuid.UUID) -> ProgramSession | None:
     """Live availability. Reclaims expired holds first so the number is honest."""
     session_obj = _lock_session(db, session_id)

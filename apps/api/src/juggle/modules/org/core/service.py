@@ -51,6 +51,18 @@ def get_organisation(session: Session, org_id: uuid.UUID) -> Organisation | None
     return session.get(Organisation, org_id)
 
 
+def adjust_reliability(
+    session: Session, org_id: uuid.UUID, delta: float
+) -> Organisation | None:
+    """Nudge an org's reliability score, clamped to [0, 1] (PRD §8.3)."""
+    org = session.get(Organisation, org_id)
+    if org is None:
+        return None
+    org.reliability_score = max(0.0, min(1.0, org.reliability_score + delta))
+    session.flush()
+    return org
+
+
 def get_member(
     session: Session, org_id: uuid.UUID, user_id: uuid.UUID
 ) -> OrgMember | None:

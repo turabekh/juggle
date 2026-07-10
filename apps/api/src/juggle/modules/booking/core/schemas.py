@@ -46,3 +46,10 @@ class OrderOut(BaseModel):
     currency: str
     status: str
     bookings: list[BookingOut]
+
+
+class SessionCancelResult(BaseModel):
+    session_id: uuid.UUID
+    cancelled_bookings: int
+    refunded_payments: int
+    reliability_score: float

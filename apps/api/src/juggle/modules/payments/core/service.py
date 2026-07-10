@@ -83,3 +83,14 @@ def mark_failed(db: Session, payment: Payment) -> Payment:
     payment.status = PaymentStatus.failed
     db.flush()
     return payment
+
+
+def refund(db: Session, payment: Payment, *, gateway: PaymentGateway) -> Payment:
+    """Full refund via the gateway; idempotent once already refunded."""
+    if payment.status is PaymentStatus.refunded:
+        return payment
+    if payment.stripe_payment_intent_id is not None:
+        gateway.refund(payment.stripe_payment_intent_id, payment.amount_cents)
+    payment.status = PaymentStatus.refunded
+    db.flush()
+    return payment

@@ -93,6 +93,11 @@ def get_program(db: Session, program_id: uuid.UUID) -> Program | None:
     return db.get(Program, program_id)
 
 
+def get_session(db: Session, session_id: uuid.UUID) -> ProgramSession | None:
+    """Raw session lookup (no publish gate) — for provider/admin operations."""
+    return db.get(ProgramSession, session_id)
+
+
 def set_program_status(
     db: Session, *, program_id: uuid.UUID, actor_id: uuid.UUID, status: ProgramStatus
 ) -> Program:
