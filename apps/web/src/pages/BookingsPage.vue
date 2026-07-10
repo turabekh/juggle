@@ -19,13 +19,23 @@
             {{ b.children.length }} {{ b.children.length === 1 ? 'child' : 'children' }} ·
             {{ money(b.unit_price_cents * b.children.length) }}
           </div>
+          <div v-if="b.status === 'confirmed'" class="jg-faint text-caption q-mt-xs">
+            <q-icon name="mark_email_read" size="14px" /> Confirmation emailed
+          </div>
         </div>
-        <q-chip
-          :color="statusColor(b.status)"
-          text-color="white"
-          :label="statusLabel(b.status)"
-          class="text-weight-600"
-        />
+        <div class="column items-end q-gutter-xs">
+          <q-chip
+            :color="statusColor(b.status)"
+            text-color="white"
+            :label="statusLabel(b.status)"
+            class="text-weight-600 q-ma-none"
+          />
+          <q-btn
+            v-if="b.status === 'confirmed' && b.payment_id"
+            flat dense no-caps size="sm" color="primary" icon="event"
+            label="Add to calendar" @click="downloadIcs(b.payment_id)"
+          />
+        </div>
       </div>
     </div>
 
@@ -59,6 +69,20 @@ function memo(id: string): SessionMemo | null {
 }
 function title(id: string): string {
   return memo(id)?.title ?? 'Activity'
+}
+
+async function downloadIcs(paymentId: string): Promise<void> {
+  try {
+    const text = await api.booking.calendarIcs(paymentId)
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/calendar' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'juggle-bookings.ics'
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  }
 }
 
 const STATUS: Record<string, { label: string; color: string }> = {

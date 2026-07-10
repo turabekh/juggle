@@ -106,9 +106,20 @@ export interface Booking {
   id: string
   session_id: string
   organisation_id: string
+  payment_id: string | null
   status: string
   unit_price_cents: number
   children: BookingChild[]
+}
+
+export interface Notification {
+  id: string
+  kind: string
+  subject: string
+  to_email: string
+  status: string
+  detail: Record<string, unknown>
+  created_at: string
 }
 
 export interface Order {

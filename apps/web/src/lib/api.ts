@@ -16,6 +16,7 @@ import type {
   ImpersonationSession,
   ImpersonationToken,
   InsuranceDoc,
+  Notification,
   Order,
   Org,
   OrgAdmin,
@@ -256,6 +257,18 @@ export const api = {
     },
     async cancelSession(sessionId: string): Promise<SessionCancelResult> {
       const { data } = await http.post<SessionCancelResult>(`/booking/sessions/${sessionId}/cancel`)
+      return data
+    },
+    async calendarIcs(paymentId: string): Promise<string> {
+      const { data } = await http.get<string>(`/booking/payments/${paymentId}/calendar.ics`, {
+        responseType: 'text',
+      })
+      return data
+    },
+  },
+  notifications: {
+    async list(): Promise<Notification[]> {
+      const { data } = await http.get<Notification[]>('/notifications')
       return data
     },
   },

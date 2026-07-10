@@ -31,6 +31,15 @@
 
         <div class="jg-header__actions">
           <q-btn
+            v-if="auth.isAuthed"
+            flat
+            round
+            icon="notifications"
+            :to="{ name: 'notifications' }"
+            aria-label="Notifications"
+            class="jg-nav__link"
+          />
+          <q-btn
             flat
             round
             icon="shopping_bag"
