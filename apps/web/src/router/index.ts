@@ -35,6 +35,26 @@ const router = createRouter({
           component: () => import('@/pages/AccountPage.vue'),
           meta: { requiresAuth: true },
         },
+        {
+          path: 'provider',
+          name: 'provider',
+          component: () => import('@/pages/provider/ProviderDashboard.vue'),
+          meta: { requiresAuth: true },
+        },
+        {
+          path: 'provider/orgs/:id',
+          name: 'provider-org',
+          component: () => import('@/pages/provider/ProviderOrgPage.vue'),
+          props: true,
+          meta: { requiresAuth: true },
+        },
+        {
+          path: 'provider/programs/:id',
+          name: 'provider-program',
+          component: () => import('@/pages/provider/ProviderProgramPage.vue'),
+          props: true,
+          meta: { requiresAuth: true },
+        },
       ],
     },
     {

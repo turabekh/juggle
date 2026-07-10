@@ -7,6 +7,7 @@ import type {
   AuditEvent,
   Availability,
   Booking,
+  CatalogSession,
   Child,
   ChildCreate,
   Flag,
@@ -15,15 +16,22 @@ import type {
   ImpersonationSession,
   ImpersonationToken,
   Order,
+  Org,
   OrgAdmin,
   OrgStatus,
+  Program,
+  RosterOut,
   SearchFilters,
   SearchResults,
+  SessionCancelResult,
+  SessionCreateInput,
   SessionDetail,
   SettingItem,
   SettingVersion,
   TokenResponse,
   User,
+  UserSummary,
+  Venue,
 } from '@/lib/types'
 
 let authToken: string | null = null
@@ -99,6 +107,83 @@ export const api = {
       const { data } = await http.get<SessionDetail>(`/catalog/sessions/${id}`)
       return data
     },
+    async createVenue(payload: {
+      organisation_id: string
+      name: string
+      suburb?: string | null
+      postcode?: string | null
+      latitude?: number | null
+      longitude?: number | null
+    }): Promise<Venue> {
+      const { data } = await http.post<Venue>('/catalog/venues', payload)
+      return data
+    },
+    async venues(organisationId: string): Promise<Venue[]> {
+      const { data } = await http.get<Venue[]>('/catalog/venues', {
+        params: { organisation_id: organisationId },
+      })
+      return data
+    },
+    async programs(organisationId: string): Promise<Program[]> {
+      const { data } = await http.get<Program[]>('/catalog/programs', {
+        params: { organisation_id: organisationId },
+      })
+      return data
+    },
+    async program(id: string): Promise<Program> {
+      const { data } = await http.get<Program>(`/catalog/programs/${id}`)
+      return data
+    },
+    async createProgram(payload: {
+      organisation_id: string
+      title: string
+      description?: string | null
+      category: string
+    }): Promise<Program> {
+      const { data } = await http.post<Program>('/catalog/programs', payload)
+      return data
+    },
+    async publishProgram(programId: string): Promise<Program> {
+      const { data } = await http.post<Program>(`/catalog/programs/${programId}/publish`)
+      return data
+    },
+    async programSessions(programId: string): Promise<CatalogSession[]> {
+      const { data } = await http.get<CatalogSession[]>(`/catalog/programs/${programId}/sessions`)
+      return data
+    },
+    async createSession(programId: string, body: SessionCreateInput): Promise<CatalogSession> {
+      const { data } = await http.post<CatalogSession>(
+        `/catalog/programs/${programId}/sessions`,
+        body,
+      )
+      return data
+    },
+  },
+  org: {
+    async mine(): Promise<Org[]> {
+      const { data } = await http.get<Org[]>('/org')
+      return data
+    },
+    async get(id: string): Promise<Org> {
+      const { data } = await http.get<Org>(`/org/${id}`)
+      return data
+    },
+    async create(name: string): Promise<Org> {
+      const { data } = await http.post<Org>('/org', { name })
+      return data
+    },
+  },
+  roster: {
+    async forSession(sessionId: string): Promise<RosterOut> {
+      const { data } = await http.get<RosterOut>(`/roster/sessions/${sessionId}`)
+      return data
+    },
+    async csv(sessionId: string): Promise<string> {
+      const { data } = await http.get<string>(`/roster/sessions/${sessionId}/export.csv`, {
+        responseType: 'text',
+      })
+      return data
+    },
   },
   inventory: {
     async availability(sessionId: string): Promise<Availability> {
@@ -139,8 +224,16 @@ export const api = {
       const { data } = await http.get<Booking[]>('/booking/bookings')
       return data
     },
+    async cancelSession(sessionId: string): Promise<SessionCancelResult> {
+      const { data } = await http.post<SessionCancelResult>(`/booking/sessions/${sessionId}/cancel`)
+      return data
+    },
   },
   admin: {
+    async users(q: string): Promise<UserSummary[]> {
+      const { data } = await http.get<UserSummary[]>('/admin/users', { params: { q } })
+      return data
+    },
     async orgs(status: OrgStatus): Promise<OrgAdmin[]> {
       const { data } = await http.get<OrgAdmin[]>('/admin/orgs', { params: { status } })
       return data

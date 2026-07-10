@@ -65,6 +65,10 @@
                     <q-item-section avatar><q-icon name="face" /></q-item-section>
                     <q-item-section>My kids</q-item-section>
                   </q-item>
+                  <q-item clickable v-close-popup :to="{ name: 'provider' }">
+                    <q-item-section avatar><q-icon name="storefront" /></q-item-section>
+                    <q-item-section>For providers</q-item-section>
+                  </q-item>
                   <q-item v-if="auth.isAdmin" clickable v-close-popup :to="{ name: 'admin-approvals' }">
                     <q-item-section avatar><q-icon name="admin_panel_settings" /></q-item-section>
                     <q-item-section>Admin console</q-item-section>

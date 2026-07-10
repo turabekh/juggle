@@ -204,3 +204,89 @@ export interface ImpersonationSession {
   expires_at: string
   ended_at: string | null
 }
+
+export interface UserSummary {
+  id: string
+  email: string
+  full_name: string | null
+  is_admin: boolean
+}
+
+// --- Provider console -------------------------------------------------------
+
+export interface Org {
+  id: string
+  name: string
+  slug: string
+  status: OrgStatus
+  created_at: string
+}
+
+export interface Venue {
+  id: string
+  organisation_id: string
+  name: string
+  suburb: string | null
+  postcode: string | null
+}
+
+export interface Program {
+  id: string
+  organisation_id: string
+  title: string
+  description: string | null
+  category: string
+  status: 'draft' | 'published' | 'unpublished'
+}
+
+export interface CatalogSession {
+  id: string
+  program_id: string
+  venue_id: string
+  starts_at: string
+  ends_at: string
+  capacity: number
+  seats_taken: number
+  seats_remaining: number
+  price_cents: number
+  age_min: number
+  age_max: number
+  session_type: 'half_day' | 'full_day'
+  drop_off: boolean
+  status: 'scheduled' | 'cancelled'
+}
+
+export interface RosterRow {
+  booking_id: string
+  child_first_name: string
+  age: number
+  medical_notes: string | null
+  emergency_contact_name: string | null
+  emergency_contact_phone: string | null
+  form_answers: Record<string, unknown>
+}
+
+export interface RosterOut {
+  session_id: string
+  count: number
+  rows: RosterRow[]
+}
+
+export interface SessionCancelResult {
+  session_id: string
+  cancelled_bookings: number
+  refunded_payments: number
+  reliability_score: number
+}
+
+export interface SessionCreateInput {
+  venue_id: string
+  starts_at: string
+  ends_at: string
+  capacity: number
+  price_cents: number
+  age_min: number
+  age_max: number
+  session_type: 'half_day' | 'full_day'
+  drop_off: boolean
+}

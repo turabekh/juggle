@@ -103,6 +103,31 @@ def get_session(db: Session, session_id: uuid.UUID) -> ProgramSession | None:
     return db.get(ProgramSession, session_id)
 
 
+def list_org_venues(
+    db: Session, *, organisation_id: uuid.UUID, actor_id: uuid.UUID
+) -> list[Venue]:
+    """A provider's venues for one org (member-gated)."""
+    _require_member(db, organisation_id, actor_id)
+    return list(
+        db.scalars(
+            select(Venue)
+            .where(Venue.organisation_id == organisation_id)
+            .order_by(Venue.created_at)
+        )
+    )
+
+
+def get_owned_program(
+    db: Session, *, program_id: uuid.UUID, actor_id: uuid.UUID
+) -> Program:
+    """A single program the actor may manage (member-gated)."""
+    program = db.get(Program, program_id)
+    if program is None:
+        raise ProgramNotFound(str(program_id))
+    _require_member(db, program.organisation_id, actor_id)
+    return program
+
+
 def list_org_programs(
     db: Session, *, organisation_id: uuid.UUID, actor_id: uuid.UUID
 ) -> list[Program]:

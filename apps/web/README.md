@@ -69,9 +69,17 @@ Signed-in admins (`user_account.is_admin`) get an **Admin console** under `/admi
 - **Impersonation** — start a view-as/act-as session; "Enter session" swaps to the
   user's view with a persistent support banner; "Exit" restores the admin.
 
+## Provider console
+
+Any signed-in user gets a **provider console** (account menu → "For providers",
+`/provider`): create an organisation, add venues + programs, schedule sessions,
+publish (making them searchable), view per-session rosters (with CSV export), and
+cancel sessions (auto-refunds families). Admin approval gates only affect
+suspended orgs from publishing.
+
 ## Not yet built (follow-ups)
 
 - SSR for SEO on listing pages (PRD §12) — currently SPA.
 - PWA service worker / installability, offline shell.
-- Provider self-serve console (onboarding, listings, roster) — API partially exists.
+- Provider ABN/WWCC/insurance onboarding docs (§8.1); payouts (§8.4).
 - Map view; reviews/waitlists (P1).

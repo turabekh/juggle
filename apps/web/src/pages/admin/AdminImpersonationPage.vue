@@ -12,14 +12,35 @@
     <div class="jg-card q-pa-lg jg-imp-start">
       <div class="text-weight-600 q-mb-md">Start a support session</div>
       <div class="jg-imp-form">
-        <q-input
+        <q-select
           v-model="form.targetUserId"
           outlined
           dense
-          label="Target user ID"
-          hint="The guardian or provider member's user id"
+          use-input
+          input-debounce="300"
+          :options="userOptions"
+          option-value="id"
+          option-label="email"
+          emit-value
+          map-options
+          clearable
+          label="Find user by email"
+          hint="Type at least 2 characters"
           class="col"
-        />
+          @filter="searchUsers"
+        >
+          <template #option="scope">
+            <q-item v-bind="scope.itemProps">
+              <q-item-section>
+                <q-item-label>{{ scope.opt.email }}</q-item-label>
+                <q-item-label caption>{{ scope.opt.full_name || '—' }}</q-item-label>
+              </q-item-section>
+            </q-item>
+          </template>
+          <template #no-option>
+            <q-item><q-item-section class="jg-muted">No matches</q-item-section></q-item>
+          </template>
+        </q-select>
         <q-select
           v-model="form.mode"
           outlined
@@ -93,7 +114,7 @@ import { useQuasar } from 'quasar'
 import { useRouter } from 'vue-router'
 
 import { api, apiError } from '@/lib/api'
-import type { ImpersonationSession, ImpersonationToken } from '@/lib/types'
+import type { ImpersonationSession, ImpersonationToken, UserSummary } from '@/lib/types'
 import { useAuthStore } from '@/stores/auth'
 
 const $q = useQuasar()
@@ -106,6 +127,28 @@ const starting = ref(false)
 const pendingToken = ref<ImpersonationToken | null>(null)
 
 const form = reactive({ targetUserId: '', mode: 'view_as' as 'view_as' | 'act_as', reason: '' })
+const userOptions = ref<UserSummary[]>([])
+
+async function searchUsers(
+  val: string,
+  update: (fn: () => void) => void,
+  abort: () => void,
+): Promise<void> {
+  if (val.length < 2) {
+    update(() => {
+      userOptions.value = []
+    })
+    return
+  }
+  try {
+    const users = await api.admin.users(val)
+    update(() => {
+      userOptions.value = users
+    })
+  } catch {
+    abort()
+  }
+}
 const modeOptions = [
   { label: 'View as (read-only)', value: 'view_as' },
   { label: 'Act as (full)', value: 'act_as' },
@@ -134,7 +177,7 @@ async function start(): Promise<void> {
   starting.value = true
   try {
     pendingToken.value = await api.admin.startImpersonation(
-      form.targetUserId.trim(),
+      form.targetUserId,
       form.mode,
       form.reason || undefined,
     )

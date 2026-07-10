@@ -21,6 +21,19 @@ def _forbid_non_member(exc: service.NotOrgMember) -> HTTPException:
     return HTTPException(status.HTTP_403_FORBIDDEN, "Not a member of this organisation")
 
 
+@router.get("/venues", response_model=list[schemas.VenueOut])
+def list_venues(
+    organisation_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
+) -> list[schemas.VenueOut]:
+    try:
+        venues = service.list_org_venues(
+            session, organisation_id=organisation_id, actor_id=principal.user_id
+        )
+    except service.NotOrgMember as exc:
+        raise _forbid_non_member(exc) from exc
+    return [schemas.VenueOut.model_validate(v) for v in venues]
+
+
 @router.post("/venues", status_code=status.HTTP_201_CREATED, response_model=schemas.VenueOut)
 def create_venue(
     payload: schemas.VenueCreate, principal: CurrentPrincipal, session: SessionDep
@@ -68,6 +81,21 @@ def create_program(
             category=payload.category,
             description=payload.description,
         )
+    except service.NotOrgMember as exc:
+        raise _forbid_non_member(exc) from exc
+    return schemas.ProgramOut.model_validate(program)
+
+
+@router.get("/programs/{program_id}", response_model=schemas.ProgramOut)
+def get_program(
+    program_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
+) -> schemas.ProgramOut:
+    try:
+        program = service.get_owned_program(
+            session, program_id=program_id, actor_id=principal.user_id
+        )
+    except service.ProgramNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Program not found") from exc
     except service.NotOrgMember as exc:
         raise _forbid_non_member(exc) from exc
     return schemas.ProgramOut.model_validate(program)
