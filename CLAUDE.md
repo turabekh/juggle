@@ -12,7 +12,7 @@ Context for Claude Code working in this repository. Read it before making change
 
 The full product spec — requirement IDs, phasing, edge cases, acceptance criteria — is in **`docs/juggle-prd.md`**. It is the source of truth; this file is the engineering orientation on top of it.
 
-> **Status:** Pre-gate per the PRD (build is contingent on the August provider-sprint kill criteria). Progress: scaffold + **M1** (data model + migration), **M2** (identity auth, guardian/child profiles, provider orgs + membership), and **M3** (catalog: venues/programs/sessions with publish gating; inventory: seat holds with TTL + transactional oversell guard, verified under concurrent load). Endpoints live on the identity, org, catalog, and inventory routers. Next: M4 search/geo. Confirm milestone scope before implementing.
+> **Status:** Pre-gate per the PRD (build is contingent on the August provider-sprint kill criteria). Progress: scaffold + **M1** (data model + migration), **M2** (identity auth, guardian/child profiles, provider orgs + membership), **M3** (catalog: venues/programs/sessions with publish gating; inventory: seat holds with TTL + transactional oversell guard, verified under concurrent load), and **M4** (search: public PostGIS radius search with distance + date/age/category/price/type filters over published, available inventory). Endpoints live on identity, org, catalog, inventory, and search routers. Next: M5 booking + payments. Confirm milestone scope before implementing.
 
 > **Name:** "Juggle" is a placeholder pending an ASIC/trademark check (PRD D-01). The Python package is `juggle`. If the name changes, update the PRD, this file, the package, and `docker-compose.yml`.
 
