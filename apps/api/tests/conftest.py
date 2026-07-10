@@ -32,10 +32,23 @@ def engine() -> Engine:
 
 @pytest.fixture
 def db(engine: Engine) -> Iterator[Session]:
-    """A session wrapped in a transaction that is rolled back after each test."""
+    """A session wrapped in a transaction that is rolled back after each test.
+
+    Any committed platform settings / feature flags (from seeds or manual use)
+    are cleared *within* this transaction so every test sees the built-in config
+    defaults; the deletes roll back, leaving persisted data untouched.
+    """
+    from sqlalchemy import delete
+
+    from juggle.modules.config.core.models import PlatformSetting
+    from juggle.modules.flags.core.models import FeatureFlag
+
     connection = engine.connect()
     transaction = connection.begin()
     session = Session(bind=connection)
+    session.execute(delete(PlatformSetting))
+    session.execute(delete(FeatureFlag))
+    session.flush()
     try:
         yield session
     finally:

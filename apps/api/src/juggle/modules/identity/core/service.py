@@ -6,7 +6,7 @@ panel and product share one code path (PRD §10.4).
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from juggle.modules.identity.core.models import Child, UserAccount, UserStatus
@@ -52,6 +52,19 @@ def authenticate(session: Session, *, email: str, password: str) -> UserAccount 
 
 def get_user(session: Session, user_id: uuid.UUID) -> UserAccount | None:
     return session.get(UserAccount, user_id)
+
+
+def search_users(session: Session, *, query: str, limit: int = 20) -> list[UserAccount]:
+    """Find users by email or name fragment — an admin support lookup (PRD §10.2)."""
+    like = f"%{query}%"
+    return list(
+        session.scalars(
+            select(UserAccount)
+            .where(or_(UserAccount.email.ilike(like), UserAccount.full_name.ilike(like)))
+            .order_by(UserAccount.email)
+            .limit(max(1, min(limit, 50)))
+        )
+    )
 
 
 def add_child(session: Session, *, guardian_id: uuid.UUID, data: ChildCreate) -> Child:

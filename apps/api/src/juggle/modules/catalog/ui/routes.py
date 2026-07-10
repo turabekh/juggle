@@ -42,6 +42,19 @@ def create_venue(
     return schemas.VenueOut.model_validate(venue)
 
 
+@router.get("/programs", response_model=list[schemas.ProgramOut])
+def list_programs(
+    organisation_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
+) -> list[schemas.ProgramOut]:
+    try:
+        programs = service.list_org_programs(
+            session, organisation_id=organisation_id, actor_id=principal.user_id
+        )
+    except service.NotOrgMember as exc:
+        raise _forbid_non_member(exc) from exc
+    return [schemas.ProgramOut.model_validate(p) for p in programs]
+
+
 @router.post("/programs", status_code=status.HTTP_201_CREATED, response_model=schemas.ProgramOut)
 def create_program(
     payload: schemas.ProgramCreate, principal: CurrentPrincipal, session: SessionDep

@@ -103,6 +103,20 @@ def get_session(db: Session, session_id: uuid.UUID) -> ProgramSession | None:
     return db.get(ProgramSession, session_id)
 
 
+def list_org_programs(
+    db: Session, *, organisation_id: uuid.UUID, actor_id: uuid.UUID
+) -> list[Program]:
+    """A provider's programs for one org (member-gated)."""
+    _require_member(db, organisation_id, actor_id)
+    return list(
+        db.scalars(
+            select(Program)
+            .where(Program.organisation_id == organisation_id)
+            .order_by(Program.created_at)
+        )
+    )
+
+
 def set_program_status(
     db: Session, *, program_id: uuid.UUID, actor_id: uuid.UUID, status: ProgramStatus
 ) -> Program:

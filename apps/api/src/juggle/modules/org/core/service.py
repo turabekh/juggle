@@ -51,6 +51,18 @@ def get_organisation(session: Session, org_id: uuid.UUID) -> Organisation | None
     return session.get(Organisation, org_id)
 
 
+def list_user_orgs(session: Session, user_id: uuid.UUID) -> list[Organisation]:
+    """Organisations the user is a member of (their provider dashboard)."""
+    return list(
+        session.scalars(
+            select(Organisation)
+            .join(OrgMember, OrgMember.organisation_id == Organisation.id)
+            .where(OrgMember.user_account_id == user_id)
+            .order_by(Organisation.created_at)
+        )
+    )
+
+
 def set_status(session: Session, org_id: uuid.UUID, status: OrgStatus) -> Organisation | None:
     """Admin lifecycle transition (approve / suspend / reinstate)."""
     org = session.get(Organisation, org_id)

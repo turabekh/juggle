@@ -16,6 +16,12 @@ router = APIRouter(prefix="/org", tags=["org"])
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
+@router.get("", response_model=list[schemas.OrgOut])
+def list_my_orgs(principal: CurrentPrincipal, session: SessionDep) -> list[schemas.OrgOut]:
+    orgs = service.list_user_orgs(session, principal.user_id)
+    return [schemas.OrgOut.model_validate(o) for o in orgs]
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=schemas.OrgOut)
 def create_org(
     payload: schemas.OrgCreate, principal: CurrentPrincipal, session: SessionDep

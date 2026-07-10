@@ -19,6 +19,15 @@ class OrgAdminOut(BaseModel):
     created_at: datetime
 
 
+class UserSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    full_name: str | None
+    is_admin: bool
+
+
 class RefundRequest(BaseModel):
     reason: str
 

@@ -18,6 +18,7 @@ from juggle.modules.booking.core import service as booking_service
 from juggle.modules.booking.core.schemas import OrderOut
 from juggle.modules.config.core import service as config_service
 from juggle.modules.identity.core import service as identity_service
+from juggle.modules.identity.core.models import UserAccount
 from juggle.modules.org.core import service as org_service
 from juggle.modules.org.core.models import Organisation, OrgStatus
 from juggle.modules.payments.core.gateway import PaymentGateway
@@ -52,6 +53,11 @@ class InvalidMode(Exception):
 
 def list_orgs(db: Session, status: OrgStatus) -> list[Organisation]:
     return org_service.list_by_status(db, status)
+
+
+def find_users(db: Session, query: str) -> list[UserAccount]:
+    """Support lookup by email/name (PRD §10.2)."""
+    return identity_service.search_users(db, query=query)
 
 
 def _set_org_status(

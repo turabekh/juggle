@@ -34,6 +34,15 @@ def list_orgs(
     return [schemas.OrgAdminOut.model_validate(o) for o in orgs]
 
 
+@router.get("/users", response_model=list[schemas.UserSummary])
+def find_users(
+    admin: CurrentAdmin,
+    session: SessionDep,
+    q: Annotated[str, Query(min_length=1)],
+) -> list[schemas.UserSummary]:
+    return [schemas.UserSummary.model_validate(u) for u in service.find_users(session, q)]
+
+
 @router.post("/orgs/{org_id}/approve", response_model=schemas.OrgAdminOut)
 def approve_org(
     org_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep
