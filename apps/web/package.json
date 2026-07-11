@@ -9,6 +9,9 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "ssr:dev": "node server.mjs",
     "build:client": "vite build --ssrManifest --outDir dist/client",
     "build:server": "vite build --ssr src/entry-server.ts --outDir dist/server",
@@ -26,9 +29,13 @@
   "devDependencies": {
     "@quasar/vite-plugin": "^1.8.0",
     "@vitejs/plugin-vue": "^5.1.4",
+    "@vitest/coverage-v8": "^2.1.9",
+    "@vue/test-utils": "^2.4.11",
+    "jsdom": "^29.1.1",
     "sass-embedded": "^1.80.4",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
+    "vitest": "^2.1.9",
     "vue-tsc": "^2.1.10"
   }
 }

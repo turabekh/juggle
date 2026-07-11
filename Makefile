@@ -1,7 +1,7 @@
 # Juggle developer shortcuts. Backend commands run inside apps/api via uv.
 API := apps/api
 
-.PHONY: help install dev db up down test lint typecheck contracts check migrate revision worker worker-loop
+.PHONY: help install dev db up down test lint typecheck contracts check migrate revision worker worker-loop web-install web-dev web-build web-test
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -55,6 +55,9 @@ web-dev: ## Run the Quasar dev server (proxies /api to :8000)
 
 web-build: ## Typecheck + build the frontend
 	cd apps/web && npm run build
+
+web-test: ## Run the frontend unit tests (Vitest)
+	cd apps/web && npm run test
 
 revision: ## Autogenerate a migration: make revision m="add sessions"
 	cd $(API) && uv run alembic revision --autogenerate -m "$(m)"
