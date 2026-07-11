@@ -12,6 +12,7 @@ import type {
   CatalogSession,
   Child,
   ChildCreate,
+  CoGuardian,
   Flag,
   Hold,
   ImpersonationMode,
@@ -110,6 +111,23 @@ export const api = {
     async create(payload: ChildCreate): Promise<Child> {
       const { data } = await http.post<Child>('/identity/children', payload)
       return data
+    },
+  },
+  coGuardians: {
+    async list(): Promise<CoGuardian[]> {
+      const { data } = await http.get<CoGuardian[]>('/identity/co-guardians')
+      return data
+    },
+    async invite(email: string): Promise<CoGuardian> {
+      const { data } = await http.post<CoGuardian>('/identity/co-guardians', { email })
+      return data
+    },
+    async accept(linkId: string): Promise<CoGuardian> {
+      const { data } = await http.post<CoGuardian>(`/identity/co-guardians/${linkId}/accept`)
+      return data
+    },
+    async remove(linkId: string): Promise<void> {
+      await http.delete(`/identity/co-guardians/${linkId}`)
     },
   },
   search: {

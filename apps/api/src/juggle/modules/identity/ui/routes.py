@@ -1,5 +1,6 @@
 """HTTP routes for the identity module: auth + guardian family profiles."""
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -60,3 +61,61 @@ def add_child(
 def list_children(principal: CurrentPrincipal, session: SessionDep) -> list[schemas.ChildOut]:
     children = service.list_children(session, principal.user_id)
     return [schemas.ChildOut.model_validate(c) for c in children]
+
+
+# --- co-guardians (PRD §7.3) -------------------------------------------------
+
+
+@router.get("/co-guardians", response_model=list[schemas.CoGuardianOut])
+def list_co_guardians(
+    principal: CurrentPrincipal, session: SessionDep
+) -> list[schemas.CoGuardianOut]:
+    return service.list_co_guardians(session, principal.user_id)
+
+
+@router.post(
+    "/co-guardians", status_code=status.HTTP_201_CREATED, response_model=schemas.CoGuardianOut
+)
+def invite_co_guardian(
+    payload: schemas.CoGuardianInvite, principal: CurrentPrincipal, session: SessionDep
+) -> schemas.CoGuardianOut:
+    try:
+        service.invite_co_guardian(session, owner_id=principal.user_id, email=payload.email)
+    except service.CoGuardianNotFound as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "No Juggle account with that email"
+        ) from exc
+    except service.CannotLinkSelf as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, "That's you!") from exc
+    except service.AlreadyLinked as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "You're already linked with this person"
+        ) from exc
+    # Return the fresh view from the inviter's side.
+    return next(
+        c for c in service.list_co_guardians(session, principal.user_id)
+        if c.other_email == payload.email
+    )
+
+
+@router.post("/co-guardians/{link_id}/accept", response_model=schemas.CoGuardianOut)
+def accept_co_guardian(
+    link_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
+) -> schemas.CoGuardianOut:
+    try:
+        service.accept_co_guardian(session, user_id=principal.user_id, link_id=link_id)
+    except service.LinkNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invitation not found") from exc
+    return next(
+        c for c in service.list_co_guardians(session, principal.user_id) if c.id == link_id
+    )
+
+
+@router.delete("/co-guardians/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_co_guardian(
+    link_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
+) -> None:
+    try:
+        service.remove_co_guardian(session, user_id=principal.user_id, link_id=link_id)
+    except service.LinkNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Link not found") from exc

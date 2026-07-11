@@ -13,6 +13,14 @@ export interface User {
   created_at: string
 }
 
+export interface CoGuardian {
+  id: string
+  other_email: string
+  other_name: string | null
+  direction: 'sent' | 'received'
+  accepted: boolean
+}
+
 export interface Child {
   id: string
   first_name: string

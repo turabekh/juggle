@@ -9,7 +9,7 @@ import enum
 import uuid
 from datetime import date
 
-from sqlalchemy import Boolean, Date, Enum, ForeignKey, String
+from sqlalchemy import Boolean, Date, Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from juggle.common import TimestampMixin, UUIDPkMixin
@@ -53,3 +53,26 @@ class Child(UUIDPkMixin, TimestampMixin, Base):
     emergency_contact_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     emergency_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     photo_consent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class GuardianLink(UUIDPkMixin, TimestampMixin, Base):
+    """A co-guardian relationship (PRD §7.3, "multiple guardians per family").
+
+    The inviter (``guardian_id``) adds another account (``member_id``); once the
+    invitee accepts, the two share access to each other's children and see each
+    other's bookings. Access is symmetric but requires ``accepted`` — you can't
+    unilaterally gain access to someone's children.
+    """
+
+    __tablename__ = "guardian_link"
+    __table_args__ = (
+        UniqueConstraint("guardian_id", "member_id", name="uq_guardian_link"),
+    )
+
+    guardian_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_account.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    member_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_account.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    accepted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

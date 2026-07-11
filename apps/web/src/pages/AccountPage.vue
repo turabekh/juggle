@@ -28,6 +28,63 @@
       </button>
     </div>
 
+    <!-- Co-guardians (PRD §7.3) -->
+    <section class="q-mt-xl">
+      <h2 class="text-h5 q-mb-xs">Family</h2>
+      <p class="jg-muted q-mb-md">
+        Add another parent or carer — once they accept, you'll share your kids and bookings.
+      </p>
+
+      <div v-if="coGuardians.length" class="jg-kids q-mb-md">
+        <div v-for="cg in coGuardians" :key="cg.id" class="jg-card jg-kidrow">
+          <q-avatar :color="cg.accepted ? 'positive' : 'grey-5'" text-color="white" size="42px">
+            {{ (cg.other_name || cg.other_email).slice(0, 1).toUpperCase() }}
+          </q-avatar>
+          <div class="col">
+            <div class="text-weight-600">{{ cg.other_name || cg.other_email }}</div>
+            <div class="jg-faint text-caption">
+              <template v-if="cg.accepted">Sharing family</template>
+              <template v-else-if="cg.direction === 'received'">Invited you</template>
+              <template v-else>Invite sent — awaiting acceptance</template>
+            </div>
+          </div>
+          <q-btn
+            v-if="!cg.accepted && cg.direction === 'received'"
+            unelevated dense no-caps size="sm" color="primary" label="Accept"
+            @click="accept(cg)"
+          />
+          <q-btn flat round dense icon="close" color="grey-7" @click="remove(cg)" />
+        </div>
+      </div>
+
+      <button class="jg-card jg-addkid" @click="showInvite = true">
+        <q-icon name="group_add" size="22px" color="primary" />
+        <span>Add a co-guardian</span>
+      </button>
+    </section>
+
+    <q-dialog v-model="showInvite">
+      <q-card style="min-width: 360px; border-radius: 18px">
+        <q-card-section>
+          <div class="text-h6">Add a co-guardian</div>
+          <div class="jg-faint text-caption">They need a Juggle account with this email.</div>
+        </q-card-section>
+        <q-card-section>
+          <q-input
+            v-model="inviteEmail" outlined dense type="email" label="Their email" autofocus
+            @keyup.enter="invite"
+          />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated color="primary" no-caps label="Send invite"
+            :loading="inviting" :disable="!inviteEmail" @click="invite"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <q-dialog v-model="showAddChild">
       <q-card style="min-width: 340px; border-radius: 18px">
         <q-card-section>
@@ -68,13 +125,17 @@ import { useQuasar } from 'quasar'
 
 import { api, apiError } from '@/lib/api'
 import { ageAt } from '@/lib/format'
-import type { Child } from '@/lib/types'
+import type { Child, CoGuardian } from '@/lib/types'
 
 const $q = useQuasar()
 const children = ref<Child[]>([])
+const coGuardians = ref<CoGuardian[]>([])
 const loading = ref(true)
 const showAddChild = ref(false)
 const saving = ref(false)
+const showInvite = ref(false)
+const inviting = ref(false)
+const inviteEmail = ref('')
 const nowIso = new Date().toISOString()
 const newChild = reactive({ first_name: '', date_of_birth: '', medical_notes: '' })
 
@@ -82,10 +143,45 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     children.value = await api.children.list()
+    coGuardians.value = await api.coGuardians.list()
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err, 'Could not load your kids') })
   } finally {
     loading.value = false
+  }
+}
+
+async function invite(): Promise<void> {
+  if (!inviteEmail.value) return
+  inviting.value = true
+  try {
+    await api.coGuardians.invite(inviteEmail.value.trim())
+    showInvite.value = false
+    inviteEmail.value = ''
+    coGuardians.value = await api.coGuardians.list()
+    $q.notify({ type: 'positive', message: 'Invite sent.' })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not send invite') })
+  } finally {
+    inviting.value = false
+  }
+}
+
+async function accept(cg: CoGuardian): Promise<void> {
+  try {
+    await api.coGuardians.accept(cg.id)
+    await load()
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  }
+}
+
+async function remove(cg: CoGuardian): Promise<void> {
+  try {
+    await api.coGuardians.remove(cg.id)
+    await load()
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
   }
 }
 

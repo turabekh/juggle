@@ -52,3 +52,17 @@ class ChildOut(BaseModel):
     emergency_contact_name: str | None
     emergency_contact_phone: str | None
     photo_consent: bool
+
+
+class CoGuardianInvite(BaseModel):
+    email: EmailStr
+
+
+class CoGuardianOut(BaseModel):
+    """A co-guardian relationship from the current user's point of view."""
+
+    id: uuid.UUID
+    other_email: str
+    other_name: str | None
+    direction: str  # 'sent' (I invited them) | 'received' (they invited me)
+    accepted: bool

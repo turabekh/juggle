@@ -192,6 +192,8 @@ def checkout(
         return _order_view(db, existing)
 
     now = datetime.now(UTC)
+    # Children may belong to the actor or any of their co-guardians (PRD §7.3).
+    family_ids = identity_service.family_guardian_ids(db, guardian_id)
     prepared: list[tuple[SeatHold, CatalogSession, Program, list[CheckoutChild]]] = []
     total = 0
 
@@ -217,7 +219,7 @@ def checkout(
 
         for child_input in item.children:
             child = db.get(Child, child_input.child_id)
-            if child is None or child.guardian_id != guardian_id:
+            if child is None or child.guardian_id not in family_ids:
                 raise ChildInvalid(str(child_input.child_id))
             age = _age_at(child.date_of_birth, session.starts_at)
             if not (session.age_min <= age <= session.age_max):
@@ -340,9 +342,11 @@ def cancel(db: Session, *, payment_id: uuid.UUID, guardian_id: uuid.UUID) -> Ord
 
 
 def list_bookings(db: Session, guardian_id: uuid.UUID) -> list[BookingOut]:
+    # A family sees each other's bookings (PRD §7.3).
+    family_ids = identity_service.family_guardian_ids(db, guardian_id)
     bookings = db.scalars(
         select(Booking)
-        .where(Booking.guardian_id == guardian_id)
+        .where(Booking.guardian_id.in_(family_ids))
         .order_by(Booking.created_at.desc())
     ).all()
     return [_booking_out(db, b) for b in bookings]

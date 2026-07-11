@@ -9,13 +9,34 @@ import uuid
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from juggle.modules.identity.core.models import Child, UserAccount, UserStatus
-from juggle.modules.identity.core.schemas import ChildCreate
+from juggle.modules.identity.core.models import (
+    Child,
+    GuardianLink,
+    UserAccount,
+    UserStatus,
+)
+from juggle.modules.identity.core.schemas import ChildCreate, CoGuardianOut
 from juggle.security import hash_password, verify_password
 
 
 class EmailAlreadyExists(Exception):
     """Raised when signing up with an email that is already registered."""
+
+
+class CoGuardianNotFound(Exception):
+    """No account with that email to invite as a co-guardian."""
+
+
+class CannotLinkSelf(Exception):
+    """A guardian cannot add themselves as a co-guardian."""
+
+
+class AlreadyLinked(Exception):
+    """These two accounts already have a co-guardian link."""
+
+
+class LinkNotFound(Exception):
+    """No such co-guardian link for this user."""
 
 
 def create_guardian(
@@ -75,8 +96,98 @@ def add_child(session: Session, *, guardian_id: uuid.UUID, data: ChildCreate) ->
 
 
 def list_children(session: Session, guardian_id: uuid.UUID) -> list[Child]:
+    """Every child the user can act for — their own plus any co-guardian's."""
+    family = family_guardian_ids(session, guardian_id)
     return list(
         session.scalars(
-            select(Child).where(Child.guardian_id == guardian_id).order_by(Child.created_at)
+            select(Child).where(Child.guardian_id.in_(family)).order_by(Child.created_at)
         )
     )
+
+
+# --- co-guardians (PRD §7.3, "multiple guardians per family") ----------------
+
+
+def family_guardian_ids(session: Session, user_id: uuid.UUID) -> set[uuid.UUID]:
+    """The user plus every accepted co-guardian (link is symmetric once accepted)."""
+    ids = {user_id}
+    rows = session.execute(
+        select(GuardianLink.guardian_id, GuardianLink.member_id).where(
+            GuardianLink.accepted.is_(True),
+            or_(GuardianLink.guardian_id == user_id, GuardianLink.member_id == user_id),
+        )
+    ).all()
+    for guardian_id, member_id in rows:
+        ids.add(guardian_id)
+        ids.add(member_id)
+    return ids
+
+
+def invite_co_guardian(
+    session: Session, *, owner_id: uuid.UUID, email: str
+) -> GuardianLink:
+    invitee = session.scalar(select(UserAccount).where(UserAccount.email == email))
+    if invitee is None:
+        raise CoGuardianNotFound(email)
+    if invitee.id == owner_id:
+        raise CannotLinkSelf(str(owner_id))
+    existing = session.scalar(
+        select(GuardianLink).where(
+            or_(
+                (GuardianLink.guardian_id == owner_id)
+                & (GuardianLink.member_id == invitee.id),
+                (GuardianLink.guardian_id == invitee.id)
+                & (GuardianLink.member_id == owner_id),
+            )
+        )
+    )
+    if existing is not None:
+        raise AlreadyLinked(email)
+    link = GuardianLink(guardian_id=owner_id, member_id=invitee.id, accepted=False)
+    session.add(link)
+    session.flush()
+    return link
+
+
+def accept_co_guardian(
+    session: Session, *, user_id: uuid.UUID, link_id: uuid.UUID
+) -> GuardianLink:
+    link = session.get(GuardianLink, link_id)
+    if link is None or link.member_id != user_id:
+        raise LinkNotFound(str(link_id))
+    link.accepted = True
+    session.flush()
+    return link
+
+
+def remove_co_guardian(
+    session: Session, *, user_id: uuid.UUID, link_id: uuid.UUID
+) -> None:
+    link = session.get(GuardianLink, link_id)
+    if link is None or user_id not in (link.guardian_id, link.member_id):
+        raise LinkNotFound(str(link_id))
+    session.delete(link)
+    session.flush()
+
+
+def list_co_guardians(session: Session, user_id: uuid.UUID) -> list[CoGuardianOut]:
+    links = session.scalars(
+        select(GuardianLink)
+        .where(or_(GuardianLink.guardian_id == user_id, GuardianLink.member_id == user_id))
+        .order_by(GuardianLink.created_at)
+    ).all()
+    out: list[CoGuardianOut] = []
+    for link in links:
+        sent = link.guardian_id == user_id
+        other_id = link.member_id if sent else link.guardian_id
+        other = session.get(UserAccount, other_id)
+        out.append(
+            CoGuardianOut(
+                id=link.id,
+                other_email=other.email if other is not None else "",
+                other_name=other.full_name if other is not None else None,
+                direction="sent" if sent else "received",
+                accepted=link.accepted,
+            )
+        )
+    return out
