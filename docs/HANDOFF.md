@@ -7,7 +7,8 @@ _Last updated: 2026-07-11. Read this first, then `CLAUDE.md` (engineering conven
 > - **Waitlist (PRD §7.7):** `waitlist` module — join a sold-out session, a freed seat is auto-offered to the FIFO front with a config-driven claim window (reserved via a seat hold), claim = normal checkout, expiry cascades; reconciliation runs lazily on reads + an admin ops sweep (no scheduler yet). Parent (join/claim) + provider (queue counts) UI. Browser-verified.
 > - **Provider comms (PRD §8.5):** `comms` module — template-guarded broadcast to a session's confirmed families via the notifications gateway; records outbound history.
 > - **Provider analytics (PRD §8.6):** `analytics` module (no table) — fill rate, gross revenue, new-vs-returning family mix, per-program rollup. (Search impressions deferred — needs event instrumentation.)
-> - **Background scheduler (PRD §7.5/§7.7):** `scheduler` module — one idempotent maintenance tick: reclaim expired holds, sweep the waitlist (offer/expire), and send **T-48h/T-3h pre-session reminders** (deduped by a `session_reminder` marker). Driven by a **worker** (`make worker` / `make worker-loop`, `python -m juggle.worker [--loop]`) or the admin **Operations** page (`POST /scheduler/run`). Payout release stays manual (payments deferred). All browser/worker-verified.
+> - **Background scheduler (PRD §7.5/§7.7):** `scheduler` module — one idempotent maintenance tick: reclaim expired holds, sweep the waitlist (offer/expire), and send **T-48h/T-3h pre-session reminders** (deduped by a `session_reminder` marker). Driven by a **worker** (`make worker` / `make worker-loop`, `python -m juggle.worker [--loop]`, or the compose `worker` service) or the admin **Operations** page (`POST /scheduler/run`). Payout release stays manual (payments deferred).
+> - **Attendance check-in (PRD §8.3):** the `roster` module gained its first table — morning-of **tap-to-check-in** (`Attendance`, keyed by booking_child_id). Roster rows carry `attended`/`attended_at` + an `attended_count`; CSV has an `attended` column; provider roster dialog toggles it. All browser/worker-verified.
 >
 > **18 domain modules** now; layering `scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ …`. See §5.
 
@@ -57,10 +58,10 @@ Open **http://localhost:9000**.
 
 ## 3. Current state (facts)
 
-- **33 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 114 pytest passing** (13 reviews + 10 waitlist + 4 comms + 3 analytics + 5 scheduler), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
+- **36 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
+- **Backend: 118 pytest passing** (13 reviews + 10 waitlist + 4 comms + 3 analytics + 5 scheduler + 4 attendance), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
 - **Frontend: vue-tsc + vite build clean.**
-- **8 Alembic migrations**, head = `5ca826299aa4` (add_session_reminder). Chain: initial → payment idempotency_key → booking seat_hold_id → notification_log → review → waitlist_entry → broadcast → session_reminder. The chain round-trips (down to base and back).
+- **9 Alembic migrations**, head = `cb8c9fc8b4eb` (add_attendance). Chain: initial → payment idempotency_key → booking seat_hold_id → notification_log → review → waitlist_entry → broadcast → session_reminder → attendance. The chain round-trips (down to base and back).
 - **18 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`, `scheduler`).
 - **Background worker**: `make worker` (one tick) / `make worker-loop` (every 5 min).
 - Stack: FastAPI + SQLAlchemy 2 + PostgreSQL/PostGIS + Alembic (`apps/api`); Vite + Vue 3 (TS) + Quasar SPA (`apps/web`).
@@ -132,7 +133,7 @@ Open **http://localhost:9000**.
 - Proven by a concurrency test: 8 threads race for the last seat → exactly one wins, seven 409, `seats_taken == 1`. Stable across repeated runs.
 
 ### Provider console (`/provider`, any signed-in user)
-- Create org → **compliance** (ABN, WWCC per staff, insurance ref — all land `pending`) → venues → programs → sessions → **publish** (suspended orgs can't publish) → **rosters** (with CSV export) → **cancel session** (→ refund + notify families) → **Earnings** (payouts view).
+- Create org → **compliance** (ABN, WWCC per staff, insurance ref — all land `pending`) → venues → programs → sessions → **publish** (suspended orgs can't publish) → **rosters** (with CSV export + **morning-of tap-to-check-in**, §8.3) → **cancel session** (→ refund + notify families) → **Earnings** (payouts view).
 - **Message families (P1, PRD §8.5)**: per-session **broadcast** — a template-guarded dialog (What to bring / Reminder / Update / Custom presets) sends to every confirmed family via the notifications gateway and records outbound history; recipient count reported. No free-text parent↔provider chat (PRD §8.5).
 - **Insights (P1, PRD §8.6)**: org **analytics** — seats-filled %, gross bookings revenue, new-vs-returning family mix, and a per-program fill-rate + revenue rollup. Full sessions also show live **waitlist queue counts**.
 
@@ -155,7 +156,7 @@ Open **http://localhost:9000**.
 
 ## 6. Data model & migrations
 
-18 initial tables + 2 added columns + 5 tables (`notification_log`, `review`, `waitlist_entry`, `broadcast`, `session_reminder`), across modules. Highlights:
+18 initial tables + 2 added columns + 6 tables (`notification_log`, `review`, `waitlist_entry`, `broadcast`, `session_reminder`, `attendance`), across modules. Highlights:
 - `user_account`, `child` (identity); `organisation`, `org_member`, `wwcc_record`, `insurance_doc` (org); `venue` (PostGIS `geography(POINT,4326)` + GiST index), `program`, `session` (catalog); `seat_hold` (inventory); `booking`, `booking_child` (booking); `payment`, `payout` (payments); `review` (reviews — `UNIQUE(booking_id)`, `CHECK(rating 1..5)`, native `review_status` enum); `waitlist_entry` (waitlist — identity `seq` for FIFO, partial `UNIQUE` on active status per guardian/session); `impersonation_session` (admin); `platform_setting` (versioned), `feature_flag`, `audit_event`, `notification_log`.
 - Cross-module references use **string-based FKs** (`ForeignKey("organisation.id")`) so no module imports another's models just for a relationship.
 - Migrations autogenerate cleanly because `alembic/env.py` **pins `search_path` to `public`** (the PostGIS image installs tiger/topology extensions whose schemas would otherwise leak into autogenerate) and uses GeoAlchemy2's alembic helpers.
@@ -202,7 +203,7 @@ Open **http://localhost:9000**.
 
 **Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** Reviews (§7.6), Waitlist (§7.7), provider Comms + Analytics (§8.5/§8.6), and the **background scheduler/worker** (§7.5/§7.7) are done. The next payment-free P1 slices:
 
-1. **Attendance check-in (§8.3 "tap to mark attended")** and **saved-kids / multi-guardian polish (§7.3 P1)** — small, self-contained product slices.
+1. **Saved-kids / multi-guardian polish (§7.3 P1)** — multiple guardians per family, saved-kid improvements. Small, self-contained.
 2. **Automated "what to bring" T-24h (§8.5)** — now unblocked by the scheduler; needs a stored per-session "what to bring" field, then add a T-24h job that sends it (reuse the comms/reminder plumbing).
 3. **Search-impression / funnel instrumentation (§13)** — event taxonomy is specced; completes the analytics "search impressions" gap.
 
@@ -227,8 +228,8 @@ apps/api/
     modules/payments/core/gateway.py         # PaymentGateway + FakeGateway
     modules/notifications/core/{gateway,ical}.py
     worker.py                                  # background maintenance runner
-  alembic/versions/*.py                        # 8 migrations
-  tests/test_*.py                              # 23 files, 114 tests
+  alembic/versions/*.py                        # 9 migrations
+  tests/test_*.py                              # 23 files, 118 tests
   scripts/seed_demo.py                         # demo data (admin + provider + sessions + reviews + waitlist)
 apps/web/
   src/lib/{api,types,format,jwt,sessionMemo}.ts
