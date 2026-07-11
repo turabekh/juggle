@@ -20,6 +20,7 @@ from juggle.modules.payments.ui import router as payments_router
 from juggle.modules.reviews.ui import router as reviews_router
 from juggle.modules.roster.ui import router as roster_router
 from juggle.modules.search.ui import router as search_router
+from juggle.modules.waitlist.ui import router as waitlist_router
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -31,6 +32,7 @@ for _router in (
     booking_router,
     payments_router,
     reviews_router,
+    waitlist_router,
     roster_router,
     notifications_router,
     search_router,

@@ -28,6 +28,7 @@ KEY_RELIABILITY_CANCELLATION_PENALTY = "reliability_cancellation_penalty"
 KEY_SEARCH_DEFAULT_RADIUS_KM = "search_default_radius_km"
 KEY_PAYOUT_DELAY_DAYS = "payout_delay_days"
 KEY_IMPERSONATION_TTL_MINUTES = "impersonation_ttl_minutes"
+KEY_WAITLIST_CLAIM_WINDOW_MINUTES = "waitlist_claim_window_minutes"
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,10 @@ REGISTRY: dict[str, SettingSpec] = {
     ),
     KEY_IMPERSONATION_TTL_MINUTES: SettingSpec(
         KEY_IMPERSONATION_TTL_MINUTES, 30, int, 5, 480, "Impersonation session lifetime (minutes)"
+    ),
+    KEY_WAITLIST_CLAIM_WINDOW_MINUTES: SettingSpec(
+        KEY_WAITLIST_CLAIM_WINDOW_MINUTES, 240, int, 15, 2880,
+        "Waitlist offer claim window (minutes)",
     ),
 }
 
@@ -193,3 +198,7 @@ def payout_delay_days(db: Session) -> int:
 
 def impersonation_ttl_minutes(db: Session) -> int:
     return int(get_value(db, KEY_IMPERSONATION_TTL_MINUTES))
+
+
+def waitlist_claim_window_minutes(db: Session) -> int:
+    return int(get_value(db, KEY_WAITLIST_CLAIM_WINDOW_MINUTES))

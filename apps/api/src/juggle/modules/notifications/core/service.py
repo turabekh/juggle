@@ -19,6 +19,7 @@ from juggle.modules.notifications.core.schemas import ConfirmationSession
 
 KIND_BOOKING_CONFIRMATION = "booking_confirmation"
 KIND_SESSION_CANCELLATION = "session_cancellation"
+KIND_WAITLIST_OFFER = "waitlist_offer"
 
 
 def _money(cents: int) -> str:
@@ -114,6 +115,34 @@ def notify_session_cancellation(
         kind=KIND_SESSION_CANCELLATION,
         subject=subject,
         detail={"refunded": refunded},
+    )
+
+
+def notify_waitlist_offer(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    to_email: str,
+    session_title: str,
+    starts_at: datetime,
+    claim_deadline: datetime,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    subject = f"A seat opened up: {session_title}"
+    body = (
+        f"Good news — a seat has become available for {session_title} "
+        f"({starts_at:%a %d %b, %I:%M%p}).\n\n"
+        f"It's held for you until {claim_deadline:%a %d %b, %I:%M%p}. "
+        "Claim it from your waitlist before then, or it passes to the next family."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(
+        db,
+        user_id=user_id,
+        to_email=to_email,
+        kind=KIND_WAITLIST_OFFER,
+        subject=subject,
+        detail={"claim_deadline": claim_deadline.isoformat()},
     )
 
 
