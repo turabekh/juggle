@@ -131,6 +131,47 @@
         </div>
       </section>
 
+      <!-- Insights (PRD §8.6) -->
+      <section v-if="analytics" class="q-mt-xl">
+        <h2 class="text-h6 q-mb-sm">Insights</h2>
+        <div class="jg-stats">
+          <div class="jg-card jg-stat">
+            <div class="jg-stat__num">{{ (analytics.fill_rate * 100).toFixed(0) }}%</div>
+            <div class="jg-stat__label">Seats filled</div>
+            <div class="jg-faint text-caption">
+              {{ analytics.booked_total }}/{{ analytics.capacity_total }} seats
+            </div>
+          </div>
+          <div class="jg-card jg-stat">
+            <div class="jg-stat__num">{{ money(analytics.revenue_cents) }}</div>
+            <div class="jg-stat__label">Bookings revenue</div>
+            <div class="jg-faint text-caption">
+              {{ analytics.bookings }} {{ analytics.bookings === 1 ? 'booking' : 'bookings' }}
+            </div>
+          </div>
+          <div class="jg-card jg-stat">
+            <div class="jg-stat__num">{{ analytics.families.total }}</div>
+            <div class="jg-stat__label">Families</div>
+            <div class="jg-faint text-caption">
+              {{ analytics.families.returning }} returning · {{ analytics.families.new }} new
+            </div>
+          </div>
+        </div>
+
+        <div v-if="analytics.programs.length" class="jg-list q-mt-md">
+          <div v-for="p in analytics.programs" :key="p.program_id" class="jg-card jg-listrow">
+            <div>
+              <div class="text-weight-600">{{ p.title }}</div>
+              <div class="jg-faint text-caption">
+                {{ p.booked_total }}/{{ p.capacity_total }} seats ·
+                {{ (p.fill_rate * 100).toFixed(0) }}% full
+              </div>
+            </div>
+            <div class="text-weight-600">{{ money(p.revenue_cents) }}</div>
+          </div>
+        </div>
+      </section>
+
       <!-- Reviews (PRD §7.6) -->
       <section class="q-mt-xl">
         <div class="row items-center q-gutter-sm q-mb-sm">
@@ -265,7 +306,16 @@ import EmptyState from '@/components/EmptyState.vue'
 import StarRating from '@/components/StarRating.vue'
 import { api, apiError } from '@/lib/api'
 import { CATEGORIES, categoryMeta, dayLabel, money } from '@/lib/format'
-import type { InsuranceDoc, Org, Payout, Program, Review, Venue, WwccRecord } from '@/lib/types'
+import type {
+  InsuranceDoc,
+  Org,
+  OrgAnalytics,
+  Payout,
+  Program,
+  Review,
+  Venue,
+  WwccRecord,
+} from '@/lib/types'
 
 const props = defineProps<{ id: string }>()
 const $q = useQuasar()
@@ -277,6 +327,7 @@ const wwcc = ref<WwccRecord[]>([])
 const insurance = ref<InsuranceDoc[]>([])
 const payouts = ref<Payout[]>([])
 const reviews = ref<Review[]>([])
+const analytics = ref<OrgAnalytics | null>(null)
 const saving = ref(false)
 const savingAbn = ref(false)
 const abnDraft = ref('')
@@ -326,6 +377,11 @@ async function load(): Promise<void> {
         api.payments.payouts(props.id),
         api.reviews.forProvider(props.id),
       ])
+    try {
+      analytics.value = await api.analytics.org(props.id)
+    } catch {
+      analytics.value = null // non-fatal
+    }
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
   }
@@ -463,4 +519,15 @@ onMounted(load)
   background: #fafbfd;
   border-radius: 0 10px 10px 0;
 }
+.jg-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 599px) {
+  .jg-stats { grid-template-columns: 1fr; }
+}
+.jg-stat { padding: 16px 18px; }
+.jg-stat__num { font-size: 26px; font-weight: 700; line-height: 1.1; }
+.jg-stat__label { font-weight: 600; margin-top: 2px; }
 </style>

@@ -7,6 +7,7 @@ import type {
   AuditEvent,
   Availability,
   Booking,
+  Broadcast,
   CatalogSession,
   Child,
   ChildCreate,
@@ -20,6 +21,7 @@ import type {
   Order,
   Org,
   OrgAdmin,
+  OrgAnalytics,
   OrgStatus,
   OrgVerifications,
   Payout,
@@ -337,6 +339,28 @@ export const api = {
         approve,
         reason,
       })
+      return data
+    },
+  },
+  comms: {
+    async broadcast(
+      sessionId: string,
+      payload: { subject: string; body: string; template_key?: string | null },
+    ): Promise<Broadcast> {
+      const { data } = await http.post<Broadcast>(
+        `/comms/sessions/${sessionId}/broadcast`,
+        payload,
+      )
+      return data
+    },
+    async history(sessionId: string): Promise<Broadcast[]> {
+      const { data } = await http.get<Broadcast[]>(`/comms/sessions/${sessionId}/broadcasts`)
+      return data
+    },
+  },
+  analytics: {
+    async org(organisationId: string): Promise<OrgAnalytics> {
+      const { data } = await http.get<OrgAnalytics>(`/analytics/organisations/${organisationId}`)
       return data
     },
   },

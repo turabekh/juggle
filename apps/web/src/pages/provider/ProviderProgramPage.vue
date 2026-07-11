@@ -57,6 +57,7 @@
             </template>
             <template v-else>
               <q-btn flat dense no-caps color="primary" icon="groups" label="Roster" @click="openRoster(s)" />
+              <q-btn flat dense no-caps color="primary" icon="campaign" label="Message" @click="openBroadcast(s)" />
               <q-btn flat dense no-caps color="negative" icon="cancel" label="Cancel" @click="confirmCancel(s)" />
             </template>
           </div>
@@ -121,6 +122,39 @@
         </q-list>
       </q-card>
     </q-dialog>
+
+    <!-- Broadcast (message families) dialog -->
+    <q-dialog v-model="showBroadcast">
+      <q-card style="min-width: 460px; max-width: 540px; border-radius: 18px">
+        <q-card-section>
+          <div class="text-h6">Message families</div>
+          <div class="jg-faint text-caption">
+            Sent to every family with a confirmed booking on this session.
+          </div>
+        </q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-select
+            v-model="broadcastTemplate" outlined dense emit-value map-options
+            :options="templateOptions" label="Template"
+            @update:model-value="applyTemplate"
+          />
+          <q-input v-model="broadcastForm.subject" outlined dense label="Subject" />
+          <q-input
+            v-model="broadcastForm.body" outlined type="textarea" autogrow
+            label="Message" :rules="[(v) => !!v.trim() || 'Write a short message']"
+          />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated no-caps color="primary" icon="send" label="Send to families"
+            :loading="sending"
+            :disable="!broadcastForm.subject.trim() || !broadcastForm.body.trim()"
+            @click="sendBroadcast"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
@@ -146,6 +180,62 @@ const showRoster = ref(false)
 const roster = ref<RosterOut | null>(null)
 const waitlistCounts = ref<Record<string, SessionWaitlist>>({})
 let rosterSessionId = ''
+
+// --- Broadcast / message families (PRD §8.5) ---
+const TEMPLATES = [
+  {
+    key: 'what_to_bring',
+    label: 'What to bring',
+    subject: 'What to bring',
+    body: 'Please pack a hat, sunscreen, a labelled water bottle, and morning tea. See you soon!',
+  },
+  {
+    key: 'reminder',
+    label: 'Friendly reminder',
+    subject: 'See you soon!',
+    body: 'Just a reminder that your session is coming up. Drop-off is at the venue at the listed start time.',
+  },
+  { key: 'update', label: 'An update', subject: 'An update about your session', body: '' },
+  { key: 'custom', label: 'Custom message', subject: '', body: '' },
+]
+const templateOptions = TEMPLATES.map((t) => ({ label: t.label, value: t.key }))
+const showBroadcast = ref(false)
+const sending = ref(false)
+const broadcastTemplate = ref('what_to_bring')
+const broadcastForm = reactive({ subject: '', body: '' })
+let broadcastSessionId = ''
+
+function applyTemplate(key: string): void {
+  const t = TEMPLATES.find((x) => x.key === key)
+  if (t) Object.assign(broadcastForm, { subject: t.subject, body: t.body })
+}
+
+function openBroadcast(s: CatalogSession): void {
+  broadcastSessionId = s.id
+  broadcastTemplate.value = 'what_to_bring'
+  applyTemplate('what_to_bring')
+  showBroadcast.value = true
+}
+
+async function sendBroadcast(): Promise<void> {
+  sending.value = true
+  try {
+    const res = await api.comms.broadcast(broadcastSessionId, {
+      subject: broadcastForm.subject.trim(),
+      body: broadcastForm.body.trim(),
+      template_key: broadcastTemplate.value,
+    })
+    showBroadcast.value = false
+    $q.notify({
+      type: 'positive',
+      message: `Sent to ${res.recipient_count} ${res.recipient_count === 1 ? 'family' : 'families'}.`,
+    })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not send message') })
+  } finally {
+    sending.value = false
+  }
+}
 
 const dayTypeOptions = [
   { label: 'Half day', value: 'half_day' },

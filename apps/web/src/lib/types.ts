@@ -419,3 +419,46 @@ export interface SessionWaitlist {
   waiting: number
   offered: number
 }
+
+// --- Provider comms + analytics (PRD §8.5 / §8.6) ----------------------------
+
+export interface Broadcast {
+  id: string
+  session_id: string
+  template_key: string | null
+  subject: string
+  body: string
+  recipient_count: number
+  created_at: string
+}
+
+export interface ProgramStat {
+  program_id: string
+  title: string
+  category: string
+  status: string
+  sessions: number
+  capacity_total: number
+  booked_total: number
+  fill_rate: number
+  revenue_cents: number
+}
+
+export interface FamilyMix {
+  total: number
+  new: number
+  returning: number
+}
+
+export interface OrgAnalytics {
+  organisation_id: string
+  revenue_cents: number
+  bookings: number
+  sessions_total: number
+  published_sessions: number
+  capacity_total: number
+  booked_total: number
+  fill_rate: number
+  families: FamilyMix
+  programs: ProgramStat[]
+}
