@@ -22,7 +22,7 @@ from juggle.modules.identity.core.schemas import ChildCreate
 from juggle.modules.inventory.core import service as inventory_service
 from juggle.modules.notifications.core.gateway import get_email_gateway
 from juggle.modules.org.core import service as org_service
-from juggle.modules.org.core.models import OrgStatus
+from juggle.modules.org.core.models import OrgStatus, VerificationStatus
 from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import get_payment_gateway
 from juggle.modules.payments.core.models import PayoutStatus
@@ -77,6 +77,23 @@ def _seed() -> None:
             db, name="Sunshine Kids Co", owner_user_id=provider.id
         )
         org_service.set_status(db, org.id, OrgStatus.approved)
+        # A fully-verified provider so the §7.2 trust badges show on listings.
+        org_service.set_abn(db, org.id, "51824753556")
+        wwcc = org_service.add_wwcc(
+            db,
+            org_id=org.id,
+            staff_name="Demo Coach",
+            wwcc_number="WWC1234567",
+            expiry_date=date(2030, 1, 1),
+        )
+        org_service.set_wwcc_status(db, wwcc.id, VerificationStatus.verified)
+        insurance = org_service.add_insurance(
+            db,
+            org_id=org.id,
+            file_ref="https://example.com/liability-cert.pdf",
+            expiry_date=date(2030, 1, 1),
+        )
+        org_service.set_insurance_status(db, insurance.id, VerificationStatus.verified)
 
         venues = [
             catalog_service.create_venue(

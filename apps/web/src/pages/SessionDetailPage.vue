@@ -18,6 +18,13 @@
         <h1 class="text-h4 q-mt-sm q-mb-xs">{{ session.title }}</h1>
         <div class="jg-muted text-subtitle1">by {{ session.organisation_name }}</div>
 
+        <!-- Provider trust badges (PRD §7.2) -->
+        <div v-if="badges.length" class="jg-badges q-mt-sm">
+          <span v-for="b in badges" :key="b.label" class="jg-vbadge">
+            <q-icon :name="b.icon" size="14px" /> {{ b.label }}
+          </span>
+        </div>
+
         <div class="jg-detail__facts jg-card q-mt-lg">
           <div class="jg-fact">
             <q-icon name="event" color="primary" />
@@ -294,6 +301,16 @@ const savingChild = ref(false)
 const newChild = reactive({ first_name: '', date_of_birth: '' })
 
 const cat = computed(() => categoryMeta(session.value?.category ?? 'other'))
+const badges = computed(() => {
+  const s = session.value
+  if (!s) return []
+  const out: { label: string; icon: string }[] = []
+  if (s.provider_approved) out.push({ label: 'Verified provider', icon: 'verified' })
+  if (s.provider_wwcc_verified) out.push({ label: 'WWCC on file', icon: 'badge' })
+  if (s.provider_insurance_verified) out.push({ label: 'Insured', icon: 'shield' })
+  if (s.provider_abn) out.push({ label: 'ABN registered', icon: 'business' })
+  return out
+})
 const seatsLeft = computed(() => seatsLive.value ?? session.value?.seats_remaining ?? 0)
 const addLabel = computed(() =>
   selectedChildIds.value.length > 1
@@ -545,4 +562,16 @@ onMounted(load)
   border-radius: 0 10px 10px 0;
 }
 .jg-waitlist { display: flex; flex-direction: column; gap: 8px; }
+.jg-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.jg-vbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--jg-positive, #21a35a);
+  background: rgba(33, 163, 90, 0.1);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
 </style>

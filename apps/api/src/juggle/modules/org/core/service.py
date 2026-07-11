@@ -64,6 +64,43 @@ def get_organisation(session: Session, org_id: uuid.UUID) -> Organisation | None
     return session.get(Organisation, org_id)
 
 
+def verification_badges(session: Session, org_id: uuid.UUID) -> dict[str, bool]:
+    """Public trust signals for a provider (PRD §7.2): approved by ops, ABN on
+    file, and at least one *verified* WWCC / insurance record."""
+    org = session.get(Organisation, org_id)
+    if org is None:
+        return {
+            "approved": False,
+            "abn_on_file": False,
+            "wwcc_verified": False,
+            "insurance_verified": False,
+        }
+    wwcc_verified = (
+        session.scalar(
+            select(WwccRecord.id).where(
+                WwccRecord.organisation_id == org_id,
+                WwccRecord.status == VerificationStatus.verified,
+            )
+        )
+        is not None
+    )
+    insurance_verified = (
+        session.scalar(
+            select(InsuranceDoc.id).where(
+                InsuranceDoc.organisation_id == org_id,
+                InsuranceDoc.status == VerificationStatus.verified,
+            )
+        )
+        is not None
+    )
+    return {
+        "approved": org.status is OrgStatus.approved,
+        "abn_on_file": bool(org.abn),
+        "wwcc_verified": wwcc_verified,
+        "insurance_verified": insurance_verified,
+    }
+
+
 def list_user_orgs(session: Session, user_id: uuid.UUID) -> list[Organisation]:
     """Organisations the user is a member of (their provider dashboard)."""
     return list(

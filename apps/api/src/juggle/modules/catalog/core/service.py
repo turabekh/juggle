@@ -305,6 +305,7 @@ def get_public_session_detail(
         db, event_type="listing_viewed", props={"session_id": str(session.id)}
     )
     org = org_service.get_organisation(db, program.organisation_id)
+    badges = org_service.verification_badges(db, program.organisation_id)
     return SessionDetailOut(
         id=session.id,
         program_id=session.program_id,
@@ -327,4 +328,8 @@ def get_public_session_detail(
         venue_name=venue.name,
         suburb=venue.suburb,
         postcode=venue.postcode,
+        provider_approved=badges["approved"],
+        provider_abn=badges["abn_on_file"],
+        provider_wwcc_verified=badges["wwcc_verified"],
+        provider_insurance_verified=badges["insurance_verified"],
     )

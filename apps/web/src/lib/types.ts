@@ -88,6 +88,10 @@ export interface SessionDetail {
   venue_name: string
   suburb: string | null
   postcode: string | null
+  provider_approved: boolean
+  provider_abn: boolean
+  provider_wwcc_verified: boolean
+  provider_insurance_verified: boolean
 }
 
 export interface Hold {

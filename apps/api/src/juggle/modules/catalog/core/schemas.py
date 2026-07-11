@@ -107,3 +107,8 @@ class SessionDetailOut(SessionOut):
     venue_name: str
     suburb: str | None
     postcode: str | None
+    # Provider trust signals (PRD §7.2 verification badges).
+    provider_approved: bool = False
+    provider_abn: bool = False
+    provider_wwcc_verified: bool = False
+    provider_insurance_verified: bool = False
