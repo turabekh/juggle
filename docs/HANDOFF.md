@@ -8,9 +8,12 @@ _Last updated: 2026-07-11. Read this first, then `CLAUDE.md` (engineering conven
 > - **Provider comms (PRD §8.5):** `comms` module — template-guarded broadcast to a session's confirmed families via the notifications gateway; records outbound history.
 > - **Provider analytics (PRD §8.6):** `analytics` module (no table) — fill rate, gross revenue, new-vs-returning family mix, per-program rollup. (Search impressions deferred — needs event instrumentation.)
 > - **Background scheduler (PRD §7.5/§7.7):** `scheduler` module — one idempotent maintenance tick: reclaim expired holds, sweep the waitlist (offer/expire), and send **T-48h/T-3h pre-session reminders** (deduped by a `session_reminder` marker). Driven by a **worker** (`make worker` / `make worker-loop`, `python -m juggle.worker [--loop]`, or the compose `worker` service) or the admin **Operations** page (`POST /scheduler/run`). Payout release stays manual (payments deferred).
-> - **Attendance check-in (PRD §8.3):** the `roster` module gained its first table — morning-of **tap-to-check-in** (`Attendance`, keyed by booking_child_id). Roster rows carry `attended`/`attended_at` + an `attended_count`; CSV has an `attended` column; provider roster dialog toggles it. All browser/worker-verified.
+> - **Attendance check-in (PRD §8.3):** the `roster` module gained its first table — morning-of **tap-to-check-in** (`Attendance`, keyed by booking_child_id). Roster rows carry `attended`/`attended_at` + an `attended_count`; CSV has an `attended` column; provider roster dialog toggles it.
+> - **Multiple guardians per family (PRD §7.3):** `identity.GuardianLink` (invite → accept; symmetric access once accepted). `list_children` + booking checkout/`list_bookings` use `family_guardian_ids`; account page "Family" section.
+> - **Automated "what to bring" T-24h (PRD §8.5):** sessions carry an optional `what_to_bring`; a scheduler T-24h job emails it to confirmed families, deduped (SessionReminder window `wtb`).
+> - **Funnel instrumentation (PRD §13):** bottom-tier `events` module (`analytics_event`, no child PII) records the 8-stage taxonomy from search/catalog/booking/org/inventory; admin **Funnel** page via `GET /analytics/funnel`. All browser-verified.
 >
-> **18 domain modules** now; layering `scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ …`. See §5.
+> **19 domain modules** now; layering `scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ … ▸ audit ▸ events`. See §5.
 
 ---
 
@@ -58,12 +61,12 @@ Open **http://localhost:9000**.
 
 ## 3. Current state (facts)
 
-- **36 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 118 pytest passing** (13 reviews + 10 waitlist + 4 comms + 3 analytics + 5 scheduler + 4 attendance), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
+- **39 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
+- **Backend: 129 pytest passing** (reviews/waitlist/comms/analytics/scheduler/attendance + 6 co-guardian + 3 funnel + 2 what-to-bring), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
 - **Frontend: vue-tsc + vite build clean.**
-- **9 Alembic migrations**, head = `cb8c9fc8b4eb` (add_attendance). Chain: initial → payment idempotency_key → booking seat_hold_id → notification_log → review → waitlist_entry → broadcast → session_reminder → attendance. The chain round-trips (down to base and back).
-- **18 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`, `scheduler`).
-- **Background worker**: `make worker` (one tick) / `make worker-loop` (every 5 min).
+- **12 Alembic migrations**, head = `e08fed049dda` (add_analytics_event). Recent chain tail: … → attendance → guardian_link → session.what_to_bring → analytics_event. The chain round-trips (down to base and back).
+- **19 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`, `scheduler`, `events`).
+- **Background worker**: `make worker` (one tick) / `make worker-loop` (every 5 min); also the compose `worker` service.
 - Stack: FastAPI + SQLAlchemy 2 + PostgreSQL/PostGIS + Alembic (`apps/api`); Vite + Vue 3 (TS) + Quasar SPA (`apps/web`).
 
 ---
@@ -71,14 +74,16 @@ Open **http://localhost:9000**.
 ## 4. Architecture
 
 ### Backend module layering (enforced by import-linter)
-18 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
+19 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
 
 1. **`core` never imports FastAPI/Starlette.**
 2. **Strict acyclic layering** (high→low — a module may import only modules **below** it):
 
    ```
-   scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ payments ▸ inventory ▸ catalog ▸ org ▸ identity ▸ notifications ▸ flags ▸ config ▸ audit
+   scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ payments ▸ inventory ▸ catalog ▸ org ▸ identity ▸ notifications ▸ flags ▸ config ▸ audit ▸ events
    ```
+
+   `events` sits at the very bottom (like `audit`): a write-only funnel log that every higher module emits to (`events.record`) with non-PII context — search/catalog/booking/org/inventory all instrument their key steps; the admin funnel read lives in `analytics` (which is above `events`). (No `ui` router — reads go through `analytics`.)
 
    `analytics` (pure read rollup, no table) and `comms` (provider broadcasts) sit near the top with `roster` — both org-member-gated, both read down into `booking`/`catalog`; `comms` also fans out via `notifications`.
    `scheduler` is the topmost module: it **orchestrates** lower modules on a periodic tick (`inventory.reclaim_all_expired`, `waitlist.process_all`, reminders) — pure domain logic driven by `src/juggle/worker.py` (not a module) or `POST /scheduler/run`.
@@ -121,7 +126,7 @@ Open **http://localhost:9000**.
 ### Parent marketplace (public + guardian)
 - **Discovery** (`GET /search/sessions`, public): PostGIS radius from lat/lng (`ST_DWithin`, distance-ordered) or suburb/postcode fallback; filters date/child-age/category/price/session-type; `available_only`; only published + future sessions; live `seats_remaining`.
 - **Listing detail** (`GET /catalog/sessions/{id}`, public, published-only): enriched with title/org/venue/description.
-- **Auth**: signup/login (JWT), `/me`. **Child profiles** (data-minimised: first name + DOB only, no surname/photos).
+- **Auth**: signup/login (JWT), `/me`. **Child profiles** (data-minimised: first name + DOB only, no surname/photos). **Co-guardians (P1, §7.3)**: invite another parent by email → they accept → both share the family's kids and see each other's bookings ("Family" section on the account page).
 - **Booking**: hold seats (TTL) → cart → checkout (idempotent, per-cart key) → confirm/cancel. Age-gating + child-count checks at checkout.
 - **My bookings**, **Add to calendar** (.ics download), **Notifications inbox** (bell in header).
 - **Reviews (P1, PRD §7.6)**: after a session finishes, **"Leave a review"** on the booking (1–5★ + text); the body is **auto-screened for the booking's child names** (blocked at submit — no child PII in content); reviews land in a **moderation queue** and only appear publicly once approved. **Listing detail** shows the program's published reviews + rating summary (with a "Verified booking" badge and any provider reply). One review per booking (DB `UNIQUE`); rating bound 1–5 by DB `CHECK`.
@@ -146,7 +151,8 @@ Open **http://localhost:9000**.
 - **Impersonation**: user email/name search → **view-as** (read-only) / **act-as** (mutations audited) → scoped time-boxed token → consumer app with a **persistent support banner** → exit restores admin. Can't impersonate admins/self; ended sessions revoke immediately.
 - **Bookings refund** (`POST /admin/payments/{id}/refund`).
 - **Review moderation** (`/admin/reviews`): pending/published/rejected queue; **approve** (→published) / **reject-with-reason** (audited). Providers reply from their org console; published reviews aggregate to a provider/program rating.
-- **Operations** (`/admin/operations`): **Run maintenance now** triggers one scheduler tick (`POST /scheduler/run`) and shows the summary — reminders sent, waitlist offers made/expired/queues checked, seat holds reclaimed. A worker normally runs this on a loop.
+- **Operations** (`/admin/operations`): **Run maintenance now** triggers one scheduler tick (`POST /scheduler/run`) and shows the summary — reminders sent (incl. T-24h "what to bring"), waitlist offers made/expired/queues checked, seat holds reclaimed. A worker normally runs this on a loop.
+- **Funnel** (`/admin/funnel`, P1 §13): windowed bar breakdown of the product event taxonomy (searches → listings viewed → checkouts started/completed → cancelled; plus sessions filled, listings published, provider signups). Reads `analytics_event` via `GET /analytics/funnel`.
 
 ### Money & comms
 - **Payments**: Stripe-style intent → confirm; 10% application fee (from config); refunds; **payouts**: net (gross − fee) accrues per session on confirm, due at `session_end + payout_delay`, released by admin "Run payouts" (transfer + mark paid).
@@ -156,7 +162,7 @@ Open **http://localhost:9000**.
 
 ## 6. Data model & migrations
 
-18 initial tables + 2 added columns + 6 tables (`notification_log`, `review`, `waitlist_entry`, `broadcast`, `session_reminder`, `attendance`), across modules. Highlights:
+18 initial tables + 3 added columns (`what_to_bring` on `session`) + 8 tables (`notification_log`, `review`, `waitlist_entry`, `broadcast`, `session_reminder`, `attendance`, `guardian_link`, `analytics_event`), across modules. Highlights:
 - `user_account`, `child` (identity); `organisation`, `org_member`, `wwcc_record`, `insurance_doc` (org); `venue` (PostGIS `geography(POINT,4326)` + GiST index), `program`, `session` (catalog); `seat_hold` (inventory); `booking`, `booking_child` (booking); `payment`, `payout` (payments); `review` (reviews — `UNIQUE(booking_id)`, `CHECK(rating 1..5)`, native `review_status` enum); `waitlist_entry` (waitlist — identity `seq` for FIFO, partial `UNIQUE` on active status per guardian/session); `impersonation_session` (admin); `platform_setting` (versioned), `feature_flag`, `audit_event`, `notification_log`.
 - Cross-module references use **string-based FKs** (`ForeignKey("organisation.id")`) so no module imports another's models just for a relationship.
 - Migrations autogenerate cleanly because `alembic/env.py` **pins `search_path` to `public`** (the PostGIS image installs tiger/topology extensions whose schemas would otherwise leak into autogenerate) and uses GeoAlchemy2's alembic helpers.
@@ -195,17 +201,17 @@ Open **http://localhost:9000**.
 - **No SSR/PWA** (PRD wants SSR for SEO on listing pages + installable PWA). Currently SPA.
 - **No user-search-by-child / duplicate-account merge / data-deletion workflow** (PRD §10.2 admin niceties).
 - **Timezone handling** is naive (see gotcha #6).
-- **P1 features not built**: reviews, waitlists, SMS, promo codes, saved-kid improvements, provider analytics, embeddable widget, birthday-party vertical (P2).
+- **P1 features not built**: SMS (Twilio), promo codes, Google/Apple SSO, embeddable widget (P2), birthday-party vertical (P2). (Reviews, waitlists, provider analytics, comms, multi-guardian, and funnel instrumentation are now built.)
 
 ---
 
 ## 10. Suggested next work (roughly prioritized)
 
-**Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** Reviews (§7.6), Waitlist (§7.7), provider Comms + Analytics (§8.5/§8.6), and the **background scheduler/worker** (§7.5/§7.7) are done. The next payment-free P1 slices:
+**Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** The payment-free P1 surface is now largely built: Reviews (§7.6), Waitlist (§7.7), Comms + Analytics (§8.5/§8.6), scheduler/worker (§7.5/§7.7), attendance check-in (§8.3), multiple guardians (§7.3), automated T-24h "what to bring" (§8.5), and funnel instrumentation (§13). Remaining payment-free slices:
 
-1. **Saved-kids / multi-guardian polish (§7.3 P1)** — multiple guardians per family, saved-kid improvements. Small, self-contained.
-2. **Automated "what to bring" T-24h (§8.5)** — now unblocked by the scheduler; needs a stored per-session "what to bring" field, then add a T-24h job that sends it (reuse the comms/reminder plumbing).
-3. **Search-impression / funnel instrumentation (§13)** — event taxonomy is specced; completes the analytics "search impressions" gap.
+1. **SSR for listing pages (§7.1)** — the last MVP-spec'd frontend-infra gap (SEO); currently SPA.
+2. **Per-cycle funnel dashboards / conversion rates (§13)** — the `analytics_event` log is captured; build richer views on top if wanted.
+3. **Google/Apple SSO (§7.3)** and **SMS via Twilio behind a gateway (§8.5)** — need external integrations.
 
 Deferred (need payments or external integrations, revisit later):
 - **Payout auto-release** in the scheduler (payment-touching — currently manual admin "Run due payouts").
@@ -223,13 +229,13 @@ apps/api/
   src/juggle/
     main.py, api.py, db.py, common.py, security.py, deps.py, models.py, settings.py
     modules/<name>/core/{models,schemas,service}.py  +  ui/routes.py
-      identity org catalog inventory booking payments roster search
-      reviews waitlist comms analytics scheduler admin config flags audit notifications
+      identity org catalog inventory booking payments roster search reviews
+      waitlist comms analytics scheduler events admin config flags audit notifications
     modules/payments/core/gateway.py         # PaymentGateway + FakeGateway
     modules/notifications/core/{gateway,ical}.py
     worker.py                                  # background maintenance runner
-  alembic/versions/*.py                        # 9 migrations
-  tests/test_*.py                              # 23 files, 118 tests
+  alembic/versions/*.py                        # 12 migrations
+  tests/test_*.py                              # 26 files, 129 tests
   scripts/seed_demo.py                         # demo data (admin + provider + sessions + reviews + waitlist)
 apps/web/
   src/lib/{api,types,format,jwt,sessionMemo}.ts
