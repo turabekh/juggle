@@ -100,15 +100,32 @@
     <q-dialog v-model="showRoster">
       <q-card style="min-width: 520px; border-radius: 18px">
         <q-card-section class="row items-center">
-          <div class="text-h6">Roster ({{ roster?.count ?? 0 }})</div>
+          <div>
+            <div class="text-h6">Roster ({{ roster?.count ?? 0 }})</div>
+            <div v-if="roster?.count" class="jg-faint text-caption">
+              {{ roster.attended_count }} of {{ roster.count }} checked in
+            </div>
+          </div>
           <q-space />
           <q-btn flat dense no-caps icon="download" label="CSV" :disable="!roster?.count" @click="downloadCsv" />
           <q-btn flat round dense icon="close" v-close-popup />
         </q-card-section>
         <q-list separator>
-          <q-item v-for="r in roster?.rows ?? []" :key="r.booking_id">
+          <q-item v-for="r in roster?.rows ?? []" :key="r.booking_child_id" tag="label" v-ripple>
+            <q-item-section side>
+              <q-checkbox
+                :model-value="r.attended"
+                color="positive"
+                checked-icon="how_to_reg"
+                unchecked-icon="person"
+                @update:model-value="(v) => setAttendance(r, v)"
+              />
+            </q-item-section>
             <q-item-section>
-              <q-item-label>{{ r.child_first_name }} · {{ r.age }} yrs</q-item-label>
+              <q-item-label :class="{ 'text-positive text-weight-600': r.attended }">
+                {{ r.child_first_name }} · {{ r.age }} yrs
+                <span v-if="r.attended" class="text-caption">· checked in</span>
+              </q-item-label>
               <q-item-label caption>
                 <span v-if="r.medical_notes">⚕ {{ r.medical_notes }} · </span>
                 {{ r.emergency_contact_name || 'no emergency contact' }}
@@ -350,6 +367,16 @@ async function openRoster(s: CatalogSession): Promise<void> {
     roster.value = await api.roster.forSession(s.id)
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
+  }
+}
+
+async function setAttendance(row: RosterOut['rows'][number], attended: boolean): Promise<void> {
+  try {
+    await api.roster.markAttendance(rosterSessionId, row.booking_child_id, attended)
+    row.attended = attended
+    if (roster.value) roster.value.attended_count += attended ? 1 : -1
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not update check-in') })
   }
 }
 

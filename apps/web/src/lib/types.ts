@@ -270,18 +270,28 @@ export interface CatalogSession {
 
 export interface RosterRow {
   booking_id: string
+  booking_child_id: string
   child_first_name: string
   age: number
   medical_notes: string | null
   emergency_contact_name: string | null
   emergency_contact_phone: string | null
   form_answers: Record<string, unknown>
+  attended: boolean
+  attended_at: string | null
 }
 
 export interface RosterOut {
   session_id: string
   count: number
+  attended_count: number
   rows: RosterRow[]
+}
+
+export interface AttendanceOut {
+  booking_child_id: string
+  attended: boolean
+  attended_at: string | null
 }
 
 export interface SessionCancelResult {

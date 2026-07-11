@@ -4,6 +4,7 @@
 import axios, { type AxiosInstance } from 'axios'
 
 import type {
+  AttendanceOut,
   AuditEvent,
   Availability,
   Booking,
@@ -225,6 +226,17 @@ export const api = {
       const { data } = await http.get<string>(`/roster/sessions/${sessionId}/export.csv`, {
         responseType: 'text',
       })
+      return data
+    },
+    async markAttendance(
+      sessionId: string,
+      bookingChildId: string,
+      attended: boolean,
+    ): Promise<AttendanceOut> {
+      const { data } = await http.put<AttendanceOut>(
+        `/roster/sessions/${sessionId}/attendance/${bookingChildId}`,
+        { attended },
+      )
       return data
     },
   },
