@@ -174,7 +174,27 @@ def test_run_endpoint_requires_admin(client: TestClient, make_admin) -> None:
         "waitlist_offers_expired",
         "reminders_sent",
         "what_to_bring_sent",
+        "compliance_expired",
     }
+
+
+def test_expired_wwcc_is_marked_expired(client: TestClient, db: Session) -> None:
+    owner = _signup(client)
+    org_id = client.post(
+        "/api/v1/org", headers=_auth(owner), json={"name": f"Org {uuid.uuid4().hex[:5]}"}
+    ).json()["id"]
+    wwcc = client.post(
+        f"/api/v1/org/{org_id}/wwcc",
+        headers=_auth(owner),
+        json={"staff_name": "Coach", "wwcc_number": "WWC1", "expiry_date": "2020-01-01"},
+    ).json()
+    assert wwcc["status"] == "pending"
+
+    summary = service.run_due_jobs(db, now=datetime.now(UTC))
+    assert summary.compliance_expired >= 1
+
+    after = client.get(f"/api/v1/org/{org_id}/wwcc", headers=_auth(owner)).json()
+    assert after[0]["status"] == "expired"
 
 
 def test_what_to_bring_sent_once(client: TestClient, db: Session) -> None:

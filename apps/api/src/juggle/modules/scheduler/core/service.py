@@ -25,6 +25,7 @@ from juggle.modules.identity.core import service as identity_service
 from juggle.modules.inventory.core import service as inventory_service
 from juggle.modules.notifications.core import service as notifications_service
 from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
+from juggle.modules.org.core import service as org_service
 from juggle.modules.scheduler.core.models import SessionReminder
 from juggle.modules.scheduler.core.schemas import JobSummary
 from juggle.modules.waitlist.core import service as waitlist_service
@@ -168,6 +169,7 @@ def run_due_jobs(
     waitlist_run = waitlist_service.process_all(db)
     reminders_sent = _send_reminders(db, now=now, gateway=gateway)
     what_to_bring_sent = _send_what_to_bring(db, now=now, gateway=gateway)
+    compliance_expired = org_service.expire_due_compliance(db, today=now.date())
 
     return JobSummary(
         holds_reclaimed=holds_reclaimed,
@@ -176,4 +178,5 @@ def run_due_jobs(
         waitlist_offers_expired=waitlist_run.offers_expired,
         reminders_sent=reminders_sent,
         what_to_bring_sent=what_to_bring_sent,
+        compliance_expired=compliance_expired,
     )

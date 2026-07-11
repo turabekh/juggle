@@ -33,7 +33,9 @@
       <div class="jg-card jg-ops__tile">
         <div class="jg-ops__num">{{ last.holds_reclaimed }}</div>
         <div class="jg-ops__label">Seat holds reclaimed</div>
-        <div class="jg-faint text-caption">expired holds returned to inventory</div>
+        <div class="jg-faint text-caption">
+          expired holds returned · {{ last.compliance_expired }} WWCC/insurance expired
+        </div>
       </div>
     </div>
 

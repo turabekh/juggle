@@ -507,4 +507,5 @@ export interface JobSummary {
   waitlist_offers_expired: number
   reminders_sent: number
   what_to_bring_sent: number
+  compliance_expired: number
 }

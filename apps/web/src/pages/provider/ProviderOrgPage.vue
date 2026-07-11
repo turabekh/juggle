@@ -36,7 +36,12 @@
               <div v-for="w in wwcc" :key="w.id" class="jg-vrow">
                 <div>
                   <div class="text-weight-500">{{ w.staff_name }}</div>
-                  <div class="jg-faint text-caption">{{ w.wwcc_number }} · exp {{ w.expiry_date }}</div>
+                  <div class="jg-faint text-caption">
+                  {{ w.wwcc_number }} · exp {{ w.expiry_date }}
+                  <span v-if="expiryWarn(w.expiry_date)" :class="expiryWarn(w.expiry_date)!.cls">
+                    · {{ expiryWarn(w.expiry_date)!.text }}
+                  </span>
+                </div>
                 </div>
                 <q-chip dense square :color="vColor(w.status)" text-color="white" :label="w.status" />
               </div>
@@ -53,7 +58,12 @@
               <div v-for="d in insurance" :key="d.id" class="jg-vrow">
                 <div>
                   <div class="text-weight-500 ellipsis" style="max-width: 220px">{{ d.file_ref }}</div>
-                  <div class="jg-faint text-caption">{{ d.expiry_date ? `exp ${d.expiry_date}` : 'no expiry' }}</div>
+                  <div class="jg-faint text-caption">
+                    {{ d.expiry_date ? `exp ${d.expiry_date}` : 'no expiry' }}
+                    <span v-if="expiryWarn(d.expiry_date)" :class="expiryWarn(d.expiry_date)!.cls">
+                      · {{ expiryWarn(d.expiry_date)!.text }}
+                    </span>
+                  </div>
                 </div>
                 <q-chip dense square :color="vColor(d.status)" text-color="white" :label="d.status" />
               </div>
@@ -358,7 +368,16 @@ function statusColor(s: string): string {
   return { pending: 'warning', approved: 'positive', suspended: 'grey-6' }[s] ?? 'grey'
 }
 function vColor(s: string): string {
-  return { pending: 'warning', verified: 'positive', rejected: 'negative', expired: 'grey-6' }[s] ?? 'grey'
+  return { pending: 'warning', verified: 'positive', rejected: 'negative', expired: 'negative' }[s] ?? 'grey'
+}
+
+// Expiry warning for a compliance doc (PRD §8.1): red if lapsed, amber within 30d.
+function expiryWarn(dateStr: string | null): { text: string; cls: string } | null {
+  if (!dateStr) return null
+  const days = Math.ceil((new Date(`${dateStr}T00:00:00`).getTime() - Date.now()) / 86_400_000)
+  if (days < 0) return { text: 'Expired', cls: 'text-negative text-weight-600' }
+  if (days <= 30) return { text: `Expires in ${days} day(s)`, cls: 'text-warning text-weight-600' }
+  return null
 }
 function payoutColor(s: string): string {
   return { scheduled: 'primary', paid: 'positive', held: 'warning', reversed: 'grey-6' }[s] ?? 'grey'

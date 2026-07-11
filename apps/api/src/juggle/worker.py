@@ -41,7 +41,8 @@ def _log(summary: JobSummary) -> None:
         f"waitlist(processed={summary.waitlist_sessions_processed} "
         f"offered={summary.waitlist_offers_made} expired={summary.waitlist_offers_expired}) "
         f"reminders_sent={summary.reminders_sent} "
-        f"what_to_bring_sent={summary.what_to_bring_sent}",
+        f"what_to_bring_sent={summary.what_to_bring_sent} "
+        f"compliance_expired={summary.compliance_expired}",
         flush=True,
     )
 

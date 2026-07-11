@@ -64,6 +64,33 @@ def get_organisation(session: Session, org_id: uuid.UUID) -> Organisation | None
     return session.get(Organisation, org_id)
 
 
+def expire_due_compliance(session: Session, *, today: date) -> int:
+    """Transition WWCC/insurance whose expiry has passed to ``expired`` (PRD §8.1
+    expiry tracking) — so a lapsed check no longer counts as verified. Returns the
+    number of records expired. Driven by the scheduler each tick."""
+    stale = (VerificationStatus.pending, VerificationStatus.verified)
+    count = 0
+    for record in session.scalars(
+        select(WwccRecord).where(
+            WwccRecord.expiry_date < today, WwccRecord.status.in_(stale)
+        )
+    ):
+        record.status = VerificationStatus.expired
+        count += 1
+    for doc in session.scalars(
+        select(InsuranceDoc).where(
+            InsuranceDoc.expiry_date.is_not(None),
+            InsuranceDoc.expiry_date < today,
+            InsuranceDoc.status.in_(stale),
+        )
+    ):
+        doc.status = VerificationStatus.expired
+        count += 1
+    if count:
+        session.flush()
+    return count
+
+
 def verification_badges(session: Session, org_id: uuid.UUID) -> dict[str, bool]:
     """Public trust signals for a provider (PRD §7.2): approved by ops, ABN on
     file, and at least one *verified* WWCC / insurance record."""

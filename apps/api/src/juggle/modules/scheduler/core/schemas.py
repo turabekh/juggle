@@ -12,3 +12,4 @@ class JobSummary(BaseModel):
     waitlist_offers_expired: int
     reminders_sent: int
     what_to_bring_sent: int
+    compliance_expired: int
