@@ -107,6 +107,7 @@ layers = [
     "juggle.modules.roster",
     "juggle.modules.search",
     "juggle.modules.reviews",
+    "juggle.modules.qanda",
     "juggle.modules.waitlist",
     "juggle.modules.booking",
     "juggle.modules.payments",

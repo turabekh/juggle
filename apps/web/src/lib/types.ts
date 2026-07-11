@@ -419,6 +419,18 @@ export interface ReviewableBooking {
   starts_at: string
 }
 
+// --- Listing Q&A (PRD §7.2) --------------------------------------------------
+
+export interface ListingQuestion {
+  id: string
+  program_id: string
+  body: string
+  answer: string | null
+  answered_at: string | null
+  asker_label: string
+  created_at: string
+}
+
 // --- Waitlist (PRD §7.7) -----------------------------------------------------
 
 export type WaitlistStatus = 'waiting' | 'offered' | 'claimed' | 'expired' | 'cancelled'

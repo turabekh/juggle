@@ -21,6 +21,7 @@ from juggle.modules.inventory.core import models as inventory_models  # noqa: F4
 from juggle.modules.notifications.core import models as notifications_models  # noqa: F401
 from juggle.modules.org.core import models as org_models  # noqa: F401
 from juggle.modules.payments.core import models as payments_models  # noqa: F401
+from juggle.modules.qanda.core import models as qanda_models  # noqa: F401
 from juggle.modules.reviews.core import models as reviews_models  # noqa: F401
 from juggle.modules.roster.core import models as roster_models  # noqa: F401
 from juggle.modules.scheduler.core import models as scheduler_models  # noqa: F401

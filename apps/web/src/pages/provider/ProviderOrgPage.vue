@@ -214,7 +214,52 @@
           Reviews from families appear here once they've attended and a moderator approves them.
         </div>
       </section>
+
+      <!-- Questions (PRD §7.2) -->
+      <section class="q-mt-xl">
+        <div class="row items-center q-gutter-sm q-mb-sm">
+          <h2 class="text-h6 q-my-none">Questions</h2>
+          <q-badge v-if="unansweredCount" color="warning" :label="`${unansweredCount} to answer`" />
+        </div>
+        <div v-if="questions.length" class="jg-list">
+          <article v-for="q in questions" :key="q.id" class="jg-card q-pa-md">
+            <div class="text-weight-600">{{ q.body }}</div>
+            <div class="jg-faint text-caption">asked by {{ q.asker_label }}</div>
+            <div v-if="q.answer" class="jg-review__reply">
+              <div class="jg-faint text-caption text-weight-600">Your answer</div>
+              <p class="q-mt-xs q-mb-none" style="white-space: pre-line">{{ q.answer }}</p>
+            </div>
+            <q-btn
+              v-else flat dense no-caps size="sm" color="primary" icon="reply"
+              label="Answer" class="q-mt-sm" @click="openAnswer(q.id)"
+            />
+          </article>
+        </div>
+        <div v-else class="jg-muted text-caption">
+          Parent questions on your listings show up here to answer.
+        </div>
+      </section>
     </template>
+
+    <!-- Answer a question dialog -->
+    <q-dialog v-model="showAnswer">
+      <q-card style="min-width: 400px; border-radius: 18px">
+        <q-card-section><div class="text-h6">Answer this question</div></q-card-section>
+        <q-card-section>
+          <q-input
+            v-model="answerForm.text" outlined type="textarea" autogrow autofocus
+            label="Your answer" hint="Shown publicly on the listing."
+          />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated no-caps color="primary" label="Post answer"
+            :loading="saving" :disable="!answerForm.text.trim()" @click="postAnswer"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
 
     <!-- Reply to review dialog -->
     <q-dialog v-model="showReply">
@@ -318,6 +363,7 @@ import { api, apiError } from '@/lib/api'
 import { CATEGORIES, categoryMeta, dayLabel, money } from '@/lib/format'
 import type {
   InsuranceDoc,
+  ListingQuestion,
   Org,
   OrgAnalytics,
   Payout,
@@ -338,6 +384,10 @@ const insurance = ref<InsuranceDoc[]>([])
 const payouts = ref<Payout[]>([])
 const reviews = ref<Review[]>([])
 const analytics = ref<OrgAnalytics | null>(null)
+const questions = ref<ListingQuestion[]>([])
+const showAnswer = ref(false)
+const answerForm = reactive({ questionId: '', text: '' })
+const unansweredCount = computed(() => questions.value.filter((q) => !q.answer).length)
 const saving = ref(false)
 const savingAbn = ref(false)
 const abnDraft = ref('')
@@ -401,8 +451,31 @@ async function load(): Promise<void> {
     } catch {
       analytics.value = null // non-fatal
     }
+    try {
+      questions.value = await api.qanda.forProvider(props.id)
+    } catch {
+      questions.value = []
+    }
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
+  }
+}
+
+function openAnswer(questionId: string): void {
+  Object.assign(answerForm, { questionId, text: '' })
+  showAnswer.value = true
+}
+
+async function postAnswer(): Promise<void> {
+  saving.value = true
+  try {
+    const updated = await api.qanda.answer(answerForm.questionId, answerForm.text.trim())
+    questions.value = questions.value.map((q) => (q.id === updated.id ? updated : q))
+    showAnswer.value = false
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    saving.value = false
   }
 }
 

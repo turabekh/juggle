@@ -20,6 +20,7 @@ import type {
   ImpersonationSession,
   ImpersonationToken,
   InsuranceDoc,
+  ListingQuestion,
   JobSummary,
   Notification,
   Order,
@@ -412,6 +413,34 @@ export const api = {
     },
     async funnel(days = 30): Promise<FunnelOut> {
       const { data } = await http.get<FunnelOut>('/analytics/funnel', { params: { days } })
+      return data
+    },
+  },
+  qanda: {
+    async forProgram(programId: string): Promise<ListingQuestion[]> {
+      const { data } = await http.get<ListingQuestion[]>(
+        `/qanda/programs/${programId}/questions`,
+      )
+      return data
+    },
+    async ask(programId: string, body: string): Promise<ListingQuestion> {
+      const { data } = await http.post<ListingQuestion>(
+        `/qanda/programs/${programId}/questions`,
+        { body },
+      )
+      return data
+    },
+    async answer(questionId: string, answer: string): Promise<ListingQuestion> {
+      const { data } = await http.post<ListingQuestion>(
+        `/qanda/questions/${questionId}/answer`,
+        { answer },
+      )
+      return data
+    },
+    async forProvider(organisationId: string): Promise<ListingQuestion[]> {
+      const { data } = await http.get<ListingQuestion[]>(
+        `/qanda/provider/${organisationId}/questions`,
+      )
       return data
     },
   },

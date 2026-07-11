@@ -105,6 +105,39 @@
           </div>
           <p v-else class="jg-muted">No reviews yet — be the first after you attend.</p>
         </section>
+
+        <!-- Q&A (PRD §7.2) -->
+        <section class="q-mt-xl">
+          <h2 class="text-h6 q-mb-md">Questions</h2>
+          <div v-if="auth.isAuthed" class="jg-card q-pa-md q-mb-md">
+            <q-input
+              v-model="newQuestion" outlined dense type="textarea" autogrow
+              label="Ask the provider a question"
+            />
+            <div class="row justify-end q-mt-sm">
+              <q-btn
+                unelevated dense no-caps color="primary" label="Ask"
+                :loading="askingQ" :disable="!newQuestion.trim()" @click="askQuestion"
+              />
+            </div>
+          </div>
+          <div v-if="questions.length" class="jg-qanda">
+            <article v-for="q in questions" :key="q.id" class="jg-card jg-qa">
+              <div class="text-weight-600">{{ q.body }}</div>
+              <div class="jg-faint text-caption">asked by {{ q.asker_label }}</div>
+              <div v-if="q.answer" class="jg-review__reply">
+                <div class="jg-faint text-caption text-weight-600">
+                  <q-icon name="storefront" size="13px" /> {{ session.organisation_name }}
+                </div>
+                <p class="q-mt-xs q-mb-none" style="white-space: pre-line">{{ q.answer }}</p>
+              </div>
+              <div v-else class="jg-faint text-caption q-mt-xs">
+                Awaiting a reply from the provider.
+              </div>
+            </article>
+          </div>
+          <p v-else class="jg-muted">No questions yet — ask the first.</p>
+        </section>
       </div>
 
       <!-- Booking panel -->
@@ -275,7 +308,7 @@ import { api, apiError } from '@/lib/api'
 import { ageAt, categoryMeta, dayLabel, money, timeRange } from '@/lib/format'
 import { useHead } from '@/lib/head'
 import { rememberSession } from '@/lib/sessionMemo'
-import type { Child, ReviewList, SessionDetail, WaitlistEntry } from '@/lib/types'
+import type { Child, ListingQuestion, ReviewList, SessionDetail, WaitlistEntry } from '@/lib/types'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 
@@ -295,6 +328,9 @@ const holding = ref(false)
 const seatsLive = ref<number | null>(null)
 const myWait = ref<WaitlistEntry | null>(null)
 const waitlisting = ref(false)
+const questions = ref<ListingQuestion[]>([])
+const newQuestion = ref('')
+const askingQ = ref(false)
 
 const showAddChild = ref(false)
 const savingChild = ref(false)
@@ -384,6 +420,21 @@ async function loadChildren(): Promise<void> {
   }
 }
 
+async function askQuestion(): Promise<void> {
+  if (!session.value || !newQuestion.value.trim()) return
+  askingQ.value = true
+  try {
+    const q = await api.qanda.ask(session.value.program_id, newQuestion.value.trim())
+    questions.value.unshift(q)
+    newQuestion.value = ''
+    $q.notify({ type: 'positive', message: 'Question posted — the provider will reply.' })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not post your question') })
+  } finally {
+    askingQ.value = false
+  }
+}
+
 async function loadMyWait(): Promise<void> {
   if (!auth.isAuthed) return
   try {
@@ -436,6 +487,11 @@ async function load(): Promise<void> {
       reviews.value = await api.reviews.forProgram(session.value.program_id)
     } catch {
       reviews.value = null // non-fatal — reviews are supplementary
+    }
+    try {
+      questions.value = await api.qanda.forProgram(session.value.program_id)
+    } catch {
+      questions.value = []
     }
   } catch {
     session.value = null
@@ -543,6 +599,8 @@ onMounted(load)
 
 .jg-reviews { display: flex; flex-direction: column; gap: 12px; }
 .jg-review { padding: 16px 18px; }
+.jg-qanda { display: flex; flex-direction: column; gap: 12px; }
+.jg-qa { padding: 16px 18px; }
 .jg-badge {
   display: inline-flex;
   align-items: center;
