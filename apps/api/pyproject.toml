@@ -103,6 +103,7 @@ layers = [
     "juggle.modules.admin",
     "juggle.modules.roster",
     "juggle.modules.search",
+    "juggle.modules.reviews",
     "juggle.modules.booking",
     "juggle.modules.payments",
     "juggle.modules.inventory",
