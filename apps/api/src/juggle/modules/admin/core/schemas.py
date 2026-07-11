@@ -30,6 +30,11 @@ class UserSummary(BaseModel):
     is_admin: bool
 
 
+class MergeUsersIn(BaseModel):
+    source_id: uuid.UUID  # the duplicate — its data moves and it is deactivated
+    target_id: uuid.UUID  # the account to keep
+
+
 class OrgVerifications(BaseModel):
     organisation_id: uuid.UUID
     name: str

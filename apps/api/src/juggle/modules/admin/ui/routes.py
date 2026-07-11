@@ -67,6 +67,30 @@ def delete_user(user_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep) ->
         ) from exc
 
 
+@router.post("/users/merge", status_code=status.HTTP_204_NO_CONTENT)
+def merge_users(
+    payload: schemas.MergeUsersIn, admin: CurrentAdmin, session: SessionDep
+) -> None:
+    """Merge a duplicate account into a primary one (PRD §10.2)."""
+    try:
+        service.merge_accounts(
+            session,
+            source_id=payload.source_id,
+            target_id=payload.target_id,
+            actor_id=admin.user_id,
+        )
+    except service.CannotMergeSelf as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Pick two different accounts to merge"
+        ) from exc
+    except service.UserNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found") from exc
+    except service.CannotDeleteAdmin as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Admin accounts cannot be merged"
+        ) from exc
+
+
 @router.post("/orgs/{org_id}/approve", response_model=schemas.OrgAdminOut)
 def approve_org(
     org_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep

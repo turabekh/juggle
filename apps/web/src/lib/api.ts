@@ -482,6 +482,16 @@ export const api = {
       const { data } = await http.get<UserSummary[]>('/admin/users', { params: { q } })
       return data
     },
+    async userBookings(userId: string): Promise<Booking[]> {
+      const { data } = await http.get<Booking[]>(`/admin/users/${userId}/bookings`)
+      return data
+    },
+    async deleteUser(userId: string): Promise<void> {
+      await http.post(`/admin/users/${userId}/delete`)
+    },
+    async mergeUsers(sourceId: string, targetId: string): Promise<void> {
+      await http.post('/admin/users/merge', { source_id: sourceId, target_id: targetId })
+    },
     async orgs(status: OrgStatus): Promise<OrgAdmin[]> {
       const { data } = await http.get<OrgAdmin[]>('/admin/orgs', { params: { status } })
       return data

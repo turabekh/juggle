@@ -96,21 +96,29 @@ def add_child(session: Session, *, guardian_id: uuid.UUID, data: ChildCreate) ->
     return child
 
 
-def delete_account(session: Session, *, user_id: uuid.UUID, actor_id: uuid.UUID) -> bool:
-    """APP data-deletion (PRD §10.2): irreversibly strip a guardian's personal
-    data and their children's, and disable login. The rows are kept (bookings and
-    payments reference them for financial/audit records) but carry no PII.
-    Returns False if there's no such user. Audited with the true actor."""
+def deactivate_account(session: Session, *, user_id: uuid.UUID) -> bool:
+    """Anonymise + disable a login (no PII, can't authenticate). Keeps the row —
+    bookings/audit reference it. Shared by delete (§10.2) and merge. No audit."""
     user = session.get(UserAccount, user_id)
     if user is None:
         return False
-
     user.email = f"deleted-{user.id}@removed.invalid"
     user.full_name = None
     user.phone = None
     user.password_hash = None
     user.mfa_secret = None
     user.status = UserStatus.deleted
+    session.flush()
+    return True
+
+
+def delete_account(session: Session, *, user_id: uuid.UUID, actor_id: uuid.UUID) -> bool:
+    """APP data-deletion (PRD §10.2): irreversibly strip a guardian's personal
+    data and their children's, and disable login. The rows are kept (bookings and
+    payments reference them for financial/audit records) but carry no PII.
+    Returns False if there's no such user. Audited with the true actor."""
+    if not deactivate_account(session, user_id=user_id):
+        return False
 
     for child in session.scalars(select(Child).where(Child.guardian_id == user_id)):
         child.first_name = "Removed"

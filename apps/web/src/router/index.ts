@@ -91,6 +91,11 @@ export function createAppRouter(history: RouterHistory) {
           component: () => import('@/pages/admin/AdminReviewsPage.vue'),
         },
         {
+          path: 'users',
+          name: 'admin-users',
+          component: () => import('@/pages/admin/AdminUsersPage.vue'),
+        },
+        {
           path: 'operations',
           name: 'admin-operations',
           component: () => import('@/pages/admin/AdminOperationsPage.vue'),

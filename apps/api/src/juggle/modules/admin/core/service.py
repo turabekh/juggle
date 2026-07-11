@@ -9,16 +9,19 @@ audited, and per-action audit happens in the auth dependency.
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from juggle.modules.admin.core.models import ImpersonationMode, ImpersonationSession
 from juggle.modules.audit.core import service as audit_service
 from juggle.modules.booking.core import service as booking_service
+from juggle.modules.booking.core.models import Booking
 from juggle.modules.booking.core.schemas import BookingOut, OrderOut
 from juggle.modules.config.core import service as config_service
 from juggle.modules.identity.core import service as identity_service
-from juggle.modules.identity.core.models import UserAccount
+from juggle.modules.identity.core.models import Child, GuardianLink, UserAccount
+from juggle.modules.inventory.core.models import SeatHold
+from juggle.modules.notifications.core.models import NotificationLog
 from juggle.modules.org.core import service as org_service
 from juggle.modules.org.core.models import (
     InsuranceDoc,
@@ -29,7 +32,10 @@ from juggle.modules.org.core.models import (
 )
 from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import PaymentGateway
-from juggle.modules.payments.core.models import Payout, PayoutStatus
+from juggle.modules.payments.core.models import Payment, Payout, PayoutStatus
+from juggle.modules.qanda.core.models import ListingQuestion
+from juggle.modules.reviews.core.models import Review
+from juggle.modules.waitlist.core.models import ACTIVE_STATUSES, WaitlistEntry, WaitlistStatus
 from juggle.security import create_impersonation_token
 
 
@@ -98,6 +104,110 @@ def delete_user(db: Session, *, user_id: uuid.UUID, actor_id: uuid.UUID) -> None
     if user.is_admin:
         raise CannotDeleteAdmin(str(user_id))
     identity_service.delete_account(db, user_id=user_id, actor_id=actor_id)
+
+
+class CannotMergeSelf(Exception):
+    """Source and target are the same account."""
+
+
+def _merge_waitlist(db: Session, source_id: uuid.UUID, target_id: uuid.UUID) -> None:
+    """Move the source's waitlist entries to the target, but drop any that would
+    clash with a target entry already active on the same session (partial UNIQUE)."""
+    for entry in db.scalars(
+        select(WaitlistEntry).where(WaitlistEntry.guardian_id == source_id)
+    ):
+        if entry.status in ACTIVE_STATUSES:
+            clash = db.scalar(
+                select(WaitlistEntry.id).where(
+                    WaitlistEntry.guardian_id == target_id,
+                    WaitlistEntry.session_id == entry.session_id,
+                    WaitlistEntry.status.in_(ACTIVE_STATUSES),
+                )
+            )
+            if clash is not None:
+                entry.status = WaitlistStatus.cancelled  # target already queued here
+                continue
+        entry.guardian_id = target_id
+
+
+def _merge_guardian_links(db: Session, source_id: uuid.UUID, target_id: uuid.UUID) -> None:
+    """Repoint the source's co-guardian links to the target, dropping self-links
+    and any that would duplicate an existing target link (UNIQUE pair)."""
+    for link in db.scalars(
+        select(GuardianLink).where(
+            or_(GuardianLink.guardian_id == source_id, GuardianLink.member_id == source_id)
+        )
+    ):
+        new_guardian = target_id if link.guardian_id == source_id else link.guardian_id
+        new_member = target_id if link.member_id == source_id else link.member_id
+        if new_guardian == new_member:
+            db.delete(link)
+            continue
+        duplicate = db.scalar(
+            select(GuardianLink.id).where(
+                GuardianLink.id != link.id,
+                or_(
+                    (GuardianLink.guardian_id == new_guardian)
+                    & (GuardianLink.member_id == new_member),
+                    (GuardianLink.guardian_id == new_member)
+                    & (GuardianLink.member_id == new_guardian),
+                ),
+            )
+        )
+        if duplicate is not None:
+            db.delete(link)
+        else:
+            link.guardian_id = new_guardian
+            link.member_id = new_member
+
+
+def merge_accounts(
+    db: Session, *, source_id: uuid.UUID, target_id: uuid.UUID, actor_id: uuid.UUID
+) -> None:
+    """Merge a duplicate guardian account into a primary one (PRD §10.2): move all
+    of the source's family data to the target, then deactivate the source. Admin
+    accounts are protected. This is an admin-owned cross-cutting data operation,
+    so it reassigns lower modules' owner columns directly (like the roster reads)."""
+    if source_id == target_id:
+        raise CannotMergeSelf(str(source_id))
+    source = db.get(UserAccount, source_id)
+    target = db.get(UserAccount, target_id)
+    if source is None or target is None:
+        raise UserNotFound(str(source_id if source is None else target_id))
+    if source.is_admin or target.is_admin:
+        raise CannotDeleteAdmin("cannot merge admin accounts")
+
+    # Simple owner-column reassignments (no uniqueness on these columns).
+    reassignments = [
+        update(Child).where(Child.guardian_id == source_id).values(guardian_id=target_id),
+        update(Booking).where(Booking.guardian_id == source_id).values(guardian_id=target_id),
+        update(Payment).where(Payment.guardian_id == source_id).values(guardian_id=target_id),
+        update(SeatHold).where(SeatHold.held_by_id == source_id).values(held_by_id=target_id),
+        update(Review).where(Review.author_id == source_id).values(author_id=target_id),
+        update(ListingQuestion)
+        .where(ListingQuestion.asker_id == source_id)
+        .values(asker_id=target_id),
+        update(NotificationLog)
+        .where(NotificationLog.user_account_id == source_id)
+        .values(user_account_id=target_id),
+    ]
+    for stmt in reassignments:
+        db.execute(stmt)
+
+    # Constrained tables need conflict handling.
+    _merge_waitlist(db, source_id, target_id)
+    _merge_guardian_links(db, source_id, target_id)
+    db.flush()
+
+    identity_service.deactivate_account(db, user_id=source_id)
+    audit_service.record(
+        db,
+        action="admin.accounts_merged",
+        actor_id=actor_id,
+        entity_type="user_account",
+        entity_id=str(source_id),
+        detail={"merged_into": str(target_id)},
+    )
 
 
 def _set_org_status(
