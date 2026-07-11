@@ -462,3 +462,13 @@ export interface OrgAnalytics {
   families: FamilyMix
   programs: ProgramStat[]
 }
+
+// --- Scheduler / maintenance worker ------------------------------------------
+
+export interface JobSummary {
+  holds_reclaimed: number
+  waitlist_sessions_processed: number
+  waitlist_offers_made: number
+  waitlist_offers_expired: number
+  reminders_sent: number
+}

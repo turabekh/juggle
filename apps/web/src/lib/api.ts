@@ -17,6 +17,7 @@ import type {
   ImpersonationSession,
   ImpersonationToken,
   InsuranceDoc,
+  JobSummary,
   Notification,
   Order,
   Org,
@@ -378,6 +379,12 @@ export const api = {
     },
     async sessionCounts(sessionId: string): Promise<SessionWaitlist> {
       const { data } = await http.get<SessionWaitlist>(`/waitlist/sessions/${sessionId}`)
+      return data
+    },
+  },
+  scheduler: {
+    async run(): Promise<JobSummary> {
+      const { data } = await http.post<JobSummary>('/scheduler/run')
       return data
     },
   },

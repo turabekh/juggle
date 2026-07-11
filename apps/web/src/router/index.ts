@@ -90,6 +90,11 @@ const router = createRouter({
           component: () => import('@/pages/admin/AdminReviewsPage.vue'),
         },
         {
+          path: 'operations',
+          name: 'admin-operations',
+          component: () => import('@/pages/admin/AdminOperationsPage.vue'),
+        },
+        {
           path: 'flags',
           name: 'admin-flags',
           component: () => import('@/pages/admin/AdminFlagsPage.vue'),

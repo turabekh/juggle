@@ -50,6 +50,7 @@ const nav = [
   { name: 'admin-config', label: 'Configuration', icon: 'tune' },
   { name: 'admin-flags', label: 'Feature flags', icon: 'flag' },
   { name: 'admin-audit', label: 'Audit log', icon: 'receipt_long' },
+  { name: 'admin-operations', label: 'Operations', icon: 'schedule' },
   { name: 'admin-impersonation', label: 'Impersonation', icon: 'support_agent' },
 ]
 
