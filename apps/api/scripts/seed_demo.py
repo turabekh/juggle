@@ -7,14 +7,26 @@ realistic marketplace during development.
 Run once:  uv run python scripts/seed_demo.py   (idempotent — skips if present)
 """
 
-from datetime import UTC, datetime, timedelta
+import uuid
+from datetime import UTC, date, datetime, timedelta
+
+from sqlalchemy.orm import Session
 
 from juggle.db import SessionLocal
+from juggle.modules.booking.core import service as booking_service
+from juggle.modules.booking.core.schemas import CheckoutChild, CheckoutItem
 from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.catalog.core.schemas import SessionCreate
 from juggle.modules.identity.core import service as identity_service
+from juggle.modules.identity.core.schemas import ChildCreate
+from juggle.modules.inventory.core import service as inventory_service
+from juggle.modules.notifications.core.gateway import get_email_gateway
 from juggle.modules.org.core import service as org_service
 from juggle.modules.org.core.models import OrgStatus
+from juggle.modules.payments.core import service as payments_service
+from juggle.modules.payments.core.gateway import get_payment_gateway
+from juggle.modules.payments.core.models import PayoutStatus
+from juggle.modules.reviews.core import service as reviews_service
 
 PROVIDER_EMAIL = "demo-provider@juggle.test"
 
@@ -119,10 +131,138 @@ def _seed() -> None:
                 status=catalog_service.ProgramStatus.published,
             )
 
+        review_count = _seed_reviews(
+            db, org_id=org.id, provider_id=provider.id, admin_id=admin.id, venue_id=venues[0].id
+        )
+
         db.commit()
-        print(f"Seeded {len(PROGRAMS)} programs / {session_count} sessions for '{org.name}'.")
+        print(
+            f"Seeded {len(PROGRAMS)} programs / {session_count} sessions "
+            f"+ {review_count} published reviews for '{org.name}'."
+        )
     finally:
         db.close()
+
+
+# (guardian first name, child first name, rating, body, provider_reply | None)
+DEMO_REVIEWS = [
+    ("Amara", "Mika", 5,
+     "Absolutely brilliant week — the coaches were warm and my kid came home buzzing "
+     "every day. Booking took two minutes.",
+     "Thank you Amara! We loved having them — see you next holidays."),
+    ("Ben", "Theo", 4,
+     "Really well organised and great value. Drop-off was smooth. Would have loved a "
+     "little more shade at pickup, but a small thing.",
+     None),
+    ("Priya", "Anaya", 5,
+     "The best holiday program we've tried in Perth. Communication was clear and the "
+     "kids were genuinely engaged the whole time.",
+     None),
+]
+
+
+def _seed_reviews(
+    db: Session,
+    *,
+    org_id: uuid.UUID,
+    provider_id: uuid.UUID,
+    admin_id: uuid.UUID,
+    venue_id: uuid.UUID,
+) -> int:
+    """A completed 'last holidays' program with confirmed bookings + published
+    reviews, so the reviews UI (PRD §7.6) is populated on first run."""
+    payment_gateway = get_payment_gateway()
+    email_gateway = get_email_gateway()
+
+    program = catalog_service.create_program(
+        db,
+        organisation_id=org_id,
+        actor_id=provider_id,
+        title="Autumn Explorers Art Camp",
+        category="art",
+        description="Our last-holidays art camp — messy, joyful and much loved.",
+    )
+    # A session that has already finished, so its bookings are reviewable.
+    start = datetime.now(UTC) - timedelta(days=30)
+    session = catalog_service.create_session(
+        db,
+        program_id=program.id,
+        actor_id=provider_id,
+        data=SessionCreate(
+            venue_id=venue_id,
+            starts_at=start,
+            ends_at=start + timedelta(hours=6),
+            capacity=20,
+            price_cents=5500,
+            age_min=5,
+            age_max=12,
+            session_type="full_day",
+            drop_off=True,
+        ),
+    )
+    catalog_service.set_program_status(
+        db,
+        program_id=program.id,
+        actor_id=provider_id,
+        status=catalog_service.ProgramStatus.published,
+    )
+
+    count = 0
+    for i, (guardian_name, child_name, rating, body, reply) in enumerate(DEMO_REVIEWS):
+        guardian = identity_service.create_guardian(
+            db,
+            email=f"parent{i + 1}@example.com",
+            password="supersecret",
+            full_name=f"{guardian_name} Demo",
+        )
+        child = identity_service.add_child(
+            db,
+            guardian_id=guardian.id,
+            data=ChildCreate(first_name=child_name, date_of_birth=date(2016, 6, 1)),
+        )
+        hold, _ = inventory_service.hold_seats(
+            db, session_id=session.id, held_by_id=guardian.id, quantity=1
+        )
+        order = booking_service.checkout(
+            db,
+            guardian_id=guardian.id,
+            idempotency_key=f"seed-{uuid.uuid4().hex}",
+            items=[CheckoutItem(hold_id=hold.id, children=[CheckoutChild(child_id=child.id)])],
+            gateway=payment_gateway,
+        )
+        booking_service.confirm(
+            db,
+            payment_id=order.payment_id,
+            guardian_id=guardian.id,
+            gateway=payment_gateway,
+            email_gateway=email_gateway,
+        )
+        review = reviews_service.submit_review(
+            db,
+            booking_id=order.bookings[0].id,
+            author_id=guardian.id,
+            rating=rating,
+            body=body,
+        )
+        reviews_service.moderate(
+            db, review_id=review.id, moderator_id=admin_id, approve=True
+        )
+        if reply is not None:
+            reviews_service.provider_reply(
+                db, review_id=review.id, actor_id=provider_id, reply=reply
+            )
+        count += 1
+
+    # This is a completed last-cycle program, so its payouts are already settled.
+    # Marking them paid also keeps these seeded rows out of the global
+    # "run due payouts" admin operation exercised by the payout tests.
+    for payout in payments_service.list_org_payouts(
+        db, organisation_id=org_id, actor_id=provider_id
+    ):
+        if payout.status is PayoutStatus.scheduled:
+            payments_service.set_payout_status(db, payout.id, PayoutStatus.paid)
+
+    return count
 
 
 def _already_seeded(db: object) -> bool:
