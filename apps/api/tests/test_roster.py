@@ -146,10 +146,94 @@ def test_csv_export(client: TestClient) -> None:
     assert reader[0] == [
         "child_first_name",
         "age",
+        "attended",
         "medical_notes",
         "emergency_contact_name",
         "emergency_contact_phone",
         "form_answers",
     ]
     assert reader[1][0] == "Robin"
-    assert reader[1][2] == "peanut allergy"
+    assert reader[1][2] == "no"  # not checked in
+    assert reader[1][3] == "peanut allergy"
+
+
+# --- attendance check-in (PRD §8.3) -----------------------------------------
+
+
+def _confirmed_roster(client: TestClient, owner: str, guardian: str, session_id: str) -> dict:
+    payment_id = _book(client, guardian, session_id, dob="2018-06-01")
+    client.post(f"/api/v1/booking/payments/{payment_id}/confirm", headers=_auth(guardian))
+    return client.get(f"/api/v1/roster/sessions/{session_id}", headers=_auth(owner)).json()
+
+
+def test_mark_and_unmark_attendance(client: TestClient) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    _, session_id = _org_and_session(client, owner)
+    roster = _confirmed_roster(client, owner, guardian, session_id)
+    assert roster["attended_count"] == 0
+    assert roster["rows"][0]["attended"] is False
+    bc_id = roster["rows"][0]["booking_child_id"]
+
+    marked = client.put(
+        f"/api/v1/roster/sessions/{session_id}/attendance/{bc_id}",
+        headers=_auth(owner),
+        json={"attended": True},
+    )
+    assert marked.status_code == 200, marked.text
+    assert marked.json()["attended"] is True
+    assert marked.json()["attended_at"] is not None
+
+    after = client.get(f"/api/v1/roster/sessions/{session_id}", headers=_auth(owner)).json()
+    assert after["attended_count"] == 1
+    assert after["rows"][0]["attended"] is True
+
+    # Undo the check-in.
+    client.put(
+        f"/api/v1/roster/sessions/{session_id}/attendance/{bc_id}",
+        headers=_auth(owner),
+        json={"attended": False},
+    )
+    reverted = client.get(f"/api/v1/roster/sessions/{session_id}", headers=_auth(owner)).json()
+    assert reverted["attended_count"] == 0
+    assert reverted["rows"][0]["attended"] is False
+
+
+def test_attendance_shows_in_csv(client: TestClient) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    _, session_id = _org_and_session(client, owner)
+    roster = _confirmed_roster(client, owner, guardian, session_id)
+    bc_id = roster["rows"][0]["booking_child_id"]
+    client.put(
+        f"/api/v1/roster/sessions/{session_id}/attendance/{bc_id}",
+        headers=_auth(owner),
+        json={"attended": True},
+    )
+    resp = client.get(
+        f"/api/v1/roster/sessions/{session_id}/export.csv", headers=_auth(owner)
+    )
+    reader = list(csv.reader(io.StringIO(resp.text)))
+    assert reader[1][2] == "yes"  # attended column
+
+
+def test_non_member_cannot_mark_attendance(client: TestClient) -> None:
+    owner, guardian, outsider = _signup(client), _signup(client), _signup(client)
+    _, session_id = _org_and_session(client, owner)
+    roster = _confirmed_roster(client, owner, guardian, session_id)
+    bc_id = roster["rows"][0]["booking_child_id"]
+    resp = client.put(
+        f"/api/v1/roster/sessions/{session_id}/attendance/{bc_id}",
+        headers=_auth(outsider),
+        json={"attended": True},
+    )
+    assert resp.status_code == 403
+
+
+def test_mark_unknown_child_is_404(client: TestClient) -> None:
+    owner = _signup(client)
+    _, session_id = _org_and_session(client, owner)
+    resp = client.put(
+        f"/api/v1/roster/sessions/{session_id}/attendance/{uuid.uuid4()}",
+        headers=_auth(owner),
+        json={"attended": True},
+    )
+    assert resp.status_code == 404
