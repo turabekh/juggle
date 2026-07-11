@@ -35,6 +35,11 @@
             flat dense no-caps size="sm" color="primary" icon="event"
             label="Add to calendar" @click="downloadIcs(b.payment_id)"
           />
+          <q-btn
+            v-if="reviewable.has(b.id)"
+            unelevated dense no-caps size="sm" color="primary" icon="rate_review"
+            label="Leave a review" @click="openReview(b.id)"
+          />
         </div>
       </div>
     </div>
@@ -47,14 +52,46 @@
     >
       <q-btn unelevated color="primary" no-caps label="Find activities" :to="{ name: 'discover' }" />
     </EmptyState>
+
+    <!-- Leave a review dialog -->
+    <q-dialog v-model="showReview">
+      <q-card style="min-width: 380px; max-width: 460px; border-radius: 18px">
+        <q-card-section>
+          <div class="text-h6">How was it?</div>
+          <div class="jg-faint text-caption">
+            Your review is verified against your booking and checked before it goes live.
+          </div>
+        </q-card-section>
+        <q-card-section class="q-gutter-md">
+          <StarRating v-model="reviewForm.rating" editable size="30px" />
+          <q-input
+            v-model="reviewForm.body"
+            outlined type="textarea" autogrow
+            label="Tell other parents about it"
+            hint="Please don't include your child's name."
+            :rules="[(v) => !!v.trim() || 'Add a few words']"
+          />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated color="primary" no-caps label="Submit review"
+            :loading="submitting"
+            :disable="reviewForm.rating < 1 || !reviewForm.body.trim()"
+            @click="submitReview"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useQuasar } from 'quasar'
 
 import EmptyState from '@/components/EmptyState.vue'
+import StarRating from '@/components/StarRating.vue'
 import { api, apiError } from '@/lib/api'
 import { dayLabel, money, timeRange } from '@/lib/format'
 import { recallSession, type SessionMemo } from '@/lib/sessionMemo'
@@ -63,6 +100,35 @@ import type { Booking } from '@/lib/types'
 const $q = useQuasar()
 const bookings = ref<Booking[]>([])
 const loading = ref(true)
+
+// Booking ids the guardian can review (confirmed + session finished + unreviewed).
+const reviewable = ref<Set<string>>(new Set())
+const showReview = ref(false)
+const submitting = ref(false)
+const reviewForm = reactive({ bookingId: '', rating: 0, body: '' })
+
+function openReview(bookingId: string): void {
+  Object.assign(reviewForm, { bookingId, rating: 0, body: '' })
+  showReview.value = true
+}
+
+async function submitReview(): Promise<void> {
+  submitting.value = true
+  try {
+    await api.reviews.submit({
+      booking_id: reviewForm.bookingId,
+      rating: reviewForm.rating,
+      body: reviewForm.body.trim(),
+    })
+    reviewable.value.delete(reviewForm.bookingId)
+    showReview.value = false
+    $q.notify({ type: 'positive', message: 'Thanks! Your review will appear once approved.' })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not submit review') })
+  } finally {
+    submitting.value = false
+  }
+}
 
 function memo(id: string): SessionMemo | null {
   return recallSession(id)
@@ -101,6 +167,12 @@ function statusColor(s: string): string {
 onMounted(async () => {
   try {
     bookings.value = await api.booking.list()
+    try {
+      const rb = await api.reviews.reviewable()
+      reviewable.value = new Set(rb.map((r) => r.booking_id))
+    } catch {
+      /* non-fatal — the review CTA just won't show */
+    }
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err, 'Could not load bookings') })
   } finally {

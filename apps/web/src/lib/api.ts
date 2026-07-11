@@ -26,6 +26,10 @@ import type {
   PayoutRunResult,
   PayoutStatus,
   Program,
+  Review,
+  ReviewableBooking,
+  ReviewList,
+  ReviewStatus,
   RosterOut,
   SearchFilters,
   SearchResults,
@@ -279,6 +283,57 @@ export const api = {
     async payouts(organisationId: string): Promise<Payout[]> {
       const { data } = await http.get<Payout[]>('/payments/payouts', {
         params: { organisation_id: organisationId },
+      })
+      return data
+    },
+  },
+  reviews: {
+    // Public
+    async forProgram(programId: string): Promise<ReviewList> {
+      const { data } = await http.get<ReviewList>(`/reviews/programs/${programId}`)
+      return data
+    },
+    async forOrganisation(organisationId: string): Promise<ReviewList> {
+      const { data } = await http.get<ReviewList>(`/reviews/organisations/${organisationId}`)
+      return data
+    },
+    // Guardian
+    async reviewable(): Promise<ReviewableBooking[]> {
+      const { data } = await http.get<ReviewableBooking[]>('/reviews/reviewable')
+      return data
+    },
+    async mine(): Promise<Review[]> {
+      const { data } = await http.get<Review[]>('/reviews/mine')
+      return data
+    },
+    async submit(payload: {
+      booking_id: string
+      rating: number
+      body: string
+    }): Promise<Review> {
+      const { data } = await http.post<Review>('/reviews', payload)
+      return data
+    },
+    // Provider
+    async forProvider(organisationId: string): Promise<Review[]> {
+      const { data } = await http.get<Review[]>(`/reviews/provider/${organisationId}`)
+      return data
+    },
+    async reply(reviewId: string, reply: string): Promise<Review> {
+      const { data } = await http.post<Review>(`/reviews/${reviewId}/reply`, { reply })
+      return data
+    },
+    // Admin moderation
+    async moderationQueue(status: ReviewStatus = 'pending'): Promise<Review[]> {
+      const { data } = await http.get<Review[]>('/reviews/moderation/queue', {
+        params: { review_status: status },
+      })
+      return data
+    },
+    async moderate(reviewId: string, approve: boolean, reason?: string): Promise<Review> {
+      const { data } = await http.post<Review>(`/reviews/${reviewId}/moderate`, {
+        approve,
+        reason,
       })
       return data
     },

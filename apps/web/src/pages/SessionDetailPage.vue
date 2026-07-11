@@ -64,6 +64,40 @@
             {{ session.drop_off ? 'Drop-off' : 'Parent stays' }}
           </span>
         </div>
+
+        <!-- Reviews (PRD §7.6) -->
+        <section v-if="reviews" class="q-mt-xl">
+          <div class="row items-center q-gutter-sm q-mb-md">
+            <h2 class="text-h6 q-my-none">Reviews</h2>
+            <template v-if="reviews.summary.count">
+              <StarRating :model-value="Math.round(reviews.summary.average ?? 0)" size="18px" />
+              <span class="text-weight-600">{{ reviews.summary.average?.toFixed(1) }}</span>
+              <span class="jg-faint">
+                · {{ reviews.summary.count }}
+                {{ reviews.summary.count === 1 ? 'review' : 'reviews' }}
+              </span>
+            </template>
+          </div>
+
+          <div v-if="reviews.items.length" class="jg-reviews">
+            <article v-for="r in reviews.items" :key="r.id" class="jg-card jg-review">
+              <div class="row items-center q-gutter-sm">
+                <StarRating :model-value="r.rating" size="15px" />
+                <span class="text-weight-600">{{ r.author_label }}</span>
+                <span class="jg-faint text-caption">· {{ dayLabel(r.created_at) }}</span>
+                <span class="jg-badge"><q-icon name="verified" size="13px" /> Verified booking</span>
+              </div>
+              <p class="q-mt-sm q-mb-none" style="white-space: pre-line">{{ r.body }}</p>
+              <div v-if="r.provider_reply" class="jg-review__reply">
+                <div class="jg-faint text-caption text-weight-600">
+                  <q-icon name="storefront" size="13px" /> Response from {{ session.organisation_name }}
+                </div>
+                <p class="q-mt-xs q-mb-none" style="white-space: pre-line">{{ r.provider_reply }}</p>
+              </div>
+            </article>
+          </div>
+          <p v-else class="jg-muted">No reviews yet — be the first after you attend.</p>
+        </section>
       </div>
 
       <!-- Booking panel -->
@@ -194,10 +228,11 @@ import { useQuasar } from 'quasar'
 import { useRoute, useRouter } from 'vue-router'
 
 import EmptyState from '@/components/EmptyState.vue'
+import StarRating from '@/components/StarRating.vue'
 import { api, apiError } from '@/lib/api'
-import { ageAt, categoryMeta, money, timeRange } from '@/lib/format'
+import { ageAt, categoryMeta, dayLabel, money, timeRange } from '@/lib/format'
 import { rememberSession } from '@/lib/sessionMemo'
-import type { Child, SessionDetail } from '@/lib/types'
+import type { Child, ReviewList, SessionDetail } from '@/lib/types'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 
@@ -209,6 +244,7 @@ const auth = useAuthStore()
 const cart = useCartStore()
 
 const session = ref<SessionDetail | null>(null)
+const reviews = ref<ReviewList | null>(null)
 const loading = ref(true)
 const children = ref<Child[]>([])
 const selectedChildIds = ref<string[]>([])
@@ -263,6 +299,11 @@ async function load(): Promise<void> {
     })
     const avail = await api.inventory.availability(props.id)
     seatsLive.value = avail.seats_remaining
+    try {
+      reviews.value = await api.reviews.forProgram(session.value.program_id)
+    } catch {
+      reviews.value = null // non-fatal — reviews are supplementary
+    }
   } catch {
     session.value = null
   } finally {
@@ -365,4 +406,25 @@ onMounted(load)
 }
 .jg-kid--off { opacity: 0.55; }
 .jg-kid__body { line-height: 1.15; }
+
+.jg-reviews { display: flex; flex-direction: column; gap: 12px; }
+.jg-review { padding: 16px 18px; }
+.jg-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--jg-primary);
+  background: var(--jg-primary-tint);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.jg-review__reply {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--jg-line);
+  background: #fafbfd;
+  border-radius: 0 10px 10px 0;
+}
 </style>

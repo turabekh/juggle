@@ -130,7 +130,60 @@
           Earnings appear here after families book. You're paid a few days after each session.
         </div>
       </section>
+
+      <!-- Reviews (PRD §7.6) -->
+      <section class="q-mt-xl">
+        <div class="row items-center q-gutter-sm q-mb-sm">
+          <h2 class="text-h6 q-my-none">Reviews</h2>
+          <template v-if="reviews.length">
+            <StarRating :model-value="Math.round(avgRating)" size="17px" />
+            <span class="text-weight-600">{{ avgRating.toFixed(1) }}</span>
+            <span class="jg-faint text-caption">· {{ reviews.length }}</span>
+          </template>
+        </div>
+        <div v-if="reviews.length" class="jg-list">
+          <article v-for="r in reviews" :key="r.id" class="jg-card q-pa-md">
+            <div class="row items-center q-gutter-sm">
+              <StarRating :model-value="r.rating" size="15px" />
+              <span class="text-weight-600">{{ r.author_label }}</span>
+              <span class="jg-faint text-caption">· {{ r.program_title }} · {{ dayLabel(r.created_at) }}</span>
+            </div>
+            <p class="q-mt-sm q-mb-none" style="white-space: pre-line">{{ r.body }}</p>
+            <div v-if="r.provider_reply" class="jg-review__reply">
+              <div class="jg-faint text-caption text-weight-600">Your reply</div>
+              <p class="q-mt-xs q-mb-none" style="white-space: pre-line">{{ r.provider_reply }}</p>
+            </div>
+            <q-btn
+              v-else flat dense no-caps size="sm" color="primary" icon="reply"
+              label="Reply" class="q-mt-sm" @click="openReply(r.id)"
+            />
+          </article>
+        </div>
+        <div v-else class="jg-muted text-caption">
+          Reviews from families appear here once they've attended and a moderator approves them.
+        </div>
+      </section>
     </template>
+
+    <!-- Reply to review dialog -->
+    <q-dialog v-model="showReply">
+      <q-card style="min-width: 400px; border-radius: 18px">
+        <q-card-section><div class="text-h6">Reply to review</div></q-card-section>
+        <q-card-section>
+          <q-input
+            v-model="replyForm.text" outlined type="textarea" autogrow autofocus
+            label="Your response" hint="Shown publicly beneath the review."
+          />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated no-caps color="primary" label="Post reply"
+            :loading="saving" :disable="!replyForm.text.trim()" @click="postReply"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
 
     <!-- Add venue dialog -->
     <q-dialog v-model="showVenue">
@@ -209,9 +262,10 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useQuasar } from 'quasar'
 
 import EmptyState from '@/components/EmptyState.vue'
+import StarRating from '@/components/StarRating.vue'
 import { api, apiError } from '@/lib/api'
 import { CATEGORIES, categoryMeta, dayLabel, money } from '@/lib/format'
-import type { InsuranceDoc, Org, Payout, Program, Venue, WwccRecord } from '@/lib/types'
+import type { InsuranceDoc, Org, Payout, Program, Review, Venue, WwccRecord } from '@/lib/types'
 
 const props = defineProps<{ id: string }>()
 const $q = useQuasar()
@@ -222,6 +276,7 @@ const programs = ref<Program[]>([])
 const wwcc = ref<WwccRecord[]>([])
 const insurance = ref<InsuranceDoc[]>([])
 const payouts = ref<Payout[]>([])
+const reviews = ref<Review[]>([])
 const saving = ref(false)
 const savingAbn = ref(false)
 const abnDraft = ref('')
@@ -229,6 +284,8 @@ const showVenue = ref(false)
 const showProgram = ref(false)
 const showWwcc = ref(false)
 const showInsurance = ref(false)
+const showReply = ref(false)
+const replyForm = reactive({ reviewId: '', text: '' })
 
 const categoryOptions = CATEGORIES.map((c) => ({ label: c.label, value: c.value }))
 const venueForm = reactive({ name: '', suburb: '', postcode: '', latitude: null as number | null, longitude: null as number | null })
@@ -239,6 +296,11 @@ const insForm = reactive({ file_ref: '', expiry_date: '' })
 const wwccValid = computed(() => wwccForm.staff_name && wwccForm.wwcc_number && wwccForm.expiry_date)
 const scheduledTotal = computed(() =>
   payouts.value.filter((p) => p.status === 'scheduled').reduce((n, p) => n + p.amount_cents, 0),
+)
+const avgRating = computed(() =>
+  reviews.value.length
+    ? reviews.value.reduce((n, r) => n + r.rating, 0) / reviews.value.length
+    : 0,
 )
 
 function statusColor(s: string): string {
@@ -255,16 +317,35 @@ async function load(): Promise<void> {
   try {
     org.value = await api.org.get(props.id)
     abnDraft.value = org.value.abn ?? ''
-    ;[venues.value, programs.value, wwcc.value, insurance.value, payouts.value] =
+    ;[venues.value, programs.value, wwcc.value, insurance.value, payouts.value, reviews.value] =
       await Promise.all([
         api.catalog.venues(props.id),
         api.catalog.programs(props.id),
         api.org.wwcc(props.id),
         api.org.insurance(props.id),
         api.payments.payouts(props.id),
+        api.reviews.forProvider(props.id),
       ])
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
+  }
+}
+
+function openReply(reviewId: string): void {
+  Object.assign(replyForm, { reviewId, text: '' })
+  showReply.value = true
+}
+
+async function postReply(): Promise<void> {
+  saving.value = true
+  try {
+    const updated = await api.reviews.reply(replyForm.reviewId, replyForm.text.trim())
+    reviews.value = reviews.value.map((r) => (r.id === updated.id ? updated : r))
+    showReply.value = false
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    saving.value = false
   }
 }
 
@@ -375,4 +456,11 @@ onMounted(load)
   padding: 8px 12px;
 }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-review__reply {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--jg-line);
+  background: #fafbfd;
+  border-radius: 0 10px 10px 0;
+}
 </style>

@@ -346,3 +346,52 @@ export interface SessionCreateInput {
   session_type: 'half_day' | 'full_day'
   drop_off: boolean
 }
+
+// --- Reviews (PRD §7.6) ------------------------------------------------------
+
+export type ReviewStatus = 'pending' | 'published' | 'rejected'
+
+export interface RatingSummary {
+  average: number | null
+  count: number
+}
+
+export interface ReviewPublic {
+  id: string
+  rating: number
+  body: string
+  author_label: string
+  created_at: string
+  provider_reply: string | null
+  provider_reply_at: string | null
+}
+
+export interface ReviewList {
+  summary: RatingSummary
+  items: ReviewPublic[]
+}
+
+export interface Review {
+  id: string
+  booking_id: string
+  organisation_id: string
+  program_id: string
+  session_id: string
+  rating: number
+  body: string
+  status: ReviewStatus
+  rejection_reason: string | null
+  author_label: string
+  program_title: string
+  provider_reply: string | null
+  provider_reply_at: string | null
+  created_at: string
+}
+
+export interface ReviewableBooking {
+  booking_id: string
+  session_id: string
+  program_title: string
+  organisation_name: string
+  starts_at: string
+}

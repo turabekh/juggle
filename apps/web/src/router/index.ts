@@ -85,6 +85,11 @@ const router = createRouter({
           component: () => import('@/pages/admin/AdminPayoutsPage.vue'),
         },
         {
+          path: 'reviews',
+          name: 'admin-reviews',
+          component: () => import('@/pages/admin/AdminReviewsPage.vue'),
+        },
+        {
           path: 'flags',
           name: 'admin-flags',
           component: () => import('@/pages/admin/AdminFlagsPage.vue'),
