@@ -17,6 +17,10 @@ export interface HeadConfig {
 }
 
 export function useHead(getter: () => HeadConfig | null): void {
+  // Client-only: during SSR there is no document. The server injects critical
+  // per-listing meta from the fetched data; the client keeps it fresh here.
+  if (typeof document === 'undefined') return
+
   const created: HTMLElement[] = []
   let jsonLdEl: HTMLScriptElement | null = null
   const previousTitle = document.title

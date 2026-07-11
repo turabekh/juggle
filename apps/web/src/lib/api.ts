@@ -59,7 +59,12 @@ export function setAuthToken(token: string | null): void {
   authToken = token
 }
 
-const http: AxiosInstance = axios.create({ baseURL: '/api/v1', timeout: 15000 })
+// On the client, requests are relative (Vite proxy / same-origin nginx). During
+// SSR there is no origin, so hit the API directly (overridable via env).
+const API_BASE = import.meta.env.SSR
+  ? (import.meta.env.VITE_SSR_API_BASE ?? 'http://localhost:8000/api/v1')
+  : '/api/v1'
+const http: AxiosInstance = axios.create({ baseURL: API_BASE, timeout: 15000 })
 
 http.interceptors.request.use((config) => {
   if (authToken) config.headers.Authorization = `Bearer ${authToken}`

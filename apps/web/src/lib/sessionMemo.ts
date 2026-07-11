@@ -2,6 +2,8 @@
 // by session id. The bookings API returns ids, not titles; this fills the gap
 // for sessions the user has viewed or booked, with a graceful fallback.
 
+import { storage } from '@/lib/storage'
+
 export interface SessionMemo {
   title: string
   orgName: string
@@ -13,7 +15,7 @@ const KEY = 'juggle.sessionMemo'
 
 function readAll(): Record<string, SessionMemo> {
   try {
-    return JSON.parse(localStorage.getItem(KEY) ?? '{}') as Record<string, SessionMemo>
+    return JSON.parse(storage.get(KEY) ?? '{}') as Record<string, SessionMemo>
   } catch {
     return {}
   }
@@ -22,7 +24,7 @@ function readAll(): Record<string, SessionMemo> {
 export function rememberSession(id: string, memo: SessionMemo): void {
   const all = readAll()
   all[id] = memo
-  localStorage.setItem(KEY, JSON.stringify(all))
+  storage.set(KEY, JSON.stringify(all))
 }
 
 export function recallSession(id: string): SessionMemo | null {

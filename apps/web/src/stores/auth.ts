@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import { api, setAuthToken } from '@/lib/api'
 import { decodeJwt } from '@/lib/jwt'
+import { storage } from '@/lib/storage'
 import type { User } from '@/lib/types'
 
 const TOKEN_KEY = 'juggle.token'
@@ -23,7 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function _establish(accessToken: string): Promise<void> {
     token.value = accessToken
     setAuthToken(accessToken)
-    localStorage.setItem(TOKEN_KEY, accessToken)
+    storage.set(TOKEN_KEY, accessToken)
     user.value = await api.auth.me()
   }
 
@@ -41,20 +42,20 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     user.value = null
     setAuthToken(null)
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(ADMIN_BACKUP_KEY)
+    storage.remove(TOKEN_KEY)
+    storage.remove(ADMIN_BACKUP_KEY)
   }
 
   /** Swap the admin token for an impersonation token, backing the admin up. */
   async function enterImpersonation(impersonationToken: string): Promise<void> {
-    if (token.value) localStorage.setItem(ADMIN_BACKUP_KEY, token.value)
+    if (token.value) storage.set(ADMIN_BACKUP_KEY, token.value)
     await _establish(impersonationToken)
   }
 
   /** Restore the admin session after an impersonation. */
   async function exitImpersonation(): Promise<void> {
-    const backup = localStorage.getItem(ADMIN_BACKUP_KEY)
-    localStorage.removeItem(ADMIN_BACKUP_KEY)
+    const backup = storage.get(ADMIN_BACKUP_KEY)
+    storage.remove(ADMIN_BACKUP_KEY)
     if (backup) {
       await _establish(backup)
     } else {
@@ -63,7 +64,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function restore(): Promise<void> {
-    const stored = localStorage.getItem(TOKEN_KEY)
+    const stored = storage.get(TOKEN_KEY)
     if (stored) {
       token.value = stored
       setAuthToken(stored)

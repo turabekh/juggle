@@ -12,6 +12,12 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
+  // SSR (server.mjs): load Quasar's Node/server build (its client bundle touches
+  // `window` at import). Externalizing lets Node resolve the "node" export.
+  ssr: {
+    external: ['quasar'],
+    resolve: { conditions: ['node', 'import', 'module', 'default'] },
+  },
   server: {
     port: 9000,
     // Proxy API calls to the FastAPI backend during dev (no CORS fuss).

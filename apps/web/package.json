@@ -8,7 +8,12 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "ssr:dev": "node server.mjs",
+    "build:client": "vite build --ssrManifest --outDir dist/client",
+    "build:server": "vite build --ssr src/entry-server.ts --outDir dist/server",
+    "build:ssr": "vue-tsc --noEmit && npm run build:client && npm run build:server",
+    "ssr:serve": "NODE_ENV=production node server.mjs"
   },
   "dependencies": {
     "@quasar/extras": "^1.16.12",

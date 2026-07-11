@@ -1,10 +1,11 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, type RouterHistory } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 
-const router = createRouter({
-  history: createWebHistory(),
-  routes: [
+export function createAppRouter(history: RouterHistory) {
+  const router = createRouter({
+    history,
+    routes: [
     {
       path: '/',
       component: () => import('@/layouts/MainLayout.vue'),
@@ -123,20 +124,21 @@ const router = createRouter({
       name: 'notfound',
       component: () => import('@/pages/NotFoundPage.vue'),
     },
-  ],
-  scrollBehavior: () => ({ top: 0 }),
-})
+    ],
+    scrollBehavior: () => ({ top: 0 }),
+  })
 
-router.beforeEach(async (to) => {
-  const auth = useAuthStore()
-  if (!auth.ready) await auth.restore()
-  if ((to.meta.requiresAuth || to.meta.requiresAdmin) && !auth.isAuthed) {
-    return { name: 'login', query: { redirect: to.fullPath } }
-  }
-  if (to.meta.requiresAdmin && !auth.isAdmin) {
-    return { name: 'discover' }
-  }
-  return true
-})
+  router.beforeEach(async (to) => {
+    const auth = useAuthStore()
+    if (!auth.ready) await auth.restore()
+    if ((to.meta.requiresAuth || to.meta.requiresAdmin) && !auth.isAuthed) {
+      return { name: 'login', query: { redirect: to.fullPath } }
+    }
+    if (to.meta.requiresAdmin && !auth.isAdmin) {
+      return { name: 'discover' }
+    }
+    return true
+  })
 
-export default router
+  return router
+}

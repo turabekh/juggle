@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
 import { api } from '@/lib/api'
+import { storage } from '@/lib/storage'
 
 /** A held session in the cart, plus the children who'll attend it. */
 export interface CartItem {
@@ -20,7 +21,7 @@ const CART_KEY = 'juggle.cart'
 
 function load(): CartItem[] {
   try {
-    const raw = localStorage.getItem(CART_KEY)
+    const raw = storage.get(CART_KEY)
     return raw ? (JSON.parse(raw) as CartItem[]) : []
   } catch {
     return []
@@ -32,7 +33,7 @@ export const useCartStore = defineStore('cart', () => {
 
   watch(
     items,
-    (val) => localStorage.setItem(CART_KEY, JSON.stringify(val)),
+    (val) => storage.set(CART_KEY, JSON.stringify(val)),
     { deep: true },
   )
 
