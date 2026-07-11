@@ -20,6 +20,7 @@ from juggle.modules.notifications.core.schemas import ConfirmationSession
 KIND_BOOKING_CONFIRMATION = "booking_confirmation"
 KIND_SESSION_CANCELLATION = "session_cancellation"
 KIND_WAITLIST_OFFER = "waitlist_offer"
+KIND_PROVIDER_BROADCAST = "provider_broadcast"
 
 
 def _money(cents: int) -> str:
@@ -143,6 +144,30 @@ def notify_waitlist_offer(
         kind=KIND_WAITLIST_OFFER,
         subject=subject,
         detail={"claim_deadline": claim_deadline.isoformat()},
+    )
+
+
+def notify_provider_broadcast(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    to_email: str,
+    organisation_name: str,
+    subject: str,
+    body: str,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """Deliver a provider's broadcast to one booked family (PRD §8.5). The
+    caller supplies fully-formed, provider-authored content."""
+    full_subject = f"{organisation_name}: {subject}"
+    gateway.send(to=to_email, subject=full_subject, body=body)
+    return _record(
+        db,
+        user_id=user_id,
+        to_email=to_email,
+        kind=KIND_PROVIDER_BROADCAST,
+        subject=full_subject,
+        detail={"organisation_name": organisation_name},
     )
 
 

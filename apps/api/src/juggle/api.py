@@ -7,9 +7,11 @@ list it here. Nothing else in the app imports module routers directly.
 from fastapi import APIRouter
 
 from juggle.modules.admin.ui import router as admin_router
+from juggle.modules.analytics.ui import router as analytics_router
 from juggle.modules.audit.ui import router as audit_router
 from juggle.modules.booking.ui import router as booking_router
 from juggle.modules.catalog.ui import router as catalog_router
+from juggle.modules.comms.ui import router as comms_router
 from juggle.modules.config.ui import router as config_router
 from juggle.modules.flags.ui import router as flags_router
 from juggle.modules.identity.ui import router as identity_router
@@ -33,6 +35,8 @@ for _router in (
     payments_router,
     reviews_router,
     waitlist_router,
+    comms_router,
+    analytics_router,
     roster_router,
     notifications_router,
     search_router,

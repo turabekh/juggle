@@ -101,6 +101,8 @@ name = "Modules form an acyclic dependency layering (higher imports lower)"
 type = "layers"
 layers = [
     "juggle.modules.admin",
+    "juggle.modules.analytics",
+    "juggle.modules.comms",
     "juggle.modules.roster",
     "juggle.modules.search",
     "juggle.modules.reviews",
