@@ -67,8 +67,8 @@ Open **http://localhost:9000**.
 ## 3. Current state (facts)
 
 - **41 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 151 pytest passing** (P1 suites + sitemap + anti-hoarding + duplicate/bulk sessions + verification badges + data-deletion + compliance-expiry + Q&A), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean. NB: e2e/browser runs commit data to the dev DB — reset+reseed (`downgrade base→upgrade head` then `make seed`) before backend tests if the global payout/hold assertions trip.
-- **Frontend: Vitest 15 units + 6 Playwright e2e specs** (`make web-test` / `make web-e2e`, stack up).
+- **Backend: 154 pytest passing** (P1 suites + sitemap + anti-hoarding + duplicate/bulk sessions + verification badges + data-deletion + compliance-expiry + Q&A + account-merge), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean. NB: e2e/browser runs commit data to the dev DB — reset+reseed (`downgrade base→upgrade head` then `make seed`) before backend tests if the global payout/hold assertions trip.
+- **Frontend: Vitest 15 units + 7 Playwright e2e specs** (`make web-test` / `make web-e2e`, stack up).
 - **20 domain modules** (added `qanda`); **13 Alembic migrations**, head = `8b9699333869` (add_listing_question).
 - **Frontend: vue-tsc + vite build clean.**
 - **13 Alembic migrations**, head = `8b9699333869` (add_listing_question). Recent chain tail: … → analytics_event → listing_question. The chain round-trips (down to base and back).
@@ -163,7 +163,7 @@ Open **http://localhost:9000**.
 - **Audit log**: every consequential action, filterable, records the **true actor** even under impersonation.
 - **Impersonation**: user email/name search → **view-as** (read-only) / **act-as** (mutations audited) → scoped time-boxed token → consumer app with a **persistent support banner** → exit restores admin. Can't impersonate admins/self; ended sessions revoke immediately.
 - **Bookings refund** (`POST /admin/payments/{id}/refund`).
-- **User management + data-deletion (P1, §10.2)**: user lookup, **booking history** (`GET /admin/users/{id}/bookings`), and **APP data-deletion** (`POST /admin/users/{id}/delete`; admins protected). Guardians can self-delete via `DELETE /identity/me` (account page "Delete my account") — PII anonymised, rows kept for financial records, login disabled.
+- **User management console (P1, §10.2)** — admin **Users** page: lookup, **booking history** (`GET /admin/users/{id}/bookings`), **APP data-deletion** (`POST /admin/users/{id}/delete`; admins protected; guardians self-delete via `DELETE /identity/me`), and **duplicate-account merge** (`POST /admin/users/merge` — the duplicate's kids/bookings/waitlist/reviews/Q&A move to the primary, constraint-aware for waitlist + co-guardian uniqueness, then the source is deactivated). PII deletion anonymises + keeps rows for financial records; login disabled.
 - **Review moderation** (`/admin/reviews`): pending/published/rejected queue; **approve** (→published) / **reject-with-reason** (audited). Providers reply from their org console; published reviews aggregate to a provider/program rating.
 - **Operations** (`/admin/operations`): **Run maintenance now** triggers one scheduler tick (`POST /scheduler/run`) and shows the summary — reminders sent (incl. T-24h "what to bring"), waitlist offers made/expired/queues checked, seat holds reclaimed. A worker normally runs this on a loop.
 - **Funnel** (`/admin/funnel`, P1 §13): windowed bar breakdown of the product event taxonomy (searches → listings viewed → checkouts started/completed → cancelled; plus sessions filled, listings published, provider signups). Reads `analytics_event` via `GET /analytics/funnel`.
@@ -226,9 +226,10 @@ Open **http://localhost:9000**.
 **Direction (2026-07-11): payments deferred; focus on Phase-1 product.** The payment-free P1 surface is now essentially complete — Reviews (§7.6), Waitlist (§7.7), Comms + Analytics (§8.5/§8.6), scheduler/worker (§7.5/§7.7), attendance (§8.3), multi-guardian (§7.3), T-24h what-to-bring (§8.5), funnel (§13), PWA, SEO, anti-hoarding, verification badges (§7.2), data-deletion (§10.2), compliance-expiry (§8.1), listing Q&A (§7.2), and duplicate + bulk session scheduling (§8.2). **Vitest + Playwright suites are committed.** What's left needs deferred/external work:
 
 1. **Full request-time SSR (§7.1)** — SEO is already client-side (indexed by Googlebot); the SSR pipeline is built but blocked on a Quasar-CLI migration (see §9). PWA is done.
-2. **Duplicate-account merge (§10.2 P1)** — the other half of admin user management (deletion + lookup + booking history are done).
-3. **Google/Apple SSO (§7.3)**, **SMS via Twilio (§8.5)** — external integrations.
-4. **CI wiring** for the frontend suites (e2e needs a stack-orchestrating runner).
+2. **Google/Apple SSO (§7.3)**, **SMS via Twilio (§8.5)** — external integrations.
+3. **CI wiring** for the frontend suites (e2e needs a stack-orchestrating runner).
+
+The admin **§10.2 ops console is now complete** — lookup, booking history, APP data-deletion, and duplicate-account merge.
 
 Deferred (need payments or external integrations, revisit later):
 - **Payout auto-release** in the scheduler (payment-touching — currently manual admin "Run due payouts").
