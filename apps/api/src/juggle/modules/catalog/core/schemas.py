@@ -61,6 +61,7 @@ class SessionCreate(BaseModel):
     age_max: int = Field(ge=0, le=18)
     session_type: Literal["half_day", "full_day"] = "full_day"
     drop_off: bool = True
+    what_to_bring: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def _sane_ranges(self) -> Self:

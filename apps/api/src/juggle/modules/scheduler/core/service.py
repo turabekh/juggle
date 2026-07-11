@@ -33,6 +33,10 @@ from juggle.modules.waitlist.core import service as waitlist_service
 # late still gets its nearest-window reminder.
 REMINDER_WINDOWS: list[tuple[str, int]] = [("48h", 48), ("3h", 3)]
 
+# Marker + lead time for the automated "what to bring" note (PRD §8.5).
+WHAT_TO_BRING_WINDOW = "wtb"
+WHAT_TO_BRING_HOURS = 24
+
 
 def _confirmed_guardian_ids(db: Session, session_id: uuid.UUID) -> list[uuid.UUID]:
     return list(
@@ -107,6 +111,52 @@ def _send_reminders(db: Session, *, now: datetime, gateway: EmailGateway) -> int
     return sent
 
 
+def _send_what_to_bring(db: Session, *, now: datetime, gateway: EmailGateway) -> int:
+    """T-24h: email the provider's what-to-bring note to confirmed families, once."""
+    horizon = now + timedelta(hours=WHAT_TO_BRING_HOURS)
+    sessions = db.scalars(
+        select(ProgramSession).where(
+            ProgramSession.status != SessionStatus.cancelled,
+            ProgramSession.starts_at > now,
+            ProgramSession.starts_at <= horizon,
+            ProgramSession.what_to_bring.is_not(None),
+        )
+    ).all()
+
+    sent = 0
+    for session in sessions:
+        if not (session.what_to_bring or "").strip():
+            continue
+        if _already_reminded(db, session.id, WHAT_TO_BRING_WINDOW):
+            continue
+        program = catalog_service.get_program(db, session.program_id)
+        title = program.title if program is not None else "your session"
+
+        count = 0
+        for guardian_id in _confirmed_guardian_ids(db, session.id):
+            guardian = identity_service.get_user(db, guardian_id)
+            if guardian is None:
+                continue
+            notifications_service.notify_what_to_bring(
+                db,
+                user_id=guardian.id,
+                to_email=guardian.email,
+                session_title=title,
+                starts_at=session.starts_at,
+                what_to_bring=session.what_to_bring or "",
+                gateway=gateway,
+            )
+            count += 1
+        db.add(
+            SessionReminder(
+                session_id=session.id, window=WHAT_TO_BRING_WINDOW, recipient_count=count
+            )
+        )
+        db.flush()
+        sent += count
+    return sent
+
+
 def run_due_jobs(
     db: Session, *, now: datetime, gateway: EmailGateway | None = None
 ) -> JobSummary:
@@ -117,6 +167,7 @@ def run_due_jobs(
     holds_reclaimed = inventory_service.reclaim_all_expired(db, now=now)
     waitlist_run = waitlist_service.process_all(db)
     reminders_sent = _send_reminders(db, now=now, gateway=gateway)
+    what_to_bring_sent = _send_what_to_bring(db, now=now, gateway=gateway)
 
     return JobSummary(
         holds_reclaimed=holds_reclaimed,
@@ -124,4 +175,5 @@ def run_due_jobs(
         waitlist_offers_made=waitlist_run.offers_made,
         waitlist_offers_expired=waitlist_run.offers_expired,
         reminders_sent=reminders_sent,
+        what_to_bring_sent=what_to_bring_sent,
     )

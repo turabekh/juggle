@@ -18,7 +18,9 @@
       <div class="jg-card jg-ops__tile">
         <div class="jg-ops__num">{{ last.reminders_sent }}</div>
         <div class="jg-ops__label">Reminders sent</div>
-        <div class="jg-faint text-caption">T-48h / T-3h pre-session emails</div>
+        <div class="jg-faint text-caption">
+          T-48h / T-3h pre-session · {{ last.what_to_bring_sent }} what-to-bring (T-24h)
+        </div>
       </div>
       <div class="jg-card jg-ops__tile">
         <div class="jg-ops__num">{{ last.waitlist_offers_made }}</div>

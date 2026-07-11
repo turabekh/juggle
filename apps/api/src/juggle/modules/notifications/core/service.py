@@ -22,6 +22,7 @@ KIND_SESSION_CANCELLATION = "session_cancellation"
 KIND_WAITLIST_OFFER = "waitlist_offer"
 KIND_PROVIDER_BROADCAST = "provider_broadcast"
 KIND_SESSION_REMINDER = "session_reminder"
+KIND_WHAT_TO_BRING = "what_to_bring"
 
 
 def _money(cents: int) -> str:
@@ -169,6 +170,33 @@ def notify_provider_broadcast(
         kind=KIND_PROVIDER_BROADCAST,
         subject=full_subject,
         detail={"organisation_name": organisation_name},
+    )
+
+
+def notify_what_to_bring(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    to_email: str,
+    session_title: str,
+    starts_at: datetime,
+    what_to_bring: str,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """The provider's what-to-bring note, sent automatically T-24h (PRD §8.5)."""
+    subject = f"What to bring tomorrow: {session_title}"
+    body = (
+        f"{session_title} is coming up on {starts_at:%a %d %b at %I:%M%p}.\n\n"
+        f"What to bring:\n{what_to_bring}"
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(
+        db,
+        user_id=user_id,
+        to_email=to_email,
+        kind=KIND_WHAT_TO_BRING,
+        subject=subject,
+        detail={},
     )
 
 

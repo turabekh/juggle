@@ -40,7 +40,8 @@ def _log(summary: JobSummary) -> None:
         f"[{ts}] tick: holds_reclaimed={summary.holds_reclaimed} "
         f"waitlist(processed={summary.waitlist_sessions_processed} "
         f"offered={summary.waitlist_offers_made} expired={summary.waitlist_offers_expired}) "
-        f"reminders_sent={summary.reminders_sent}",
+        f"reminders_sent={summary.reminders_sent} "
+        f"what_to_bring_sent={summary.what_to_bring_sent}",
         flush=True,
     )
 

@@ -11,3 +11,4 @@ class JobSummary(BaseModel):
     waitlist_offers_made: int
     waitlist_offers_expired: int
     reminders_sent: int
+    what_to_bring_sent: int

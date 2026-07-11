@@ -182,6 +182,7 @@ def create_session(
         age_max=data.age_max,
         session_type=data.session_type,
         drop_off=data.drop_off,
+        what_to_bring=data.what_to_bring,
     )
     db.add(session)
     db.flush()

@@ -88,6 +88,11 @@
             <q-select v-model="sessionForm.session_type" outlined dense :options="dayTypeOptions" emit-value map-options label="Day type" class="col" />
             <q-toggle v-model="sessionForm.drop_off" label="Drop-off" color="primary" class="col" />
           </div>
+          <q-input
+            v-model="sessionForm.what_to_bring" outlined dense type="textarea" autogrow
+            label="What to bring (optional)"
+            hint="Emailed to families automatically the day before."
+          />
         </q-card-section>
         <q-card-actions align="right" class="q-pb-md q-pr-md">
           <q-btn flat no-caps label="Cancel" v-close-popup />
@@ -270,6 +275,7 @@ const sessionForm = reactive({
   age_max: 12,
   session_type: 'full_day' as 'half_day' | 'full_day',
   drop_off: true,
+  what_to_bring: '',
 })
 
 const sessionValid = computed(
@@ -349,6 +355,7 @@ async function addSession(): Promise<void> {
       age_max: sessionForm.age_max,
       session_type: sessionForm.session_type,
       drop_off: sessionForm.drop_off,
+      what_to_bring: sessionForm.what_to_bring || null,
     })
     showSession.value = false
     sessions.value = await api.catalog.programSessions(props.id)

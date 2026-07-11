@@ -173,4 +173,55 @@ def test_run_endpoint_requires_admin(client: TestClient, make_admin) -> None:
         "waitlist_offers_made",
         "waitlist_offers_expired",
         "reminders_sent",
+        "what_to_bring_sent",
     }
+
+
+def test_what_to_bring_sent_once(client: TestClient, db: Session) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    org_id = client.post(
+        "/api/v1/org", headers=_auth(owner), json={"name": f"Org {uuid.uuid4().hex[:5]}"}
+    ).json()["id"]
+    venue_id = client.post(
+        "/api/v1/catalog/venues",
+        headers=_auth(owner),
+        json={"organisation_id": org_id, "name": "Hall"},
+    ).json()["id"]
+    program_id = client.post(
+        "/api/v1/catalog/programs",
+        headers=_auth(owner),
+        json={"organisation_id": org_id, "title": "Camp", "category": "art"},
+    ).json()["id"]
+    session_id = client.post(
+        f"/api/v1/catalog/programs/{program_id}/sessions",
+        headers=_auth(owner),
+        json={
+            "venue_id": venue_id,
+            "starts_at": START_ISO,
+            "ends_at": END_ISO,
+            "capacity": 5,
+            "price_cents": 5000,
+            "age_min": 4,
+            "age_max": 12,
+            "what_to_bring": "A hat, sunscreen and a water bottle.",
+        },
+    ).json()["id"]
+    client.post(f"/api/v1/catalog/programs/{program_id}/publish", headers=_auth(owner))
+    _book_confirm(client, guardian, session_id)
+
+    now = START - timedelta(hours=20)  # inside the T-24h window
+    first = service.run_due_jobs(db, now=now)
+    assert first.what_to_bring_sent == 1
+    notes = client.get("/api/v1/notifications", headers=_auth(guardian)).json()
+    wtb = [n for n in notes if n["kind"] == "what_to_bring"]
+    assert len(wtb) == 1
+    # Idempotent — a second tick sends nothing more.
+    assert service.run_due_jobs(db, now=now).what_to_bring_sent == 0
+
+
+def test_no_what_to_bring_note_no_email(client: TestClient, db: Session) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    _, session_id = _org_session(client, owner)  # no what_to_bring set
+    _book_confirm(client, guardian, session_id)
+    now = START - timedelta(hours=20)
+    assert service.run_due_jobs(db, now=now).what_to_bring_sent == 0

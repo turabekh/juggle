@@ -363,6 +363,7 @@ export interface SessionCreateInput {
   age_max: number
   session_type: 'half_day' | 'full_day'
   drop_off: boolean
+  what_to_bring?: string | null
 }
 
 // --- Reviews (PRD §7.6) ------------------------------------------------------
@@ -489,4 +490,5 @@ export interface JobSummary {
   waitlist_offers_made: number
   waitlist_offers_expired: number
   reminders_sent: number
+  what_to_bring_sent: number
 }

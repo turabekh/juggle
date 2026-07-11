@@ -103,6 +103,8 @@ class Session(UUIDPkMixin, TimestampMixin, Base):
         Enum(SessionType, name="session_type"), default=SessionType.full_day, nullable=False
     )
     drop_off: Mapped[bool] = mapped_column(default=True, nullable=False)  # vs parent-stays
+    # Provider "what to bring" note, emailed automatically T-24h (PRD §8.5).
+    what_to_bring: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[SessionStatus] = mapped_column(
         Enum(SessionStatus, name="session_status"), default=SessionStatus.scheduled, nullable=False
     )
