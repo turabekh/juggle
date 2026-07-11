@@ -22,3 +22,13 @@ app.use(createPinia())
 app.use(router)
 
 app.mount('#app')
+
+// Register the PWA service worker (production build only, to avoid caching the
+// dev server / interfering with HMR).
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* offline support is best-effort */
+    })
+  })
+}
