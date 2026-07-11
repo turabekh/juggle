@@ -16,7 +16,9 @@ _Last updated: 2026-07-11. Read this first, then `CLAUDE.md` (engineering conven
 > - **PWA (done):** installable web manifest + generated maskable icons + an offline app-shell service worker (dependency-free). Browser-verified.
 > - **SSR (pipeline built, blocked):** the full isomorphic setup exists (app factory, client/server entries, `server.mjs`, SSR-safe guards) but **can't render** — `@quasar/vite-plugin` ships only Quasar's client bundle; Quasar SSR is CLI-only. See §9.
 >
-> **19 domain modules** now; layering `scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ … ▸ audit ▸ events`. See §5.
+> **20 domain modules** now; layering `scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ qanda ▸ waitlist ▸ booking ▸ … ▸ audit ▸ events`. See §5.
+>
+> **Latest batch (2026-07-11):** provider verification badges (§7.2), APP data-deletion (§10.2), compliance expiry auto-tracking (§8.1), listing Q&A (§7.2), and duplicate/bulk session scheduling (§8.2).
 
 ---
 
@@ -65,11 +67,12 @@ Open **http://localhost:9000**.
 ## 3. Current state (facts)
 
 - **41 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 138 pytest passing** (P1 suites + sitemap + anti-hoarding + duplicate-sessions), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean. NB: e2e/browser runs commit data to the dev DB — `make db && (downgrade base→upgrade head) && make seed` before backend tests if the global payout/hold assertions trip.
-- **Frontend e2e: 5 Playwright specs green** (`make web-e2e`, stack up).
+- **Backend: 151 pytest passing** (P1 suites + sitemap + anti-hoarding + duplicate/bulk sessions + verification badges + data-deletion + compliance-expiry + Q&A), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean. NB: e2e/browser runs commit data to the dev DB — reset+reseed (`downgrade base→upgrade head` then `make seed`) before backend tests if the global payout/hold assertions trip.
+- **Frontend: Vitest 15 units + 6 Playwright e2e specs** (`make web-test` / `make web-e2e`, stack up).
+- **20 domain modules** (added `qanda`); **13 Alembic migrations**, head = `8b9699333869` (add_listing_question).
 - **Frontend: vue-tsc + vite build clean.**
-- **12 Alembic migrations**, head = `e08fed049dda` (add_analytics_event). Recent chain tail: … → attendance → guardian_link → session.what_to_bring → analytics_event. The chain round-trips (down to base and back).
-- **19 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`, `scheduler`, `events`).
+- **13 Alembic migrations**, head = `8b9699333869` (add_listing_question). Recent chain tail: … → analytics_event → listing_question. The chain round-trips (down to base and back).
+- **20 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`, `scheduler`, `events`, `qanda`).
 - **Background worker**: `make worker` (one tick) / `make worker-loop` (every 5 min); also the compose `worker` service.
 - Stack: FastAPI + SQLAlchemy 2 + PostgreSQL/PostGIS + Alembic (`apps/api`); Vite + Vue 3 (TS) + Quasar SPA (`apps/web`).
 
@@ -78,7 +81,7 @@ Open **http://localhost:9000**.
 ## 4. Architecture
 
 ### Backend module layering (enforced by import-linter)
-19 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
+20 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
 
 1. **`core` never imports FastAPI/Starlette.**
 2. **Strict acyclic layering** (high→low — a module may import only modules **below** it):
@@ -144,7 +147,10 @@ Open **http://localhost:9000**.
 
 ### Provider console (`/provider`, any signed-in user)
 - Create org → **compliance** (ABN, WWCC per staff, insurance ref — all land `pending`) → venues → programs → sessions → **publish** (suspended orgs can't publish) → **rosters** (with CSV export + **morning-of tap-to-check-in**, §8.3) → **cancel session** (→ refund + notify families) → **Earnings** (payouts view).
-- **Duplicate-from-last-cycle (P1, §8.2)**: one-click **re-list** — copy all of a program's non-cancelled sessions shifted forward by whole days (preserving time-of-day/venue/pricing, seats reset). `POST /catalog/programs/{id}/duplicate-sessions`; "Duplicate to new dates" on the program page. (PRD's lever for provider relist rate.)
+- **Duplicate-from-last-cycle + bulk creation (P1, §8.2)**: one-click **re-list** (`POST …/duplicate-sessions`, shift all sessions forward) and **"Add several"** (`POST …/bulk-sessions`, a template × date range, weekdays-only, items generated client-side). PRD's levers for provider relist rate.
+- **Listing Q&A (P1, §7.2)**: parents ask questions on a listing; the provider answers (both public). `qanda` module; "Questions" section on the listing + a provider answering inbox ("N to answer").
+- **Verification badges (P1, §7.2)**: listing detail shows provider trust chips — Verified provider / WWCC on file / Insured / ABN registered — from `org.verification_badges` (approved + ≥1 *verified* WWCC/insurance; kept honest by compliance-expiry).
+- **Compliance expiry (P1, §8.1)**: the scheduler auto-transitions WWCC/insurance past their date to `expired`; the provider org page flags "Expires in N days" / "Expired".
 - **Message families (P1, PRD §8.5)**: per-session **broadcast** — a template-guarded dialog (What to bring / Reminder / Update / Custom presets) sends to every confirmed family via the notifications gateway and records outbound history; recipient count reported. No free-text parent↔provider chat (PRD §8.5).
 - **Insights (P1, PRD §8.6)**: org **analytics** — seats-filled %, gross bookings revenue, new-vs-returning family mix, and a per-program fill-rate + revenue rollup. Full sessions also show live **waitlist queue counts**.
 
@@ -157,6 +163,7 @@ Open **http://localhost:9000**.
 - **Audit log**: every consequential action, filterable, records the **true actor** even under impersonation.
 - **Impersonation**: user email/name search → **view-as** (read-only) / **act-as** (mutations audited) → scoped time-boxed token → consumer app with a **persistent support banner** → exit restores admin. Can't impersonate admins/self; ended sessions revoke immediately.
 - **Bookings refund** (`POST /admin/payments/{id}/refund`).
+- **User management + data-deletion (P1, §10.2)**: user lookup, **booking history** (`GET /admin/users/{id}/bookings`), and **APP data-deletion** (`POST /admin/users/{id}/delete`; admins protected). Guardians can self-delete via `DELETE /identity/me` (account page "Delete my account") — PII anonymised, rows kept for financial records, login disabled.
 - **Review moderation** (`/admin/reviews`): pending/published/rejected queue; **approve** (→published) / **reject-with-reason** (audited). Providers reply from their org console; published reviews aggregate to a provider/program rating.
 - **Operations** (`/admin/operations`): **Run maintenance now** triggers one scheduler tick (`POST /scheduler/run`) and shows the summary — reminders sent (incl. T-24h "what to bring"), waitlist offers made/expired/queues checked, seat holds reclaimed. A worker normally runs this on a loop.
 - **Funnel** (`/admin/funnel`, P1 §13): windowed bar breakdown of the product event taxonomy (searches → listings viewed → checkouts started/completed → cancelled; plus sessions filled, listings published, provider signups). Reads `analytics_event` via `GET /analytics/funnel`.
@@ -216,11 +223,12 @@ Open **http://localhost:9000**.
 
 ## 10. Suggested next work (roughly prioritized)
 
-**Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** The payment-free P1 surface is now largely built: Reviews (§7.6), Waitlist (§7.7), Comms + Analytics (§8.5/§8.6), scheduler/worker (§7.5/§7.7), attendance check-in (§8.3), multiple guardians (§7.3), automated T-24h "what to bring" (§8.5), and funnel instrumentation (§13). Remaining payment-free slices:
+**Direction (2026-07-11): payments deferred; focus on Phase-1 product.** The payment-free P1 surface is now essentially complete — Reviews (§7.6), Waitlist (§7.7), Comms + Analytics (§8.5/§8.6), scheduler/worker (§7.5/§7.7), attendance (§8.3), multi-guardian (§7.3), T-24h what-to-bring (§8.5), funnel (§13), PWA, SEO, anti-hoarding, verification badges (§7.2), data-deletion (§10.2), compliance-expiry (§8.1), listing Q&A (§7.2), and duplicate + bulk session scheduling (§8.2). **Vitest + Playwright suites are committed.** What's left needs deferred/external work:
 
-1. **Full request-time SSR / PWA (§7.1)** — SEO for listing pages is now handled client-side (meta + JSON-LD + sitemap, indexed by Googlebot); true SSR (non-JS crawlers, faster first paint) + an installable PWA are the remaining frontend-infra items. This is a large, higher-risk change to the serving model — scope it deliberately.
-2. **Per-cycle funnel dashboards / conversion rates (§13)** — the `analytics_event` log is captured; build richer views on top if wanted.
-3. **Google/Apple SSO (§7.3)** and **SMS via Twilio behind a gateway (§8.5)** — need external integrations.
+1. **Full request-time SSR (§7.1)** — SEO is already client-side (indexed by Googlebot); the SSR pipeline is built but blocked on a Quasar-CLI migration (see §9). PWA is done.
+2. **Duplicate-account merge (§10.2 P1)** — the other half of admin user management (deletion + lookup + booking history are done).
+3. **Google/Apple SSO (§7.3)**, **SMS via Twilio (§8.5)** — external integrations.
+4. **CI wiring** for the frontend suites (e2e needs a stack-orchestrating runner).
 
 Deferred (need payments or external integrations, revisit later):
 - **Payout auto-release** in the scheduler (payment-touching — currently manual admin "Run due payouts").
