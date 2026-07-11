@@ -69,6 +69,8 @@ class PaymentGateway(Protocol):
 
     def confirm(self, intent_id: str) -> PaymentConfirmResult: ...
 
+    def cancel_payment_intent(self, intent_id: str) -> PaymentConfirmResult: ...
+
     def refund(self, intent_id: str, amount_cents: int) -> RefundResult: ...
 
     def transfer(self, *, destination: str | None, amount_cents: int) -> TransferResult: ...
@@ -110,6 +112,10 @@ class FakeGateway:
     def confirm(self, intent_id: str) -> PaymentConfirmResult:
         self._intents[intent_id] = "succeeded"
         return PaymentConfirmResult(id=intent_id, status="succeeded", succeeded=True)
+
+    def cancel_payment_intent(self, intent_id: str) -> PaymentConfirmResult:
+        self._intents[intent_id] = "canceled"
+        return PaymentConfirmResult(id=intent_id, status="canceled", succeeded=False)
 
     def refund(self, intent_id: str, amount_cents: int) -> RefundResult:
         return RefundResult(id=f"re_fake_{uuid.uuid4().hex}", status="succeeded")
@@ -174,6 +180,14 @@ class StripeGateway:
         intent = self._client.payment_intents.retrieve(intent_id)
         return PaymentConfirmResult(
             id=intent.id, status=intent.status or "", succeeded=intent.status == "succeeded"
+        )
+
+    def cancel_payment_intent(self, intent_id: str) -> PaymentConfirmResult:
+        # Terminal outcome for an abandoned checkout (ADR-0005 §1): hard-cancel the PI so
+        # a late webhook can no longer succeed and strand the freed seat.
+        intent = self._client.payment_intents.cancel(intent_id)
+        return PaymentConfirmResult(
+            id=intent.id, status=intent.status or "canceled", succeeded=False
         )
 
     def refund(self, intent_id: str, amount_cents: int) -> RefundResult:

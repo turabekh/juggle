@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from juggle.modules.booking.core import service as booking_service
 from juggle.modules.booking.core.models import Booking, BookingStatus
 from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.catalog.core.models import Session as ProgramSession
@@ -26,6 +27,7 @@ from juggle.modules.inventory.core import service as inventory_service
 from juggle.modules.notifications.core import service as notifications_service
 from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
 from juggle.modules.org.core import service as org_service
+from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
 from juggle.modules.scheduler.core.models import SessionReminder
 from juggle.modules.scheduler.core.schemas import JobSummary
 from juggle.modules.waitlist.core import service as waitlist_service
@@ -159,12 +161,23 @@ def _send_what_to_bring(db: Session, *, now: datetime, gateway: EmailGateway) ->
 
 
 def run_due_jobs(
-    db: Session, *, now: datetime, gateway: EmailGateway | None = None
+    db: Session,
+    *,
+    now: datetime,
+    gateway: EmailGateway | None = None,
+    payment_gateway: PaymentGateway | None = None,
 ) -> JobSummary:
     """Execute one maintenance tick. Idempotent; safe to call on any cadence."""
     if gateway is None:
         gateway = get_email_gateway()
+    if payment_gateway is None:
+        payment_gateway = get_payment_gateway()
 
+    # Free abandoned checkouts BEFORE waitlist processing so the freed seats can be
+    # offered on this same tick.
+    abandoned = booking_service.sweep_abandoned_checkouts(
+        db, gateway=payment_gateway, now=now
+    )
     holds_reclaimed = inventory_service.reclaim_all_expired(db, now=now)
     waitlist_run = waitlist_service.process_all(db)
     reminders_sent = _send_reminders(db, now=now, gateway=gateway)
@@ -173,6 +186,7 @@ def run_due_jobs(
 
     return JobSummary(
         holds_reclaimed=holds_reclaimed,
+        abandoned_checkouts_swept=abandoned,
         waitlist_sessions_processed=waitlist_run.sessions_processed,
         waitlist_offers_made=waitlist_run.offers_made,
         waitlist_offers_expired=waitlist_run.offers_expired,

@@ -20,7 +20,7 @@ checkout with the same key returns the original order instead of re-charging.
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from juggle.modules.booking.core.models import Booking, BookingChild, BookingStatus
@@ -125,6 +125,18 @@ def _bookings_for_payment(db: Session, payment_id: uuid.UUID) -> list[Booking]:
     )
 
 
+def _charged_quantity(db: Session, booking: Booking) -> int:
+    """Seats charged at checkout for this booking — the immutable hold quantity, not a
+    live child count (a child deleted post-checkout must not under-accrue; ADR-0005 §6)."""
+    if booking.seat_hold_id is not None:
+        hold = db.get(SeatHold, booking.seat_hold_id)
+        if hold is not None:
+            return hold.quantity
+    return db.scalar(
+        select(func.count(BookingChild.id)).where(BookingChild.booking_id == booking.id)
+    ) or 0
+
+
 def _child_names(db: Session, booking_id: uuid.UUID) -> list[str]:
     names: list[str] = []
     for link in db.scalars(select(BookingChild).where(BookingChild.booking_id == booking_id)):
@@ -164,13 +176,17 @@ def order_calendar(db: Session, *, payment_id: uuid.UUID, guardian_id: uuid.UUID
     return notifications_service.order_ics(_confirmation_sessions(db, payment.id))
 
 
-def _order_view(db: Session, payment: Payment) -> OrderOut:
+def _order_view(
+    db: Session, payment: Payment, *, client_secret: str | None = None
+) -> OrderOut:
     return OrderOut(
         payment_id=payment.id,
         amount_cents=payment.amount_cents,
         application_fee_cents=payment.application_fee_cents,
+        fee_gst_cents=payment.fee_gst_cents,
         currency=payment.currency,
         status=payment.status.value,
+        client_secret=client_secret,
         bookings=[_booking_out(db, b) for b in _bookings_for_payment(db, payment.id)],
     )
 
@@ -229,10 +245,34 @@ def checkout(
         total += session.price_cents * hold.quantity
         prepared.append((hold, session, program, item.children))
 
-    payment = payments_service.create_payment(
+    # Firm every seat BEFORE talking to Stripe (ADR-0005 §1): a reserved hold counts
+    # against capacity but is no longer reclaimed by the TTL sweep, so a reclaim during
+    # the payment round-trip can't strand a paid seat. reserve_hold locks the session and
+    # re-checks under the lock; a False means the seat was lost between hold and checkout.
+    checkout_window = config_service.checkout_window_seconds(db)
+    for hold, _session, _program, _children in prepared:
+        if not inventory_service.reserve_hold(db, hold_id=hold.id):
+            raise HoldExpired(str(hold.id))
+        # expires_at becomes the checkout deadline the abandoned-checkout sweep reads.
+        hold.expires_at = now + timedelta(seconds=checkout_window)
+
+    # Per-session rounding of the take-rate so the parts sum to the charge (ADR-0002).
+    fee_rate = config_service.platform_fee_rate(db)
+    gst_rate = config_service.gst_rate(db)
+    fee_total = 0
+    gst_total = 0
+    for hold, session, _program, _children in prepared:
+        line = session.price_cents * hold.quantity
+        fee, gst, _net = payments_service.take_rate(line, fee_rate, gst_rate)
+        fee_total += fee
+        gst_total += gst
+
+    payment, intent = payments_service.create_payment(
         db,
         guardian_id=guardian_id,
         amount_cents=total,
+        application_fee_cents=fee_total,
+        fee_gst_cents=gst_total,
         idempotency_key=idempotency_key,
         gateway=gateway,
     )
@@ -257,8 +297,6 @@ def checkout(
                     form_answers=child_input.form_answers,
                 )
             )
-        # Extend the hold to cover the payment step (see module docstring).
-        hold.expires_at = now + timedelta(seconds=config_service.checkout_window_seconds(db))
 
     db.flush()
     events_service.record(
@@ -266,7 +304,7 @@ def checkout(
         event_type="checkout_started",
         props={"payment_id": str(payment.id), "sessions": len(prepared)},
     )
-    return _order_view(db, payment)
+    return _order_view(db, payment, client_secret=intent.client_secret)
 
 
 def confirm(
@@ -277,7 +315,10 @@ def confirm(
     gateway: PaymentGateway,
     email_gateway: EmailGateway,
 ) -> OrderOut:
-    payment = payments_service.get_payment(db, payment_id)
+    # Row-lock the payment so a concurrent abandoned-sweep can't flip it to failed on a
+    # stale read after we've decided to confirm (ADR-0005 §3). Under the lock the status
+    # is authoritative: if the sweep already failed it, the pending guard below rejects.
+    payment = payments_service.get_payment_for_update(db, payment_id)
     if payment is None or payment.guardian_id != guardian_id:
         raise PaymentNotFound(str(payment_id))
     if payment.status is PaymentStatus.succeeded:
@@ -293,7 +334,10 @@ def confirm(
         booking.status = BookingStatus.confirmed
         if booking.seat_hold_id is not None:
             hold = db.get(SeatHold, booking.seat_hold_id)
-            if hold is not None and hold.status is SeatHoldStatus.active:
+            if hold is not None and hold.status in (
+                SeatHoldStatus.active,
+                SeatHoldStatus.reserved,
+            ):
                 hold.status = SeatHoldStatus.consumed
     db.flush()
 
@@ -310,25 +354,29 @@ def confirm(
         )
 
     # Accrue each provider's net earnings to a payout, due after the session runs.
+    # Accrue on the CHARGED quantity (the hold), not a live child count, so a child
+    # deleted between checkout and confirm cannot under-accrue (ADR-0005 §6).
     delay_days = config_service.payout_delay_days(db)
     fee_rate = config_service.platform_fee_rate(db)
+    gst_rate = config_service.gst_rate(db)
     for booking in _bookings_for_payment(db, payment.id):
         session_obj = db.get(CatalogSession, booking.session_id)
         if session_obj is None:
             continue
-        gross = booking.unit_price_cents * len(_child_names(db, booking.id))
+        quantity = _charged_quantity(db, booking)
+        gross = booking.unit_price_cents * quantity
         payments_service.accrue_payout(
             db,
             organisation_id=booking.organisation_id,
             session_id=session_obj.id,
-            net_cents=payments_service.provider_net_cents(gross, fee_rate),
+            net_cents=payments_service.provider_net_cents(gross, fee_rate, gst_rate),
             scheduled_for=session_obj.ends_at + timedelta(days=delay_days),
         )
     return _order_view(db, payment)
 
 
 def cancel(db: Session, *, payment_id: uuid.UUID, guardian_id: uuid.UUID) -> OrderOut:
-    payment = payments_service.get_payment(db, payment_id)
+    payment = payments_service.get_payment_for_update(db, payment_id)
     if payment is None or payment.guardian_id != guardian_id:
         raise PaymentNotFound(str(payment_id))
     if payment.status is PaymentStatus.failed:
@@ -351,6 +399,47 @@ def cancel(db: Session, *, payment_id: uuid.UUID, guardian_id: uuid.UUID) -> Ord
         db, event_type="booking_cancelled", props={"payment_id": str(payment.id)}
     )
     return _order_view(db, payment)
+
+
+def sweep_abandoned_checkouts(
+    db: Session, *, gateway: PaymentGateway, now: datetime | None = None
+) -> int:
+    """Terminal outcome for checkouts that never completed (ADR-0005 §1): for each
+    pending payment older than the checkout window, hard-cancel the PaymentIntent (so a
+    late webhook can't strand the seat), free the reserved seats, and fail the order.
+
+    This is the ONLY reclaimer of a firm reservation — the TTL sweep deliberately skips
+    reserved holds — so it is load-bearing and idempotent (a re-run finds nothing pending).
+    """
+    moment = now or datetime.now(UTC)
+    deadline = moment - timedelta(seconds=config_service.checkout_window_seconds(db))
+    # FOR UPDATE SKIP LOCKED so concurrent ticks don't double-sweep. A payment being
+    # confirmed/cancelled right now takes its own FOR UPDATE on the row (confirm/cancel),
+    # so either this sweep skips it (already locked) or that path blocks on our lock and
+    # then sees `failed` and rejects — the confirm-vs-settle race is serialised (ADR-0005 §3).
+    stale = db.scalars(
+        select(Payment)
+        .where(
+            Payment.status == PaymentStatus.pending,
+            Payment.created_at < deadline,
+        )
+        .with_for_update(skip_locked=True)
+    ).all()
+    swept = 0
+    for payment in stale:
+        if payment.stripe_payment_intent_id is not None:
+            gateway.cancel_payment_intent(payment.stripe_payment_intent_id)
+        for booking in _bookings_for_payment(db, payment.id):
+            booking.status = BookingStatus.cancelled
+            if booking.seat_hold_id is not None:
+                inventory_service.force_release(db, hold_id=booking.seat_hold_id)
+        payments_service.mark_failed(db, payment)
+        events_service.record(
+            db, event_type="checkout_abandoned", props={"payment_id": str(payment.id)}
+        )
+        swept += 1
+    db.flush()
+    return swept
 
 
 def list_bookings(db: Session, guardian_id: uuid.UUID) -> list[BookingOut]:

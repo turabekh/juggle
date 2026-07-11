@@ -15,10 +15,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from juggle.modules.config.core import service as config_service
 from juggle.modules.identity.core import service as identity_service
 from juggle.modules.org.core import service as org_service
-from juggle.modules.payments.core.gateway import AccountLinkResult, PaymentGateway
+from juggle.modules.payments.core.gateway import (
+    AccountLinkResult,
+    PaymentGateway,
+    PaymentIntentResult,
+)
 from juggle.modules.payments.core.models import (
     Payment,
     PaymentStatus,
@@ -45,8 +48,21 @@ class PayoutNotFound(Exception):
 
 
 def application_fee_cents(amount_cents: int, fee_rate: float) -> int:
-    # GST on the fee is a separate invoicing line (D-02); this is commission only.
+    # The 10% commission, ex-GST — platform revenue (ADR-0002).
     return round(amount_cents * fee_rate)
+
+
+def fee_gst_cents(fee_cents: int, gst_rate: float) -> int:
+    # GST on the commission — the platform remits this to the ATO (ADR-0002, INV-6).
+    return round(fee_cents * gst_rate)
+
+
+def take_rate(line_cents: int, fee_rate: float, gst_rate: float) -> tuple[int, int, int]:
+    """Split one GST-inclusive line into (fee, gst, net) with per-session rounding
+    (ADR-0002). ``net`` is the derived remainder so fee+gst+net == line_cents exactly."""
+    fee = application_fee_cents(line_cents, fee_rate)
+    gst = fee_gst_cents(fee, gst_rate)
+    return fee, gst, line_cents - fee - gst
 
 
 def create_payment(
@@ -54,14 +70,19 @@ def create_payment(
     *,
     guardian_id: uuid.UUID,
     amount_cents: int,
+    application_fee_cents: int,
+    fee_gst_cents: int,
     idempotency_key: str,
     gateway: PaymentGateway,
     currency: str = "aud",
-) -> Payment:
-    fee = application_fee_cents(amount_cents, config_service.platform_fee_rate(db))
+) -> tuple[Payment, PaymentIntentResult]:
+    """Create the Stripe PaymentIntent (separate charge — no application_fee/destination,
+    ADR-0001/0005) and the local Payment row. The caller passes the per-session-summed
+    fee + GST so rounding stays per-session (ADR-0002). Returns the payment and the intent
+    so the caller can hand the client_secret to the Payment Element."""
     intent = gateway.create_payment_intent(
         amount_cents=amount_cents,
-        application_fee_cents=fee,
+        application_fee_cents=application_fee_cents,
         currency=currency,
         idempotency_key=idempotency_key,
     )
@@ -70,13 +91,14 @@ def create_payment(
         stripe_payment_intent_id=intent.id,
         idempotency_key=idempotency_key,
         amount_cents=amount_cents,
-        application_fee_cents=fee,
+        application_fee_cents=application_fee_cents,
+        fee_gst_cents=fee_gst_cents,
         currency=currency,
         status=PaymentStatus.pending,
     )
     db.add(payment)
     db.flush()
-    return payment
+    return payment, intent
 
 
 def find_by_idempotency_key(
@@ -92,6 +114,12 @@ def find_by_idempotency_key(
 
 def get_payment(db: Session, payment_id: uuid.UUID) -> Payment | None:
     return db.get(Payment, payment_id)
+
+
+def get_payment_for_update(db: Session, payment_id: uuid.UUID) -> Payment | None:
+    """Row-locked read for settlement transitions (confirm / cancel / sweep), so two
+    paths can't act on a stale ``pending`` read of the same payment (ADR-0005 §3)."""
+    return db.scalar(select(Payment).where(Payment.id == payment_id).with_for_update())
 
 
 def mark_succeeded(db: Session, payment: Payment, *, gateway: PaymentGateway) -> Payment:
@@ -256,9 +284,10 @@ def handle_webhook(db: Session, *, payload: bytes, sig_header: str, secret: str)
 
 # --- Payouts (PRD §8.4) -----------------------------------------------------
 
-def provider_net_cents(gross_cents: int, fee_rate: float) -> int:
-    """What the provider earns after the platform commission."""
-    return gross_cents - application_fee_cents(gross_cents, fee_rate)
+def provider_net_cents(gross_cents: int, fee_rate: float, gst_rate: float) -> int:
+    """What the provider earns after the platform commission and its GST (ADR-0002)."""
+    _fee, _gst, net = take_rate(gross_cents, fee_rate, gst_rate)
+    return net
 
 
 def accrue_payout(

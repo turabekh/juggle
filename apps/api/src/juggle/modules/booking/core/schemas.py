@@ -44,8 +44,11 @@ class OrderOut(BaseModel):
     payment_id: uuid.UUID
     amount_cents: int
     application_fee_cents: int
+    fee_gst_cents: int = 0
     currency: str
     status: str
+    # PaymentIntent client_secret for the Payment Element — only on a fresh checkout.
+    client_secret: str | None = None
     bookings: list[BookingOut]
 
 

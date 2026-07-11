@@ -97,8 +97,8 @@ def test_confirm_accrues_net_payout(client: TestClient) -> None:
     assert payouts.status_code == 200
     rows = payouts.json()
     assert len(rows) == 1
-    # $100 gross - 10% fee = $90 net to the provider.
-    assert rows[0]["amount_cents"] == 9000
+    # $100 gross − 10% fee ($10) − GST on the fee ($1) = $89 net (ADR-0002).
+    assert rows[0]["amount_cents"] == 8900
     assert rows[0]["status"] == "scheduled"
 
     # Two bookings on the same session accumulate into one payout.
@@ -107,7 +107,71 @@ def test_confirm_accrues_net_payout(client: TestClient) -> None:
         "/api/v1/payments/payouts", headers=_auth(owner), params={"organisation_id": org_id}
     ).json()
     assert len(rows) == 1
-    assert rows[0]["amount_cents"] == 18000
+    assert rows[0]["amount_cents"] == 17800
+
+
+def test_order_reconciles_to_fee_plus_gst_plus_net(client: TestClient) -> None:
+    """INV-6/ADR-0002: for a multi-session cart, amount_cents == Σfee + Σgst + Σnet, with
+    per-session rounding — the platform take plus every provider payout close to the charge."""
+    owner, guardian = _signup(client), _signup(client)
+    org_id = client.post(
+        "/api/v1/org", headers=_auth(owner), json={"name": f"Org {uuid.uuid4().hex[:5]}"}
+    ).json()["id"]
+    venue_id = client.post(
+        "/api/v1/catalog/venues", headers=_auth(owner),
+        json={"organisation_id": org_id, "name": "Hall"},
+    ).json()["id"]
+    program_id = client.post(
+        "/api/v1/catalog/programs", headers=_auth(owner),
+        json={"organisation_id": org_id, "title": "Camp", "category": "art"},
+    ).json()["id"]
+    # Two past sessions with awkward prices so rounding actually bites.
+    session_ids = []
+    for price in (5001, 3333):
+        sid = client.post(
+            f"/api/v1/catalog/programs/{program_id}/sessions", headers=_auth(owner),
+            json={
+                "venue_id": venue_id,
+                "starts_at": "2026-01-05T01:00:00Z",
+                "ends_at": "2026-01-05T07:00:00Z",
+                "capacity": 5,
+                "price_cents": price,
+                "age_min": 4,
+                "age_max": 12,
+            },
+        ).json()["id"]
+        session_ids.append(sid)
+    client.post(f"/api/v1/catalog/programs/{program_id}/publish", headers=_auth(owner))
+
+    items = []
+    for sid in session_ids:
+        hold_id = client.post(
+            "/api/v1/inventory/holds", headers=_auth(guardian),
+            json={"session_id": sid, "quantity": 1},
+        ).json()["id"]
+        child_id = client.post(
+            "/api/v1/identity/children", headers=_auth(guardian),
+            json={"first_name": "Kid", "date_of_birth": "2018-01-01"},
+        ).json()["id"]
+        items.append({"hold_id": hold_id, "children": [{"child_id": child_id}]})
+
+    order = client.post(
+        "/api/v1/booking/checkout", headers=_auth(guardian),
+        json={"idempotency_key": f"key-{uuid.uuid4().hex}", "items": items},
+    ).json()
+    client.post(f"/api/v1/booking/payments/{order['payment_id']}/confirm", headers=_auth(guardian))
+
+    net_total = sum(
+        p["amount_cents"]
+        for p in client.get(
+            "/api/v1/payments/payouts", headers=_auth(owner), params={"organisation_id": org_id}
+        ).json()
+    )
+    assert (
+        order["application_fee_cents"] + order["fee_gst_cents"] + net_total
+        == order["amount_cents"]
+        == 5001 + 3333
+    )
 
 
 def test_admin_runs_due_payouts(client: TestClient, make_admin: Callable[[], str]) -> None:
@@ -120,7 +184,7 @@ def test_admin_runs_due_payouts(client: TestClient, make_admin: Callable[[], str
     run = client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
     assert run.status_code == 200
     assert run.json()["released"] == 1
-    assert run.json()["total_cents"] == 7200  # 8000 - 10%
+    assert run.json()["total_cents"] == 7120  # 8000 − 10% fee − GST on the fee (ADR-0002)
 
     # Now it's paid, not scheduled.
     scheduled = client.get(
@@ -130,7 +194,7 @@ def test_admin_runs_due_payouts(client: TestClient, make_admin: Callable[[], str
     paid = client.get(
         "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "paid"}
     ).json()
-    assert any(p["amount_cents"] == 7200 for p in paid)
+    assert any(p["amount_cents"] == 7120 for p in paid)
 
 
 def test_future_payout_not_released(client: TestClient, make_admin: Callable[[], str]) -> None:

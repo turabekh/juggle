@@ -12,6 +12,7 @@ class PaymentOut(BaseModel):
     id: uuid.UUID
     amount_cents: int
     application_fee_cents: int
+    fee_gst_cents: int = 0
     currency: str
     status: str
 

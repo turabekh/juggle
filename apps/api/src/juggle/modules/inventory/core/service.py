@@ -17,7 +17,7 @@ model directly to hold the lock.
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from juggle.modules.catalog.core.models import Session as ProgramSession
@@ -115,14 +115,20 @@ def hold_seats(
     _reclaim_expired(db, session_obj, now=now)
 
     # Anti-hoarding: cap a guardian's concurrent live holds (PRD fraud basics).
-    # Counts holds that are still active and unexpired across all sessions.
+    # Counts unexpired browsing holds plus firm checkout reservations, across all
+    # sessions, so a guardian can't pin seats by leaving carts mid-checkout.
     limit = config_service.max_active_holds_per_guardian(db)
     active_holds = (
         db.scalar(
             select(func.count(SeatHold.id)).where(
                 SeatHold.held_by_id == held_by_id,
-                SeatHold.status == SeatHoldStatus.active,
-                SeatHold.expires_at >= now,
+                or_(
+                    and_(
+                        SeatHold.status == SeatHoldStatus.active,
+                        SeatHold.expires_at >= now,
+                    ),
+                    SeatHold.status == SeatHoldStatus.reserved,
+                ),
             )
         )
         or 0
@@ -150,13 +156,37 @@ def hold_seats(
     return hold, session_obj
 
 
+def reserve_hold(db: Session, *, hold_id: uuid.UUID) -> bool:
+    """Convert an active browsing hold into a firm checkout reservation (ADR-0005).
+    The seat stays counted but is no longer reclaimed by the TTL sweep; only an
+    explicit terminal outcome (confirm/cancel/abandoned-sweep) resolves it.
+
+    Takes the session lock and re-reads the hold under it, so a concurrent TTL
+    reclaim can't expire the seat between the caller's check and this transition
+    (that would strand a paid seat). Returns False if the seat was already lost.
+    """
+    hold = db.get(SeatHold, hold_id)
+    if hold is None:
+        return False
+    _lock_session(db, hold.session_id)
+    db.refresh(hold)
+    if hold.status is not SeatHoldStatus.active:
+        return False
+    hold.status = SeatHoldStatus.reserved
+    db.flush()
+    return True
+
+
 def release_hold(db: Session, *, hold_id: uuid.UUID, actor_id: uuid.UUID) -> None:
     hold = db.get(SeatHold, hold_id)
     if hold is None or hold.held_by_id != actor_id:
         raise HoldNotFound(str(hold_id))
-    if hold.status is not SeatHoldStatus.active:
-        return  # already released/expired/consumed — nothing to give back
+    # Lock the session, THEN re-read the hold, so two concurrent releasers can't both
+    # pass the status guard and double-decrement seats_taken (INV-1).
     session_obj = _lock_session(db, hold.session_id)
+    db.refresh(hold)
+    if hold.status not in (SeatHoldStatus.active, SeatHoldStatus.reserved):
+        return  # already released/expired/consumed — nothing to give back
     if session_obj is not None:
         session_obj.seats_taken -= hold.quantity
     hold.status = SeatHoldStatus.released
@@ -164,15 +194,21 @@ def release_hold(db: Session, *, hold_id: uuid.UUID, actor_id: uuid.UUID) -> Non
 
 
 def force_release(db: Session, *, hold_id: uuid.UUID) -> None:
-    """Release a hold regardless of owner — for provider/admin session cancels.
+    """Release a hold regardless of owner — for provider/admin session cancels and
+    the abandoned-checkout sweep.
 
-    Gives seats back for both active (pending) and consumed (confirmed) holds,
-    under the session row lock.
+    Gives seats back for active (browsing), reserved (mid-checkout), and consumed
+    (confirmed) holds. Locks the session first, then re-reads the hold under the lock,
+    so concurrent releasers (e.g. a provider cancel racing the sweep) can't both
+    decrement seats_taken for the same hold (INV-1).
     """
     hold = db.get(SeatHold, hold_id)
-    if hold is None or hold.status in (SeatHoldStatus.released, SeatHoldStatus.expired):
+    if hold is None:
         return
     session_obj = _lock_session(db, hold.session_id)
+    db.refresh(hold)
+    if hold.status in (SeatHoldStatus.released, SeatHoldStatus.expired):
+        return
     if session_obj is not None:
         session_obj.seats_taken -= hold.quantity
     hold.status = SeatHoldStatus.released

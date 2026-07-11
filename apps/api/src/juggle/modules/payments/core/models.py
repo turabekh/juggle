@@ -38,6 +38,7 @@ class Payment(UUIDPkMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("amount_cents >= 0", name="ck_payment_amount_nonneg"),
         CheckConstraint("application_fee_cents >= 0", name="ck_payment_fee_nonneg"),
+        CheckConstraint("fee_gst_cents >= 0", name="ck_payment_fee_gst_nonneg"),
     )
 
     guardian_id: Mapped[uuid.UUID] = mapped_column(
@@ -51,6 +52,8 @@ class Payment(UUIDPkMixin, TimestampMixin, Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     application_fee_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # GST on the commission (ADR-0002); platform remits to the ATO. Deducted from payout.
+    fee_gst_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="aud", nullable=False)
     status: Mapped[PaymentStatus] = mapped_column(
         Enum(PaymentStatus, name="payment_status"), default=PaymentStatus.pending, nullable=False

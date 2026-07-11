@@ -18,8 +18,9 @@ from juggle.db import Base
 
 
 class SeatHoldStatus(enum.StrEnum):
-    active = "active"        # counting against capacity
-    consumed = "consumed"    # converted into a booking
+    active = "active"        # counting against capacity; reclaimable when its TTL lapses
+    reserved = "reserved"    # firm checkout reservation (ADR-0005) — counts, NOT TTL-reclaimed
+    consumed = "consumed"    # converted into a confirmed booking
     released = "released"    # explicitly given back
     expired = "expired"      # TTL lapsed
 

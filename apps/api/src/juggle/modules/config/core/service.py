@@ -22,6 +22,7 @@ from juggle.modules.config.core.models import PlatformSetting
 
 # Setting keys (stable identifiers stored in the DB).
 KEY_PLATFORM_FEE_RATE = "platform_fee_rate"
+KEY_GST_RATE = "gst_rate"
 KEY_SEAT_HOLD_TTL_SECONDS = "seat_hold_ttl_seconds"
 KEY_CHECKOUT_WINDOW_SECONDS = "checkout_window_seconds"
 KEY_RELIABILITY_CANCELLATION_PENALTY = "reliability_cancellation_penalty"
@@ -45,6 +46,9 @@ class SettingSpec:
 REGISTRY: dict[str, SettingSpec] = {
     KEY_PLATFORM_FEE_RATE: SettingSpec(
         KEY_PLATFORM_FEE_RATE, 0.10, float, 0.0, 0.20, "Marketplace commission rate (0–20%)"
+    ),
+    KEY_GST_RATE: SettingSpec(
+        KEY_GST_RATE, 0.10, float, 0.0, 0.20, "GST rate on the platform commission (ADR-0002)"
     ),
     KEY_SEAT_HOLD_TTL_SECONDS: SettingSpec(
         KEY_SEAT_HOLD_TTL_SECONDS, 900, int, 60, 3600, "Seat-hold time-to-live (seconds)"
@@ -179,6 +183,10 @@ def history(db: Session, key: str) -> list[PlatformSetting]:
 
 def platform_fee_rate(db: Session) -> float:
     return float(get_value(db, KEY_PLATFORM_FEE_RATE))
+
+
+def gst_rate(db: Session) -> float:
+    return float(get_value(db, KEY_GST_RATE))
 
 
 def seat_hold_ttl_seconds(db: Session) -> int:
