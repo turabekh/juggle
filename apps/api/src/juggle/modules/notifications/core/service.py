@@ -21,6 +21,7 @@ KIND_BOOKING_CONFIRMATION = "booking_confirmation"
 KIND_SESSION_CANCELLATION = "session_cancellation"
 KIND_WAITLIST_OFFER = "waitlist_offer"
 KIND_PROVIDER_BROADCAST = "provider_broadcast"
+KIND_SESSION_REMINDER = "session_reminder"
 
 
 def _money(cents: int) -> str:
@@ -168,6 +169,37 @@ def notify_provider_broadcast(
         kind=KIND_PROVIDER_BROADCAST,
         subject=full_subject,
         detail={"organisation_name": organisation_name},
+    )
+
+
+def notify_session_reminder(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    to_email: str,
+    session_title: str,
+    starts_at: datetime,
+    venue_name: str,
+    window: str,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """A pre-session reminder (PRD §7.5). ``window`` ('48h' / '3h') tunes the copy."""
+    when = "in 2 days" if window == "48h" else "soon"
+    subject = f"Reminder: {session_title} is {when}"
+    body = (
+        f"Just a heads-up — {session_title} starts {starts_at:%a %d %b at %I:%M%p} "
+        f"at {venue_name}.\n\n"
+        "Please pack a hat, sunscreen, a labelled water bottle and morning tea. "
+        "See you there!"
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(
+        db,
+        user_id=user_id,
+        to_email=to_email,
+        kind=KIND_SESSION_REMINDER,
+        subject=subject,
+        detail={"window": window},
     )
 
 

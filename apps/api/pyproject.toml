@@ -100,6 +100,7 @@ forbidden_modules = ["fastapi", "starlette"]
 name = "Modules form an acyclic dependency layering (higher imports lower)"
 type = "layers"
 layers = [
+    "juggle.modules.scheduler",
     "juggle.modules.admin",
     "juggle.modules.analytics",
     "juggle.modules.comms",

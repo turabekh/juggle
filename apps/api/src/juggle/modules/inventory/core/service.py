@@ -48,8 +48,9 @@ def _lock_session(db: Session, session_id: uuid.UUID) -> ProgramSession | None:
     ).scalar_one_or_none()
 
 
-def _reclaim_expired(db: Session, session_obj: ProgramSession, *, now: datetime) -> None:
-    """Release seats from active holds whose TTL has lapsed. Runs under the lock."""
+def _reclaim_expired(db: Session, session_obj: ProgramSession, *, now: datetime) -> int:
+    """Release seats from active holds whose TTL has lapsed. Runs under the lock.
+    Returns the number of holds reclaimed."""
     expired = db.scalars(
         select(SeatHold).where(
             SeatHold.session_id == session_obj.id,
@@ -62,6 +63,29 @@ def _reclaim_expired(db: Session, session_obj: ProgramSession, *, now: datetime)
         session_obj.seats_taken -= hold.quantity
     if expired:
         db.flush()
+    return len(expired)
+
+
+def reclaim_all_expired(db: Session, *, now: datetime | None = None) -> int:
+    """Proactively reclaim every session's lapsed holds (for the scheduler sweep).
+
+    Lazy reclaim only runs when a session is read/mutated; this walks all sessions
+    that currently hold an expired active hold and frees the seats under each
+    session's row lock. Returns the total number of holds reclaimed.
+    """
+    if now is None:
+        now = datetime.now(UTC)
+    session_ids = db.scalars(
+        select(SeatHold.session_id)
+        .where(SeatHold.status == SeatHoldStatus.active, SeatHold.expires_at < now)
+        .distinct()
+    ).all()
+    total = 0
+    for session_id in session_ids:
+        session_obj = _lock_session(db, session_id)
+        if session_obj is not None:
+            total += _reclaim_expired(db, session_obj, now=now)
+    return total
 
 
 def hold_seats(

@@ -21,6 +21,7 @@ from juggle.modules.org.ui import router as org_router
 from juggle.modules.payments.ui import router as payments_router
 from juggle.modules.reviews.ui import router as reviews_router
 from juggle.modules.roster.ui import router as roster_router
+from juggle.modules.scheduler.ui import router as scheduler_router
 from juggle.modules.search.ui import router as search_router
 from juggle.modules.waitlist.ui import router as waitlist_router
 
@@ -37,6 +38,7 @@ for _router in (
     waitlist_router,
     comms_router,
     analytics_router,
+    scheduler_router,
     roster_router,
     notifications_router,
     search_router,

@@ -1,0 +1,127 @@
+"""Scheduler service: one idempotent maintenance tick (PRD §7.5, §7.7).
+
+The top of the layering — it orchestrates lower modules on a periodic beat that a
+worker or cron drives. Every job is safe to run repeatedly:
+
+  * ``reclaim_all_expired`` — free seats from lapsed holds proactively.
+  * ``waitlist.process_all`` — offer freed seats / expire lapsed offers.
+  * ``_send_reminders`` — T-48h / T-3h pre-session emails, deduped by a
+    ``SessionReminder`` marker so each window fires exactly once per session.
+
+``now`` is injected so behaviour is deterministic and testable.
+"""
+
+import uuid
+from datetime import datetime, timedelta
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from juggle.modules.booking.core.models import Booking, BookingStatus
+from juggle.modules.catalog.core import service as catalog_service
+from juggle.modules.catalog.core.models import Session as ProgramSession
+from juggle.modules.catalog.core.models import SessionStatus, Venue
+from juggle.modules.identity.core import service as identity_service
+from juggle.modules.inventory.core import service as inventory_service
+from juggle.modules.notifications.core import service as notifications_service
+from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
+from juggle.modules.scheduler.core.models import SessionReminder
+from juggle.modules.scheduler.core.schemas import JobSummary
+from juggle.modules.waitlist.core import service as waitlist_service
+
+# (marker key, hours before start). Ordered widest-first so a session created
+# late still gets its nearest-window reminder.
+REMINDER_WINDOWS: list[tuple[str, int]] = [("48h", 48), ("3h", 3)]
+
+
+def _confirmed_guardian_ids(db: Session, session_id: uuid.UUID) -> list[uuid.UUID]:
+    return list(
+        db.scalars(
+            select(Booking.guardian_id)
+            .where(
+                Booking.session_id == session_id,
+                Booking.status == BookingStatus.confirmed,
+            )
+            .distinct()
+        )
+    )
+
+
+def _already_reminded(db: Session, session_id: uuid.UUID, window: str) -> bool:
+    return (
+        db.scalar(
+            select(SessionReminder.id).where(
+                SessionReminder.session_id == session_id,
+                SessionReminder.window == window,
+            )
+        )
+        is not None
+    )
+
+
+def _send_reminders(db: Session, *, now: datetime, gateway: EmailGateway) -> int:
+    sent = 0
+    for window, hours in REMINDER_WINDOWS:
+        horizon = now + timedelta(hours=hours)
+        sessions = db.scalars(
+            select(ProgramSession).where(
+                ProgramSession.status != SessionStatus.cancelled,
+                ProgramSession.starts_at > now,
+                ProgramSession.starts_at <= horizon,
+            )
+        ).all()
+        for session in sessions:
+            if _already_reminded(db, session.id, window):
+                continue
+            program = catalog_service.get_program(db, session.program_id)
+            venue = db.get(Venue, session.venue_id)
+            title = program.title if program is not None else "your session"
+            venue_name = venue.name if venue is not None else "the venue"
+
+            count = 0
+            for guardian_id in _confirmed_guardian_ids(db, session.id):
+                guardian = identity_service.get_user(db, guardian_id)
+                if guardian is None:
+                    continue
+                notifications_service.notify_session_reminder(
+                    db,
+                    user_id=guardian.id,
+                    to_email=guardian.email,
+                    session_title=title,
+                    starts_at=session.starts_at,
+                    venue_name=venue_name,
+                    window=window,
+                    gateway=gateway,
+                )
+                count += 1
+
+            # Record the marker even when nobody is booked, so we don't re-scan
+            # this window every tick; late bookers are still caught by T-3h.
+            db.add(
+                SessionReminder(
+                    session_id=session.id, window=window, recipient_count=count
+                )
+            )
+            db.flush()
+            sent += count
+    return sent
+
+
+def run_due_jobs(
+    db: Session, *, now: datetime, gateway: EmailGateway | None = None
+) -> JobSummary:
+    """Execute one maintenance tick. Idempotent; safe to call on any cadence."""
+    if gateway is None:
+        gateway = get_email_gateway()
+
+    holds_reclaimed = inventory_service.reclaim_all_expired(db, now=now)
+    waitlist_run = waitlist_service.process_all(db)
+    reminders_sent = _send_reminders(db, now=now, gateway=gateway)
+
+    return JobSummary(
+        holds_reclaimed=holds_reclaimed,
+        waitlist_sessions_processed=waitlist_run.sessions_processed,
+        waitlist_offers_made=waitlist_run.offers_made,
+        waitlist_offers_expired=waitlist_run.offers_expired,
+        reminders_sent=reminders_sent,
+    )
