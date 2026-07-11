@@ -88,7 +88,7 @@ Run from the repo root (see `make help`). Backend commands run in `apps/api` via
 | Module boundary contracts | `make contracts` |
 | Migrations | `make migrate` / `make revision m="..."` |
 | Maintenance worker | `make worker` (one tick) / `make worker-loop` (every 5 min) |
-| Frontend build / unit tests | `make web-build` / `make web-test` (Vitest) |
+| Frontend build / tests | `make web-build`, `make web-test` (Vitest units), `make web-e2e` (Playwright, needs stack up) |
 | **Everything CI runs** | `make check` |
 
 Run `make check` before considering a change finished.
