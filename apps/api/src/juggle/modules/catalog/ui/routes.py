@@ -151,6 +151,32 @@ def create_session(
     return schemas.SessionOut.model_validate(created)
 
 
+@router.post(
+    "/programs/{program_id}/duplicate-sessions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=list[schemas.SessionOut],
+)
+def duplicate_sessions(
+    program_id: uuid.UUID,
+    payload: schemas.DuplicateSessionsIn,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+) -> list[schemas.SessionOut]:
+    """Re-list a program's sessions into a new cycle (PRD §8.2)."""
+    try:
+        created = service.duplicate_program_sessions(
+            session,
+            program_id=program_id,
+            actor_id=principal.user_id,
+            shift_days=payload.shift_days,
+        )
+    except service.ProgramNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Program not found") from exc
+    except service.NotOrgMember as exc:
+        raise _forbid_non_member(exc) from exc
+    return [schemas.SessionOut.model_validate(s) for s in created]
+
+
 @router.get("/programs/{program_id}/sessions", response_model=list[schemas.SessionOut])
 def list_program_sessions(
     program_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep

@@ -200,6 +200,13 @@ export const api = {
       )
       return data
     },
+    async duplicateSessions(programId: string, shiftDays: number): Promise<CatalogSession[]> {
+      const { data } = await http.post<CatalogSession[]>(
+        `/catalog/programs/${programId}/duplicate-sessions`,
+        { shift_days: shiftDays },
+      )
+      return data
+    },
   },
   org: {
     async mine(): Promise<Org[]> {

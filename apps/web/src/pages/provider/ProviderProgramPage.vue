@@ -25,7 +25,14 @@
 
       <div class="row items-center justify-between q-mb-sm">
         <h2 class="text-h6 q-my-none">Sessions</h2>
-        <q-btn unelevated no-caps color="primary" icon="add" label="Add session" :disable="!venues.length" @click="showSession = true" />
+        <div class="row q-gutter-sm">
+          <q-btn
+            v-if="sessions.length"
+            flat no-caps color="primary" icon="content_copy" label="Duplicate to new dates"
+            @click="openDuplicate"
+          />
+          <q-btn unelevated no-caps color="primary" icon="add" label="Add session" :disable="!venues.length" @click="showSession = true" />
+        </div>
       </div>
       <div v-if="!venues.length" class="jg-muted text-caption q-mb-md">
         Add a venue on the organisation page before scheduling sessions.
@@ -97,6 +104,40 @@
         <q-card-actions align="right" class="q-pb-md q-pr-md">
           <q-btn flat no-caps label="Cancel" v-close-popup />
           <q-btn unelevated no-caps color="primary" label="Add session" :loading="saving" :disable="!sessionValid" @click="addSession" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- Duplicate-to-new-dates dialog (PRD §8.2) -->
+    <q-dialog v-model="showDuplicate">
+      <q-card style="min-width: 380px; border-radius: 18px">
+        <q-card-section>
+          <div class="text-h6">Duplicate to new dates</div>
+          <div class="jg-faint text-caption">
+            Copies all {{ sessions.length }} session(s) — same times, venue and pricing —
+            to a new cycle. Pick the date for the <b>first</b> session.
+          </div>
+        </q-card-section>
+        <q-card-section>
+          <q-input
+            v-model="dupForm.newFirstDate" outlined dense type="date"
+            label="New first-session date" stack-label
+          />
+          <div v-if="dupShiftDays !== null && dupShiftDays >= 1" class="jg-faint text-caption q-mt-sm">
+            Shifts every session forward by {{ dupShiftDays }} day(s).
+          </div>
+          <div v-else-if="dupForm.newFirstDate" class="text-negative text-caption q-mt-sm">
+            Pick a date after the current first session ({{ firstSessionDate }}).
+          </div>
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated no-caps color="primary" icon="content_copy" label="Duplicate"
+            :loading="duplicating"
+            :disable="dupShiftDays === null || dupShiftDays < 1"
+            @click="doDuplicate"
+          />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -198,6 +239,9 @@ const venues = ref<Venue[]>([])
 const publishing = ref(false)
 const saving = ref(false)
 const showSession = ref(false)
+const showDuplicate = ref(false)
+const duplicating = ref(false)
+const dupForm = reactive({ newFirstDate: '' })
 const showRoster = ref(false)
 const roster = ref<RosterOut | null>(null)
 const waitlistCounts = ref<Record<string, SessionWaitlist>>({})
@@ -289,6 +333,52 @@ const sessionValid = computed(
 
 function venueName(id: string): string {
   return venues.value.find((v) => v.id === id)?.name ?? 'Venue'
+}
+
+// --- Duplicate to new dates (PRD §8.2) ---
+const firstSession = computed(
+  () =>
+    [...sessions.value]
+      .filter((s) => s.status !== 'cancelled')
+      .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0] ?? null,
+)
+const firstSessionDate = computed(() =>
+  firstSession.value ? dayLabel(firstSession.value.starts_at) : '',
+)
+const dupShiftDays = computed<number | null>(() => {
+  if (!firstSession.value || !dupForm.newFirstDate) return null
+  const a = new Date(firstSession.value.starts_at)
+  const start = new Date(a.getFullYear(), a.getMonth(), a.getDate())
+  const [y, m, d] = dupForm.newFirstDate.split('-').map(Number)
+  const target = new Date(y, m - 1, d)
+  return Math.round((target.getTime() - start.getTime()) / 86_400_000)
+})
+
+function openDuplicate(): void {
+  const base = firstSession.value ? new Date(firstSession.value.starts_at) : new Date()
+  base.setDate(base.getDate() + 84) // ~ next holiday cycle; a starting point
+  const iso = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`
+  dupForm.newFirstDate = iso
+  showDuplicate.value = true
+}
+
+async function doDuplicate(): Promise<void> {
+  if (dupShiftDays.value === null || dupShiftDays.value < 1) return
+  duplicating.value = true
+  try {
+    const created = await api.catalog.duplicateSessions(props.id, dupShiftDays.value)
+    showDuplicate.value = false
+    $q.notify({
+      type: 'positive',
+      message: `Duplicated ${created.length} session(s) to the new dates.`,
+    })
+    sessions.value = await api.catalog.programSessions(props.id)
+    await loadWaitlistCounts()
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not duplicate sessions') })
+  } finally {
+    duplicating.value = false
+  }
 }
 
 function waitlistLabel(sessionId: string): string {

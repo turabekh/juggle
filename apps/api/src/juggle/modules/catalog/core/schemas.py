@@ -72,6 +72,11 @@ class SessionCreate(BaseModel):
         return self
 
 
+class DuplicateSessionsIn(BaseModel):
+    # Whole-day forward shift applied to every session (preserves time-of-day).
+    shift_days: int = Field(ge=1, le=730)
+
+
 class SessionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

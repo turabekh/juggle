@@ -6,7 +6,7 @@ organisation. It does not reach into org's models directly.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from geoalchemy2.elements import WKTElement
 from sqlalchemy import select
@@ -200,6 +200,51 @@ def create_sessions_bulk(
 ) -> list[ProgramSession]:
     """Create many sessions in one transaction (PRD §8.2 bulk creation)."""
     return [create_session(db, program_id=program_id, actor_id=actor_id, data=i) for i in items]
+
+
+def duplicate_program_sessions(
+    db: Session, *, program_id: uuid.UUID, actor_id: uuid.UUID, shift_days: int
+) -> list[ProgramSession]:
+    """Re-list a program for the next cycle (PRD §8.2, "duplicate-from-last-cycle
+    — critical for relist rate"): copy every non-cancelled session shifted forward
+    by whole days, preserving time-of-day, venue, pricing, ages and what-to-bring.
+    Seats reset to zero and each copy starts ``scheduled``."""
+    program = db.get(Program, program_id)
+    if program is None:
+        raise ProgramNotFound(str(program_id))
+    _require_member(db, program.organisation_id, actor_id)
+
+    shift = timedelta(days=shift_days)
+    originals = list(
+        db.scalars(
+            select(ProgramSession)
+            .where(
+                ProgramSession.program_id == program_id,
+                ProgramSession.status != SessionStatus.cancelled,
+            )
+            .order_by(ProgramSession.starts_at)
+        )
+    )
+    created: list[ProgramSession] = []
+    for original in originals:
+        copy = ProgramSession(
+            program_id=program_id,
+            venue_id=original.venue_id,
+            starts_at=original.starts_at + shift,
+            ends_at=original.ends_at + shift,
+            capacity=original.capacity,
+            seats_taken=0,
+            price_cents=original.price_cents,
+            age_min=original.age_min,
+            age_max=original.age_max,
+            session_type=original.session_type,
+            drop_off=original.drop_off,
+            what_to_bring=original.what_to_bring,
+        )
+        db.add(copy)
+        created.append(copy)
+    db.flush()
+    return created
 
 
 def list_program_sessions(db: Session, program_id: uuid.UUID) -> list[ProgramSession]:
