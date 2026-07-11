@@ -1,7 +1,7 @@
 # Juggle developer shortcuts. Backend commands run inside apps/api via uv.
 API := apps/api
 
-.PHONY: help install dev db up down test lint typecheck contracts check migrate revision worker worker-loop web-install web-dev web-build web-test
+.PHONY: help install dev db up down test lint typecheck contracts check migrate revision worker worker-loop web-install web-dev web-build web-test web-e2e
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -58,6 +58,9 @@ web-build: ## Typecheck + build the frontend
 
 web-test: ## Run the frontend unit tests (Vitest)
 	cd apps/web && npm run test
+
+web-e2e: ## Run the Playwright e2e suite (needs the full stack running)
+	cd apps/web && npm run e2e
 
 revision: ## Autogenerate a migration: make revision m="add sessions"
 	cd $(API) && uv run alembic revision --autogenerate -m "$(m)"

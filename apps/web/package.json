@@ -12,6 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
     "ssr:dev": "node server.mjs",
     "build:client": "vite build --ssrManifest --outDir dist/client",
     "build:server": "vite build --ssr src/entry-server.ts --outDir dist/server",
@@ -27,6 +29,7 @@
     "vue-router": "^4.4.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@quasar/vite-plugin": "^1.8.0",
     "@vitejs/plugin-vue": "^5.1.4",
     "@vitest/coverage-v8": "^2.1.9",
