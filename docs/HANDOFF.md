@@ -65,7 +65,8 @@ Open **http://localhost:9000**.
 ## 3. Current state (facts)
 
 - **41 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 134 pytest passing** (P1 suites + sitemap + anti-hoarding hold limits), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
+- **Backend: 138 pytest passing** (P1 suites + sitemap + anti-hoarding + duplicate-sessions), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean. NB: e2e/browser runs commit data to the dev DB — `make db && (downgrade base→upgrade head) && make seed` before backend tests if the global payout/hold assertions trip.
+- **Frontend e2e: 5 Playwright specs green** (`make web-e2e`, stack up).
 - **Frontend: vue-tsc + vite build clean.**
 - **12 Alembic migrations**, head = `e08fed049dda` (add_analytics_event). Recent chain tail: … → attendance → guardian_link → session.what_to_bring → analytics_event. The chain round-trips (down to base and back).
 - **19 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`, `scheduler`, `events`).
@@ -143,6 +144,7 @@ Open **http://localhost:9000**.
 
 ### Provider console (`/provider`, any signed-in user)
 - Create org → **compliance** (ABN, WWCC per staff, insurance ref — all land `pending`) → venues → programs → sessions → **publish** (suspended orgs can't publish) → **rosters** (with CSV export + **morning-of tap-to-check-in**, §8.3) → **cancel session** (→ refund + notify families) → **Earnings** (payouts view).
+- **Duplicate-from-last-cycle (P1, §8.2)**: one-click **re-list** — copy all of a program's non-cancelled sessions shifted forward by whole days (preserving time-of-day/venue/pricing, seats reset). `POST /catalog/programs/{id}/duplicate-sessions`; "Duplicate to new dates" on the program page. (PRD's lever for provider relist rate.)
 - **Message families (P1, PRD §8.5)**: per-session **broadcast** — a template-guarded dialog (What to bring / Reminder / Update / Custom presets) sends to every confirmed family via the notifications gateway and records outbound history; recipient count reported. No free-text parent↔provider chat (PRD §8.5).
 - **Insights (P1, PRD §8.6)**: org **analytics** — seats-filled %, gross bookings revenue, new-vs-returning family mix, and a per-program fill-rate + revenue rollup. Full sessions also show live **waitlist queue counts**.
 
