@@ -77,6 +77,12 @@ class DuplicateSessionsIn(BaseModel):
     shift_days: int = Field(ge=1, le=730)
 
 
+class BulkSessionsIn(BaseModel):
+    # A batch of sessions to create in one transaction (PRD §8.2 bulk creation).
+    # The client expands a template + date range into fully-formed items.
+    items: list[SessionCreate] = Field(min_length=1, max_length=60)
+
+
 class SessionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

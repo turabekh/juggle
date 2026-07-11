@@ -152,6 +152,33 @@ def create_session(
 
 
 @router.post(
+    "/programs/{program_id}/bulk-sessions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=list[schemas.SessionOut],
+)
+def bulk_create_sessions(
+    program_id: uuid.UUID,
+    payload: schemas.BulkSessionsIn,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+) -> list[schemas.SessionOut]:
+    """Create many sessions across a date range in one go (PRD §8.2)."""
+    try:
+        created = service.create_sessions_bulk(
+            session, program_id=program_id, actor_id=principal.user_id, items=payload.items
+        )
+    except service.ProgramNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Program not found") from exc
+    except service.VenueNotFound as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Venue not found in this organisation"
+        ) from exc
+    except service.NotOrgMember as exc:
+        raise _forbid_non_member(exc) from exc
+    return [schemas.SessionOut.model_validate(s) for s in created]
+
+
+@router.post(
     "/programs/{program_id}/duplicate-sessions",
     status_code=status.HTTP_201_CREATED,
     response_model=list[schemas.SessionOut],

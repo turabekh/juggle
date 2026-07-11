@@ -211,6 +211,16 @@ export const api = {
       )
       return data
     },
+    async bulkSessions(
+      programId: string,
+      items: SessionCreateInput[],
+    ): Promise<CatalogSession[]> {
+      const { data } = await http.post<CatalogSession[]>(
+        `/catalog/programs/${programId}/bulk-sessions`,
+        { items },
+      )
+      return data
+    },
   },
   org: {
     async mine(): Promise<Org[]> {

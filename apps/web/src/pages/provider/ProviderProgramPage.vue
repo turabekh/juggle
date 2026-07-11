@@ -31,6 +31,10 @@
             flat no-caps color="primary" icon="content_copy" label="Duplicate to new dates"
             @click="openDuplicate"
           />
+          <q-btn
+            flat no-caps color="primary" icon="date_range" label="Add several"
+            :disable="!venues.length" @click="openBulk"
+          />
           <q-btn unelevated no-caps color="primary" icon="add" label="Add session" :disable="!venues.length" @click="showSession = true" />
         </div>
       </div>
@@ -142,6 +146,48 @@
       </q-card>
     </q-dialog>
 
+    <!-- Add several (bulk over a date range, PRD §8.2) -->
+    <q-dialog v-model="showBulk">
+      <q-card style="min-width: 440px; border-radius: 18px">
+        <q-card-section>
+          <div class="text-h6">Add several sessions</div>
+          <div class="jg-faint text-caption">One session per day from the first date.</div>
+        </q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-select v-model="bulkForm.venue_id" outlined dense :options="venueOptions" emit-value map-options label="Venue" />
+          <div class="row q-col-gutter-md">
+            <q-input v-model="bulkForm.first_date" outlined dense type="date" label="First date" stack-label class="col" />
+            <q-input v-model.number="bulkForm.day_count" outlined dense type="number" label="How many" class="col" />
+          </div>
+          <q-toggle v-model="bulkForm.weekdays_only" label="Weekdays only" color="primary" />
+          <div class="row q-col-gutter-md">
+            <q-input v-model="bulkForm.start_time" outlined dense type="time" label="Starts" stack-label class="col" />
+            <q-input v-model="bulkForm.end_time" outlined dense type="time" label="Ends" stack-label class="col" />
+          </div>
+          <div class="row q-col-gutter-md">
+            <q-input v-model.number="bulkForm.capacity" outlined dense type="number" label="Capacity" class="col" />
+            <q-input v-model.number="bulkForm.price" outlined dense type="number" prefix="$" label="Price / child" class="col" />
+          </div>
+          <div class="row q-col-gutter-md">
+            <q-input v-model.number="bulkForm.age_min" outlined dense type="number" label="Min age" class="col" />
+            <q-input v-model.number="bulkForm.age_max" outlined dense type="number" label="Max age" class="col" />
+          </div>
+          <div class="row q-col-gutter-md items-center">
+            <q-select v-model="bulkForm.session_type" outlined dense :options="dayTypeOptions" emit-value map-options label="Day type" class="col" />
+            <q-toggle v-model="bulkForm.drop_off" label="Drop-off" color="primary" class="col" />
+          </div>
+          <div class="jg-faint text-caption">Will create {{ bulkPreviewCount }} session(s).</div>
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated no-caps color="primary" label="Create sessions"
+            :loading="bulking" :disable="!bulkValid" @click="doBulk"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <!-- Roster dialog -->
     <q-dialog v-model="showRoster">
       <q-card style="min-width: 520px; border-radius: 18px">
@@ -228,7 +274,14 @@ import { useQuasar } from 'quasar'
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
 import { categoryMeta, dayLabel, money, timeRange } from '@/lib/format'
-import type { CatalogSession, Program, RosterOut, SessionWaitlist, Venue } from '@/lib/types'
+import type {
+  CatalogSession,
+  Program,
+  RosterOut,
+  SessionCreateInput,
+  SessionWaitlist,
+  Venue,
+} from '@/lib/types'
 
 const props = defineProps<{ id: string }>()
 const $q = useQuasar()
@@ -242,6 +295,22 @@ const showSession = ref(false)
 const showDuplicate = ref(false)
 const duplicating = ref(false)
 const dupForm = reactive({ newFirstDate: '' })
+const showBulk = ref(false)
+const bulking = ref(false)
+const bulkForm = reactive({
+  venue_id: '',
+  first_date: '',
+  day_count: 5,
+  weekdays_only: true,
+  start_time: '09:00',
+  end_time: '15:00',
+  capacity: 12,
+  price: 50,
+  age_min: 5,
+  age_max: 12,
+  session_type: 'full_day' as 'half_day' | 'full_day',
+  drop_off: true,
+})
 const showRoster = ref(false)
 const roster = ref<RosterOut | null>(null)
 const waitlistCounts = ref<Record<string, SessionWaitlist>>({})
@@ -353,6 +422,66 @@ const dupShiftDays = computed<number | null>(() => {
   const target = new Date(y, m - 1, d)
   return Math.round((target.getTime() - start.getTime()) / 86_400_000)
 })
+
+function pad(n: number): string {
+  return String(n).padStart(2, '0')
+}
+function generateBulkItems(): SessionCreateInput[] {
+  const [y, m, d] = bulkForm.first_date.split('-').map(Number)
+  const items: SessionCreateInput[] = []
+  let offset = 0
+  while (items.length < bulkForm.day_count && offset < 120) {
+    const day = new Date(y, m - 1, d + offset)
+    offset += 1
+    if (bulkForm.weekdays_only && (day.getDay() === 0 || day.getDay() === 6)) continue
+    const dayStr = `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`
+    items.push({
+      venue_id: bulkForm.venue_id,
+      starts_at: new Date(`${dayStr}T${bulkForm.start_time}`).toISOString(),
+      ends_at: new Date(`${dayStr}T${bulkForm.end_time}`).toISOString(),
+      capacity: bulkForm.capacity,
+      price_cents: Math.round(bulkForm.price * 100),
+      age_min: bulkForm.age_min,
+      age_max: bulkForm.age_max,
+      session_type: bulkForm.session_type,
+      drop_off: bulkForm.drop_off,
+    })
+  }
+  return items
+}
+const bulkValid = computed(
+  () =>
+    !!bulkForm.venue_id &&
+    !!bulkForm.first_date &&
+    bulkForm.day_count > 0 &&
+    bulkForm.end_time > bulkForm.start_time &&
+    bulkForm.age_min <= bulkForm.age_max,
+)
+const bulkPreviewCount = computed(() => (bulkForm.first_date ? generateBulkItems().length : 0))
+
+function openBulk(): void {
+  bulkForm.venue_id = venues.value[0]?.id ?? ''
+  const base = new Date()
+  base.setDate(base.getDate() + 7)
+  bulkForm.first_date = `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}`
+  showBulk.value = true
+}
+
+async function doBulk(): Promise<void> {
+  const items = generateBulkItems()
+  if (!items.length) return
+  bulking.value = true
+  try {
+    const created = await api.catalog.bulkSessions(props.id, items)
+    showBulk.value = false
+    $q.notify({ type: 'positive', message: `Created ${created.length} session(s).` })
+    sessions.value = await api.catalog.programSessions(props.id)
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not create sessions') })
+  } finally {
+    bulking.value = false
+  }
+}
 
 function openDuplicate(): void {
   const base = firstSession.value ? new Date(firstSession.value.starts_at) : new Date()
