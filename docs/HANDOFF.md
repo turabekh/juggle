@@ -2,7 +2,11 @@
 
 _Last updated: 2026-07-11. Read this first, then `CLAUDE.md` (engineering conventions) and `docs/juggle-prd.md` (product spec)._
 
-> **Latest slice (2026-07-11): Reviews & trust (PRD §7.6) — first Phase-1 feature.** A new `reviews` module (verified-booking-only, 1–5★ + text, moderation queue, provider right-of-reply, child-PII auto-screen, published-only aggregates) with parent/provider/admin UI. Payments work is deferred per direction. 14th domain module; layering now `search ▸ reviews ▸ booking`. See §5 and §12.
+> **Latest slices (2026-07-11) — Phase-1, payments deferred per direction:**
+> - **Reviews & trust (PRD §7.6):** `reviews` module — verified-booking-only, 1–5★ + text, moderation queue, provider right-of-reply, child-PII auto-screen, published-only aggregates; parent/provider/admin UI.
+> - **Waitlist (PRD §7.7):** `waitlist` module — join a sold-out session, a freed seat is auto-offered to the FIFO front with a config-driven claim window (reserved via a seat hold), claim = normal checkout, expiry cascades; reconciliation runs lazily on reads + an admin ops sweep (no scheduler yet). Parent (join/claim) + provider (queue counts) UI. Browser-verified.
+>
+> **15 domain modules** now; layering `search ▸ reviews ▸ waitlist ▸ booking`. See §5.
 
 ---
 
@@ -50,11 +54,11 @@ Open **http://localhost:9000**.
 
 ## 3. Current state (facts)
 
-- **23 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 92 pytest passing** (13 new for reviews), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
+- **27 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
+- **Backend: 102 pytest passing** (13 for reviews + 10 for waitlist), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
 - **Frontend: vue-tsc + vite build clean.**
-- **5 Alembic migrations**, head = `1a8e86929f18` (add_review). Chain: initial → payment idempotency_key → booking seat_hold_id → notification_log → review. The chain round-trips (down to base and back).
-- **14 domain modules** (added `reviews`).
+- **6 Alembic migrations**, head = `d42f6941bdac` (add_waitlist_entry). Chain: initial → payment idempotency_key → booking seat_hold_id → notification_log → review → waitlist_entry. The chain round-trips (down to base and back).
+- **15 domain modules** (added `reviews`, `waitlist`).
 - Stack: FastAPI + SQLAlchemy 2 + PostgreSQL/PostGIS + Alembic (`apps/api`); Vite + Vue 3 (TS) + Quasar SPA (`apps/web`).
 
 ---
@@ -62,16 +66,18 @@ Open **http://localhost:9000**.
 ## 4. Architecture
 
 ### Backend module layering (enforced by import-linter)
-14 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
+15 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
 
 1. **`core` never imports FastAPI/Starlette.**
 2. **Strict acyclic layering** (high→low — a module may import only modules **below** it):
 
    ```
-   admin ▸ roster ▸ search ▸ reviews ▸ booking ▸ payments ▸ inventory ▸ catalog ▸ org ▸ identity ▸ notifications ▸ flags ▸ config ▸ audit
+   admin ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ payments ▸ inventory ▸ catalog ▸ org ▸ identity ▸ notifications ▸ flags ▸ config ▸ audit
    ```
 
    `reviews` sits between `search` and `booking`: it verifies against a confirmed+completed `booking` (below it) and reads catalog/org/identity for enrichment; it has its own admin-gated moderation routes (no need for the top `admin` module to import it).
+
+   `waitlist` sits between `reviews` and `booking`: it **reconciles against live inventory** rather than being pushed to — it reads booking/inventory/catalog/org/identity/notifications to offer freed seats, so the core checkout path is never modified. No booking→waitlist call exists (that would be an upward edge); offers surface via lazy reconciliation on reads + an admin ops sweep (`POST /waitlist/process`).
 
    Cross-module calls go through the lower module's `core.service`. Key consequences:
    - `catalog` calls `org.service` (membership); `inventory` operates on `catalog`'s `Session`; `booking` orchestrates catalog/inventory/payments/identity/org/notifications; `admin` sits on top and composes everything.
@@ -110,6 +116,7 @@ Open **http://localhost:9000**.
 - **Booking**: hold seats (TTL) → cart → checkout (idempotent, per-cart key) → confirm/cancel. Age-gating + child-count checks at checkout.
 - **My bookings**, **Add to calendar** (.ics download), **Notifications inbox** (bell in header).
 - **Reviews (P1, PRD §7.6)**: after a session finishes, **"Leave a review"** on the booking (1–5★ + text); the body is **auto-screened for the booking's child names** (blocked at submit — no child PII in content); reviews land in a **moderation queue** and only appear publicly once approved. **Listing detail** shows the program's published reviews + rating summary (with a "Verified booking" badge and any provider reply). One review per booking (DB `UNIQUE`); rating bound 1–5 by DB `CHECK`.
+- **Waitlist (P1, PRD §7.7)**: on a **sold-out** listing, **"Join the waitlist"** (shows FIFO position). When a seat frees (a cancelled pending booking / admin refund), reconciliation **offers it to the front of the queue** by reserving the seat with a **claim-window hold** (config `waitlist_claim_window_minutes`, default 4h) and emailing the family; **"Claim your seat"** on *My bookings* books it via the normal checkout against that hold. Unclaimed offers **expire and cascade** to the next family. Providers see live **queue counts** on full sessions. FIFO uses a DB identity `seq` (stable even when `created_at` ties on the transaction clock); one active place per guardian/session (partial `UNIQUE`).
 
 ### Inventory correctness (the core promise)
 - `catalog.Session.seats_taken` is the single source of truth; **inventory is its only writer**.
@@ -137,8 +144,8 @@ Open **http://localhost:9000**.
 
 ## 6. Data model & migrations
 
-18 initial tables + 2 added columns + 2 tables (`notification_log`, `review`), across modules. Highlights:
-- `user_account`, `child` (identity); `organisation`, `org_member`, `wwcc_record`, `insurance_doc` (org); `venue` (PostGIS `geography(POINT,4326)` + GiST index), `program`, `session` (catalog); `seat_hold` (inventory); `booking`, `booking_child` (booking); `payment`, `payout` (payments); `review` (reviews — `UNIQUE(booking_id)`, `CHECK(rating 1..5)`, native `review_status` enum); `impersonation_session` (admin); `platform_setting` (versioned), `feature_flag`, `audit_event`, `notification_log`.
+18 initial tables + 2 added columns + 3 tables (`notification_log`, `review`, `waitlist_entry`), across modules. Highlights:
+- `user_account`, `child` (identity); `organisation`, `org_member`, `wwcc_record`, `insurance_doc` (org); `venue` (PostGIS `geography(POINT,4326)` + GiST index), `program`, `session` (catalog); `seat_hold` (inventory); `booking`, `booking_child` (booking); `payment`, `payout` (payments); `review` (reviews — `UNIQUE(booking_id)`, `CHECK(rating 1..5)`, native `review_status` enum); `waitlist_entry` (waitlist — identity `seq` for FIFO, partial `UNIQUE` on active status per guardian/session); `impersonation_session` (admin); `platform_setting` (versioned), `feature_flag`, `audit_event`, `notification_log`.
 - Cross-module references use **string-based FKs** (`ForeignKey("organisation.id")`) so no module imports another's models just for a relationship.
 - Migrations autogenerate cleanly because `alembic/env.py` **pins `search_path` to `public`** (the PostGIS image installs tiger/topology extensions whose schemas would otherwise leak into autogenerate) and uses GeoAlchemy2's alembic helpers.
 
@@ -182,14 +189,14 @@ Open **http://localhost:9000**.
 
 ## 10. Suggested next work (roughly prioritized)
 
-**Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** Reviews (§7.6) is done. The next payment-free P1 slices:
+**Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** Reviews (§7.6) and Waitlist (§7.7) are done. The next payment-free P1 slices:
 
-1. **Waitlist (PRD §7.7)** — join a sold-out session; on a cancellation, **auto-offer** to the front of the queue with a **4h claim window**; claim routes into the normal hold→checkout flow (uses the existing fake gateway, no new payments work). Touches `inventory` + `notifications`. This is the natural next feature.
-2. **Provider comms/analytics (§8.5/§8.6)** — broadcast to a session's booked families (template-guarded) + fill-rate/new-vs-returning stats. No payments, no external deps.
-3. **Saved-kids / multi-guardian polish (§7.3 P1)**, **attendance check-in (§8.3 "tap to mark attended")** — small, self-contained.
+1. **Provider comms/analytics (§8.5/§8.6)** — broadcast to a session's booked families (template-guarded) + fill-rate/new-vs-returning stats. No payments, no external deps. Notifications gateway already exists.
+2. **Saved-kids / multi-guardian polish (§7.3 P1)**, **attendance check-in (§8.3 "tap to mark attended")** — small, self-contained.
+3. **Background scheduler / worker** — the payment-free half (T-48h/T-3h reminders, **waitlist offer-expiry sweep**, reclaim expired holds) can be pulled forward now that waitlist reconciliation exists (`POST /waitlist/process` is already cron-ready). Payout release is the payment-touching half.
 
 Deferred (need payments or external integrations, revisit later):
-- **Background scheduler / worker** — auto-run due payouts + T-48h/T-3h reminders + reclaim expired holds (the reminders half is payment-free and could be pulled forward).
+- **Payout release** side of the scheduler (payment-touching).
 - **Real integrations** behind the gateways — Stripe (destination charges + Connect payouts), Postmark/SES email, SMS via Twilio.
 - **Provider doc upload** (S3 presigned) + strict approval-before-publish gate; **timezone correctness** (store venue tz); refund automation, promo codes.
 
@@ -205,12 +212,12 @@ apps/api/
     main.py, api.py, db.py, common.py, security.py, deps.py, models.py, settings.py
     modules/<name>/core/{models,schemas,service}.py  +  ui/routes.py
       identity org catalog inventory booking payments roster
-      search reviews admin config flags audit notifications
+      search reviews waitlist admin config flags audit notifications
     modules/payments/core/gateway.py         # PaymentGateway + FakeGateway
     modules/notifications/core/{gateway,ical}.py
-  alembic/versions/*.py                        # 5 migrations
-  tests/test_*.py                              # 19 files, 92 tests
-  scripts/seed_demo.py                         # demo data (admin + provider + sessions + reviews)
+  alembic/versions/*.py                        # 6 migrations
+  tests/test_*.py                              # 20 files, 102 tests
+  scripts/seed_demo.py                         # demo data (admin + provider + sessions + reviews + waitlist)
 apps/web/
   src/lib/{api,types,format,jwt,sessionMemo}.ts
   src/stores/{auth,cart}.ts

@@ -27,6 +27,7 @@ from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import get_payment_gateway
 from juggle.modules.payments.core.models import PayoutStatus
 from juggle.modules.reviews.core import service as reviews_service
+from juggle.modules.waitlist.core import service as waitlist_service
 
 PROVIDER_EMAIL = "demo-provider@juggle.test"
 
@@ -134,11 +135,13 @@ def _seed() -> None:
         review_count = _seed_reviews(
             db, org_id=org.id, provider_id=provider.id, admin_id=admin.id, venue_id=venues[0].id
         )
+        _seed_waitlist(db, org_id=org.id, provider_id=provider.id, venue_id=venues[1].id)
 
         db.commit()
         print(
             f"Seeded {len(PROGRAMS)} programs / {session_count} sessions "
-            f"+ {review_count} published reviews for '{org.name}'."
+            f"+ {review_count} published reviews + a sold-out session with a waitlist "
+            f"for '{org.name}'."
         )
     finally:
         db.close()
@@ -263,6 +266,92 @@ def _seed_reviews(
             payments_service.set_payout_status(db, payout.id, PayoutStatus.paid)
 
     return count
+
+
+def _seed_waitlist(
+    db: Session, *, org_id: uuid.UUID, provider_id: uuid.UUID, venue_id: uuid.UUID
+) -> None:
+    """A high-demand, single-seat future session — sold out, with one family
+    waiting — so the waitlist UI (PRD §7.7) has something to show on first run."""
+    payment_gateway = get_payment_gateway()
+    email_gateway = get_email_gateway()
+
+    program = catalog_service.create_program(
+        db,
+        organisation_id=org_id,
+        actor_id=provider_id,
+        title="Sold-Out Slime Lab",
+        category="stem",
+        description="Our most popular one — a single small-group session that fills fast.",
+    )
+    start = datetime.now(UTC) + timedelta(days=20)
+    session = catalog_service.create_session(
+        db,
+        program_id=program.id,
+        actor_id=provider_id,
+        data=SessionCreate(
+            venue_id=venue_id,
+            starts_at=start,
+            ends_at=start + timedelta(hours=3),
+            capacity=1,
+            price_cents=4500,
+            age_min=5,
+            age_max=12,
+            session_type="half_day",
+            drop_off=True,
+        ),
+    )
+    catalog_service.set_program_status(
+        db,
+        program_id=program.id,
+        actor_id=provider_id,
+        status=catalog_service.ProgramStatus.published,
+    )
+
+    # One family takes the only seat (→ sold out).
+    holder = identity_service.create_guardian(
+        db, email="parent-booked@example.com", password="supersecret", full_name="Sam Demo"
+    )
+    child = identity_service.add_child(
+        db,
+        guardian_id=holder.id,
+        data=ChildCreate(first_name="Frankie", date_of_birth=date(2016, 6, 1)),
+    )
+    hold, _ = inventory_service.hold_seats(
+        db, session_id=session.id, held_by_id=holder.id, quantity=1
+    )
+    order = booking_service.checkout(
+        db,
+        guardian_id=holder.id,
+        idempotency_key=f"seed-wl-{uuid.uuid4().hex}",
+        items=[CheckoutItem(hold_id=hold.id, children=[CheckoutChild(child_id=child.id)])],
+        gateway=payment_gateway,
+    )
+    booking_service.confirm(
+        db,
+        payment_id=order.payment_id,
+        guardian_id=holder.id,
+        gateway=payment_gateway,
+        email_gateway=email_gateway,
+    )
+    # Settle the accrued payout so this demo row stays out of the global
+    # "scheduled payouts" assertions in the payout tests (see _seed_reviews).
+    for payout in payments_service.list_org_payouts(
+        db, organisation_id=org_id, actor_id=provider_id
+    ):
+        if payout.status is PayoutStatus.scheduled:
+            payments_service.set_payout_status(db, payout.id, PayoutStatus.paid)
+
+    # Another family joins the waitlist for the now sold-out session.
+    waiter = identity_service.create_guardian(
+        db, email="parent-waiting@example.com", password="supersecret", full_name="Alex Demo"
+    )
+    identity_service.add_child(
+        db,
+        guardian_id=waiter.id,
+        data=ChildCreate(first_name="Charlie", date_of_birth=date(2017, 3, 1)),
+    )
+    waitlist_service.join_waitlist(db, session_id=session.id, guardian_id=waiter.id)
 
 
 def _already_seeded(db: object) -> bool:
