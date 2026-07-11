@@ -58,7 +58,7 @@ Open **http://localhost:9000**.
 | Admin | `admin@example.com` | account menu → **Admin console** |
 | Provider | any signed-in user | account menu → **For providers** |
 
-`make check` (from repo root or `apps/api`) runs the full gate: ruff + mypy(strict) + import-linter + pytest. Frontend: `make web-build` (vue-tsc + vite build).
+`make check` (from repo root or `apps/api`) runs the full backend gate: ruff + mypy(strict) + import-linter + pytest. Frontend: `make web-build` (vue-tsc + vite build) and `make web-test` (Vitest units).
 
 ---
 
@@ -178,7 +178,8 @@ Open **http://localhost:9000**.
 
 - **Backend**: pytest hits real Postgres through FastAPI `TestClient`; the `db` fixture wraps each test in a transaction that **rolls back**, and **clears `platform_setting`/`feature_flag` rows within the transaction** so every test sees built-in config defaults (a seeded/edited fee can't break fee-dependent tests). `make_admin` fixture flips `is_admin` then re-logs-in. DB tests **skip cleanly** if Postgres is unreachable.
 - **The big proofs**: concurrency oversell test (threads), the checkout state machine, payout accrual/release, impersonation matrix, verification flow.
-- **Frontend/UX**: verified by driving the real app in **headless Chromium (Playwright)** — full journeys (signup→book→pay→bookings, provider onboarding→publish, admin review/verify/run-payouts, impersonation banner) with screenshots reviewed for visual correctness. Playwright lives in the scratchpad, not the repo. There are **no committed frontend unit tests yet** (a gap — see §9).
+- **Frontend/UX**: verified by driving the real app in **headless Chromium (Playwright)** — full journeys (signup→book→pay→bookings, provider onboarding→publish, admin review/verify/run-payouts, impersonation banner) with screenshots reviewed for visual correctness. Playwright lives in the scratchpad, not the repo.
+- **Frontend unit tests (committed)**: **Vitest** (jsdom + @vue/test-utils, Quasar installed in `test/setup.ts`) — 15 tests covering `lib/format`, `lib/jwt`, the SSR-safe `lib/storage` shim, the cart Pinia store (totals + localStorage persistence), and the `StarRating` component. `make web-test` / `npm test`. A committed Playwright e2e suite is still a follow-up.
 
 ---
 
@@ -202,7 +203,7 @@ Open **http://localhost:9000**.
 - **Scheduler runs via the compose `worker` service** (`docker compose up` starts db + api + worker looping every 5 min); `make worker[-loop]` or cron hitting `POST /scheduler/run` also work. A non-compose production deploy still needs its own process/cron for the worker. Payout release is deliberately **not** in the tick (payments deferred) — it's still the manual admin "Run due payouts".
 - **Real integrations not wired**: Stripe (payments + Connect transfers), Postmark/SES (email). Both are gateway swaps.
 - **No file upload**: insurance is a URL/`file_ref`, not an uploaded document (needs presigned S3).
-- **No frontend unit/e2e tests committed** (only ad-hoc Playwright in scratchpad). Worth adding Vitest + a committed Playwright suite.
+- **Frontend unit tests committed** (Vitest, `make web-test`). A committed **Playwright e2e** suite (the full journeys currently run ad-hoc from the scratchpad) is still worth adding.
 - **PWA: done.** Installable (web manifest + generated maskable icons via `scripts/gen-icons.mjs`, dependency-free) with an offline app-shell service worker (`public/sw.js`, registered in prod builds only; never caches `/api`). Browser-verified.
 - **Request-time SSR: pipeline built but BLOCKED on the UI layer.** The full isomorphic setup exists and is correct — `src/app.ts` factory, `entry-client.ts`/`entry-server.ts`, history-injectable router, `server.mjs` (dev + prod), `build:ssr` scripts, and SSR-safe storage/api/head guards (all additive; the SPA build is untouched and green). **It cannot render** because `@quasar/vite-plugin` only ships Quasar's *client* bundle (touches `window` at import) — Quasar SSR is officially supported **only** through the Quasar CLI (`@quasar/app-vite`). Empirically confirmed: externalizing to Quasar's `node` export and Node DOM-shims both fail. **To activate SSR:** migrate the app to the Quasar CLI SSR mode (large restructure the team deliberately avoided), or swap Quasar for an SSR-capable UI kit. Note SEO is already handled client-side (meta + JSON-LD + `sitemap.xml`, indexed by Googlebot), so SSR's remaining upside is non-JS crawlers + faster first paint.
 - **No user-search-by-child / duplicate-account merge / data-deletion workflow** (PRD §10.2 admin niceties).
@@ -224,7 +225,7 @@ Deferred (need payments or external integrations, revisit later):
 - **Real integrations** behind the gateways — Stripe (destination charges + Connect payouts), Postmark/SES email, SMS via Twilio.
 - **Provider doc upload** (S3 presigned) + strict approval-before-publish gate; **timezone correctness** (store venue tz); refund automation, promo codes.
 
-Cross-cutting, do anytime: **committed frontend tests** (Vitest + Playwright), rate limiting/booking-velocity limits, CORS/secrets review, error monitoring.
+Cross-cutting, do anytime: **committed Playwright e2e** (Vitest units + anti-hoarding limits are done), CORS/secrets review, error monitoring.
 
 ---
 
