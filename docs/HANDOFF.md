@@ -12,7 +12,9 @@ _Last updated: 2026-07-11. Read this first, then `CLAUDE.md` (engineering conven
 > - **Multiple guardians per family (PRD §7.3):** `identity.GuardianLink` (invite → accept; symmetric access once accepted). `list_children` + booking checkout/`list_bookings` use `family_guardian_ids`; account page "Family" section.
 > - **Automated "what to bring" T-24h (PRD §8.5):** sessions carry an optional `what_to_bring`; a scheduler T-24h job emails it to confirmed families, deduped (SessionReminder window `wtb`).
 > - **Funnel instrumentation (PRD §13):** bottom-tier `events` module (`analytics_event`, no child PII) records the 8-stage taxonomy from search/catalog/booking/org/inventory; admin **Funnel** page via `GET /analytics/funnel`.
-> - **Listing SEO (PRD §7.1):** `GET /catalog/sitemap.xml` + `robots.txt`; a dependency-free `useHead` composable sets per-listing title/description/canonical/OG + **schema.org Event JSON-LD** (Googlebot renders JS → indexed + rich-result eligible). Full request-time SSR (for non-JS crawlers) is the remaining follow-up. All browser-verified.
+> - **Listing SEO (PRD §7.1):** `GET /catalog/sitemap.xml` + `robots.txt`; a dependency-free `useHead` composable sets per-listing title/description/canonical/OG + **schema.org Event JSON-LD** (Googlebot renders JS → indexed + rich-result eligible). Browser-verified.
+> - **PWA (done):** installable web manifest + generated maskable icons + an offline app-shell service worker (dependency-free). Browser-verified.
+> - **SSR (pipeline built, blocked):** the full isomorphic setup exists (app factory, client/server entries, `server.mjs`, SSR-safe guards) but **can't render** — `@quasar/vite-plugin` ships only Quasar's client bundle; Quasar SSR is CLI-only. See §9.
 >
 > **19 domain modules** now; layering `scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ … ▸ audit ▸ events`. See §5.
 
@@ -200,7 +202,8 @@ Open **http://localhost:9000**.
 - **Real integrations not wired**: Stripe (payments + Connect transfers), Postmark/SES (email). Both are gateway swaps.
 - **No file upload**: insurance is a URL/`file_ref`, not an uploaded document (needs presigned S3).
 - **No frontend unit/e2e tests committed** (only ad-hoc Playwright in scratchpad). Worth adding Vitest + a committed Playwright suite.
-- **No request-time SSR / PWA.** Listing SEO is handled by client-rendered meta + `sitemap.xml` + schema.org JSON-LD (§7.1 — indexed by JS-executing crawlers like Googlebot). True SSR (for non-JS crawlers / faster first paint) and an installable PWA remain follow-ups; still an SPA otherwise.
+- **PWA: done.** Installable (web manifest + generated maskable icons via `scripts/gen-icons.mjs`, dependency-free) with an offline app-shell service worker (`public/sw.js`, registered in prod builds only; never caches `/api`). Browser-verified.
+- **Request-time SSR: pipeline built but BLOCKED on the UI layer.** The full isomorphic setup exists and is correct — `src/app.ts` factory, `entry-client.ts`/`entry-server.ts`, history-injectable router, `server.mjs` (dev + prod), `build:ssr` scripts, and SSR-safe storage/api/head guards (all additive; the SPA build is untouched and green). **It cannot render** because `@quasar/vite-plugin` only ships Quasar's *client* bundle (touches `window` at import) — Quasar SSR is officially supported **only** through the Quasar CLI (`@quasar/app-vite`). Empirically confirmed: externalizing to Quasar's `node` export and Node DOM-shims both fail. **To activate SSR:** migrate the app to the Quasar CLI SSR mode (large restructure the team deliberately avoided), or swap Quasar for an SSR-capable UI kit. Note SEO is already handled client-side (meta + JSON-LD + `sitemap.xml`, indexed by Googlebot), so SSR's remaining upside is non-JS crawlers + faster first paint.
 - **No user-search-by-child / duplicate-account merge / data-deletion workflow** (PRD §10.2 admin niceties).
 - **Timezone handling** is naive (see gotcha #6).
 - **P1 features not built**: SMS (Twilio), promo codes, Google/Apple SSO, embeddable widget (P2), birthday-party vertical (P2). (Reviews, waitlists, provider analytics, comms, multi-guardian, and funnel instrumentation are now built.)
@@ -240,8 +243,11 @@ apps/api/
   tests/test_*.py                              # 27 files, 130 tests
   scripts/seed_demo.py                         # demo data (admin + provider + sessions + reviews + waitlist)
 apps/web/
-  public/robots.txt                            # SEO (points at /sitemap.xml)
-  src/lib/{api,types,format,jwt,sessionMemo,head}.ts   # head.ts = SEO meta + JSON-LD
+  public/{robots.txt, manifest.webmanifest, sw.js, icon-*.png}   # SEO + PWA
+  scripts/gen-icons.mjs                        # dependency-free PWA icon generator
+  server.mjs                                   # SSR runner (blocked on Quasar CLI — §9)
+  src/{app,entry-client,entry-server}.ts       # isomorphic app factory + entries
+  src/lib/{api,types,format,jwt,sessionMemo,head,storage}.ts   # head=SEO, storage=SSR-safe kv
   src/stores/{auth,cart}.ts
   src/router/index.ts
   src/layouts/{MainLayout,AdminLayout}.vue
