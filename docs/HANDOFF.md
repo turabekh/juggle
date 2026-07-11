@@ -65,7 +65,7 @@ Open **http://localhost:9000**.
 ## 3. Current state (facts)
 
 - **41 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 130 pytest passing** (adds 1 sitemap test on top of the P1 suites), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
+- **Backend: 134 pytest passing** (P1 suites + sitemap + anti-hoarding hold limits), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
 - **Frontend: vue-tsc + vite build clean.**
 - **12 Alembic migrations**, head = `e08fed049dda` (add_analytics_event). Recent chain tail: … → attendance → guardian_link → session.what_to_bring → analytics_event. The chain round-trips (down to base and back).
 - **19 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`, `scheduler`, `events`).
@@ -149,7 +149,8 @@ Open **http://localhost:9000**.
 ### Admin console (`/admin`, `is_admin` users)
 - **Approvals**: list by status, **Review** dialog (ABN + WWCC + insurance with verify/reject), approve/suspend.
 - **Payouts**: Scheduled/Held/Paid tabs, **Run due payouts**, hold/release.
-- **Configuration**: runtime settings (fee %, seat-hold TTL, checkout window, reliability penalty, search radius, payout delay, impersonation TTL) — bounded, **versioned**, audited, effective immediately.
+- **Configuration**: runtime settings (fee %, seat-hold TTL, checkout window, reliability penalty, search radius, payout delay, impersonation TTL, waitlist claim window, **max active holds per guardian**) — bounded, **versioned**, audited, effective immediately.
+- **Anti-hoarding (fraud basics)**: `inventory.hold_seats` caps a guardian's concurrent live holds at the config value → **429** over the limit (released/expired holds free a slot). Edge/login rate-limiting stays an nginx concern.
 - **Feature flags**: on/off + rollout % (deterministic bucketing) + targeting.
 - **Audit log**: every consequential action, filterable, records the **true actor** even under impersonation.
 - **Impersonation**: user email/name search → **view-as** (read-only) / **act-as** (mutations audited) → scoped time-boxed token → consumer app with a **persistent support banner** → exit restores admin. Can't impersonate admins/self; ended sessions revoke immediately.
