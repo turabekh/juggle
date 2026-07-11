@@ -2,6 +2,8 @@
 
 _Last updated: 2026-07-11. Read this first, then `CLAUDE.md` (engineering conventions) and `docs/juggle-prd.md` (product spec)._
 
+> **Latest slice (2026-07-11): Reviews & trust (PRD §7.6) — first Phase-1 feature.** A new `reviews` module (verified-booking-only, 1–5★ + text, moderation queue, provider right-of-reply, child-PII auto-screen, published-only aggregates) with parent/provider/admin UI. Payments work is deferred per direction. 14th domain module; layering now `search ▸ reviews ▸ booking`. See §5 and §12.
+
 ---
 
 ## 1. What this is
@@ -48,10 +50,11 @@ Open **http://localhost:9000**.
 
 ## 3. Current state (facts)
 
-- **20 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 79 pytest passing**, mypy `--strict` clean (104 files), **import-linter 2/2 contracts KEPT**, ruff clean.
+- **23 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
+- **Backend: 92 pytest passing** (13 new for reviews), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
 - **Frontend: vue-tsc + vite build clean.**
-- **4 Alembic migrations**, head = `cb61cfc9ec23` (add_notification_log). Chain: initial → payment idempotency_key → booking seat_hold_id → notification_log. The chain round-trips (down to base and back).
+- **5 Alembic migrations**, head = `1a8e86929f18` (add_review). Chain: initial → payment idempotency_key → booking seat_hold_id → notification_log → review. The chain round-trips (down to base and back).
+- **14 domain modules** (added `reviews`).
 - Stack: FastAPI + SQLAlchemy 2 + PostgreSQL/PostGIS + Alembic (`apps/api`); Vite + Vue 3 (TS) + Quasar SPA (`apps/web`).
 
 ---
@@ -59,14 +62,16 @@ Open **http://localhost:9000**.
 ## 4. Architecture
 
 ### Backend module layering (enforced by import-linter)
-13 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
+14 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
 
 1. **`core` never imports FastAPI/Starlette.**
 2. **Strict acyclic layering** (high→low — a module may import only modules **below** it):
 
    ```
-   admin ▸ roster ▸ search ▸ booking ▸ payments ▸ inventory ▸ catalog ▸ org ▸ identity ▸ notifications ▸ flags ▸ config ▸ audit
+   admin ▸ roster ▸ search ▸ reviews ▸ booking ▸ payments ▸ inventory ▸ catalog ▸ org ▸ identity ▸ notifications ▸ flags ▸ config ▸ audit
    ```
+
+   `reviews` sits between `search` and `booking`: it verifies against a confirmed+completed `booking` (below it) and reads catalog/org/identity for enrichment; it has its own admin-gated moderation routes (no need for the top `admin` module to import it).
 
    Cross-module calls go through the lower module's `core.service`. Key consequences:
    - `catalog` calls `org.service` (membership); `inventory` operates on `catalog`'s `Session`; `booking` orchestrates catalog/inventory/payments/identity/org/notifications; `admin` sits on top and composes everything.
@@ -104,6 +109,7 @@ Open **http://localhost:9000**.
 - **Auth**: signup/login (JWT), `/me`. **Child profiles** (data-minimised: first name + DOB only, no surname/photos).
 - **Booking**: hold seats (TTL) → cart → checkout (idempotent, per-cart key) → confirm/cancel. Age-gating + child-count checks at checkout.
 - **My bookings**, **Add to calendar** (.ics download), **Notifications inbox** (bell in header).
+- **Reviews (P1, PRD §7.6)**: after a session finishes, **"Leave a review"** on the booking (1–5★ + text); the body is **auto-screened for the booking's child names** (blocked at submit — no child PII in content); reviews land in a **moderation queue** and only appear publicly once approved. **Listing detail** shows the program's published reviews + rating summary (with a "Verified booking" badge and any provider reply). One review per booking (DB `UNIQUE`); rating bound 1–5 by DB `CHECK`.
 
 ### Inventory correctness (the core promise)
 - `catalog.Session.seats_taken` is the single source of truth; **inventory is its only writer**.
@@ -121,6 +127,7 @@ Open **http://localhost:9000**.
 - **Audit log**: every consequential action, filterable, records the **true actor** even under impersonation.
 - **Impersonation**: user email/name search → **view-as** (read-only) / **act-as** (mutations audited) → scoped time-boxed token → consumer app with a **persistent support banner** → exit restores admin. Can't impersonate admins/self; ended sessions revoke immediately.
 - **Bookings refund** (`POST /admin/payments/{id}/refund`).
+- **Review moderation** (`/admin/reviews`): pending/published/rejected queue; **approve** (→published) / **reject-with-reason** (audited). Providers reply from their org console; published reviews aggregate to a provider/program rating.
 
 ### Money & comms
 - **Payments**: Stripe-style intent → confirm; 10% application fee (from config); refunds; **payouts**: net (gross − fee) accrues per session on confirm, due at `session_end + payout_delay`, released by admin "Run payouts" (transfer + mark paid).
@@ -130,8 +137,8 @@ Open **http://localhost:9000**.
 
 ## 6. Data model & migrations
 
-18 initial tables + 2 added columns + 1 table, across modules. Highlights:
-- `user_account`, `child` (identity); `organisation`, `org_member`, `wwcc_record`, `insurance_doc` (org); `venue` (PostGIS `geography(POINT,4326)` + GiST index), `program`, `session` (catalog); `seat_hold` (inventory); `booking`, `booking_child` (booking); `payment`, `payout` (payments); `impersonation_session` (admin); `platform_setting` (versioned), `feature_flag`, `audit_event`, `notification_log`.
+18 initial tables + 2 added columns + 2 tables (`notification_log`, `review`), across modules. Highlights:
+- `user_account`, `child` (identity); `organisation`, `org_member`, `wwcc_record`, `insurance_doc` (org); `venue` (PostGIS `geography(POINT,4326)` + GiST index), `program`, `session` (catalog); `seat_hold` (inventory); `booking`, `booking_child` (booking); `payment`, `payout` (payments); `review` (reviews — `UNIQUE(booking_id)`, `CHECK(rating 1..5)`, native `review_status` enum); `impersonation_session` (admin); `platform_setting` (versioned), `feature_flag`, `audit_event`, `notification_log`.
 - Cross-module references use **string-based FKs** (`ForeignKey("organisation.id")`) so no module imports another's models just for a relationship.
 - Migrations autogenerate cleanly because `alembic/env.py` **pins `search_path` to `public`** (the PostGIS image installs tiger/topology extensions whose schemas would otherwise leak into autogenerate) and uses GeoAlchemy2's alembic helpers.
 
@@ -175,12 +182,18 @@ Open **http://localhost:9000**.
 
 ## 10. Suggested next work (roughly prioritized)
 
-1. **Background scheduler / worker** — auto-run due payouts + send T-48h/T-3h reminders (and reclaim expired holds). This unlocks two half-built features and is real infra. Options: APScheduler in-process, or a `make`-invoked management command + cron, or an admin "run all due" that a cron hits.
-2. **Real integrations** behind the gateways — Stripe (destination charges + Connect payouts) and Postmark/SES. Config in `settings.py`, select in `get_*_gateway()`.
-3. **Hardening/review pass** — add committed frontend tests (Vitest + Playwright), rate limiting/booking-velocity limits (PRD fraud basics), CORS/secrets review, error-monitoring.
-4. **Provider onboarding polish** — real doc upload (S3 presigned), and decide on the strict approval-before-publish gate.
-5. **Timezone correctness** — store venue timezone; render per-venue.
-6. **P1 features** — reviews (verified-booking-only), waitlists (auto-offer with claim window), SMS via Twilio behind a gateway.
+**Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** Reviews (§7.6) is done. The next payment-free P1 slices:
+
+1. **Waitlist (PRD §7.7)** — join a sold-out session; on a cancellation, **auto-offer** to the front of the queue with a **4h claim window**; claim routes into the normal hold→checkout flow (uses the existing fake gateway, no new payments work). Touches `inventory` + `notifications`. This is the natural next feature.
+2. **Provider comms/analytics (§8.5/§8.6)** — broadcast to a session's booked families (template-guarded) + fill-rate/new-vs-returning stats. No payments, no external deps.
+3. **Saved-kids / multi-guardian polish (§7.3 P1)**, **attendance check-in (§8.3 "tap to mark attended")** — small, self-contained.
+
+Deferred (need payments or external integrations, revisit later):
+- **Background scheduler / worker** — auto-run due payouts + T-48h/T-3h reminders + reclaim expired holds (the reminders half is payment-free and could be pulled forward).
+- **Real integrations** behind the gateways — Stripe (destination charges + Connect payouts), Postmark/SES email, SMS via Twilio.
+- **Provider doc upload** (S3 presigned) + strict approval-before-publish gate; **timezone correctness** (store venue tz); refund automation, promo codes.
+
+Cross-cutting, do anytime: **committed frontend tests** (Vitest + Playwright), rate limiting/booking-velocity limits, CORS/secrets review, error monitoring.
 
 ---
 
@@ -192,12 +205,12 @@ apps/api/
     main.py, api.py, db.py, common.py, security.py, deps.py, models.py, settings.py
     modules/<name>/core/{models,schemas,service}.py  +  ui/routes.py
       identity org catalog inventory booking payments roster
-      search admin config flags audit notifications
+      search reviews admin config flags audit notifications
     modules/payments/core/gateway.py         # PaymentGateway + FakeGateway
     modules/notifications/core/{gateway,ical}.py
-  alembic/versions/*.py                        # 4 migrations
-  tests/test_*.py                              # 18 files, 79 tests
-  scripts/seed_demo.py                         # demo data (admin + provider + sessions)
+  alembic/versions/*.py                        # 5 migrations
+  tests/test_*.py                              # 19 files, 92 tests
+  scripts/seed_demo.py                         # demo data (admin + provider + sessions + reviews)
 apps/web/
   src/lib/{api,types,format,jwt,sessionMemo}.ts
   src/stores/{auth,cart}.ts
