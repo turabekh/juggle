@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from juggle.modules.admin.core.models import ImpersonationMode, ImpersonationSession
 from juggle.modules.audit.core import service as audit_service
 from juggle.modules.booking.core import service as booking_service
-from juggle.modules.booking.core.schemas import OrderOut
+from juggle.modules.booking.core.schemas import BookingOut, OrderOut
 from juggle.modules.config.core import service as config_service
 from juggle.modules.identity.core import service as identity_service
 from juggle.modules.identity.core.models import UserAccount
@@ -74,6 +74,30 @@ def list_orgs(db: Session, status: OrgStatus) -> list[Organisation]:
 def find_users(db: Session, query: str) -> list[UserAccount]:
     """Support lookup by email/name (PRD §10.2)."""
     return identity_service.search_users(db, query=query)
+
+
+def user_bookings(db: Session, user_id: uuid.UUID) -> list[BookingOut]:
+    """A user's booking history for support (PRD §10.2)."""
+    return booking_service.list_bookings(db, user_id)
+
+
+class UserNotFound(Exception):
+    """No such user to delete."""
+
+
+class CannotDeleteAdmin(Exception):
+    """Refuse to data-delete an admin account."""
+
+
+def delete_user(db: Session, *, user_id: uuid.UUID, actor_id: uuid.UUID) -> None:
+    """Action an APP data-deletion request (PRD §10.2). Admin accounts are
+    protected; the anonymisation + audit happen in ``identity``."""
+    user = db.get(UserAccount, user_id)
+    if user is None:
+        raise UserNotFound(str(user_id))
+    if user.is_admin:
+        raise CannotDeleteAdmin(str(user_id))
+    identity_service.delete_account(db, user_id=user_id, actor_id=actor_id)
 
 
 def _set_org_status(

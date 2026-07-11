@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from juggle.db import get_session
 from juggle.deps import CurrentAdmin
 from juggle.modules.admin.core import schemas, service
-from juggle.modules.booking.core.schemas import OrderOut
+from juggle.modules.booking.core.schemas import BookingOut, OrderOut
 from juggle.modules.org.core.models import OrgStatus, VerificationStatus
 from juggle.modules.org.core.schemas import InsuranceOut, WwccOut
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
@@ -44,6 +44,27 @@ def find_users(
     q: Annotated[str, Query(min_length=1)],
 ) -> list[schemas.UserSummary]:
     return [schemas.UserSummary.model_validate(u) for u in service.find_users(session, q)]
+
+
+@router.get("/users/{user_id}/bookings", response_model=list[BookingOut])
+def user_bookings(
+    user_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep
+) -> list[BookingOut]:
+    """A user's booking history (support lookup, PRD §10.2)."""
+    return service.user_bookings(session, user_id)
+
+
+@router.post("/users/{user_id}/delete", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep) -> None:
+    """Action an APP data-deletion request for a user (PRD §10.2)."""
+    try:
+        service.delete_user(session, user_id=user_id, actor_id=admin.user_id)
+    except service.UserNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found") from exc
+    except service.CannotDeleteAdmin as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Admin accounts cannot be data-deleted here"
+        ) from exc
 
 
 @router.post("/orgs/{org_id}/approve", response_model=schemas.OrgAdminOut)

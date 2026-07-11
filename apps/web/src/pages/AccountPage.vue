@@ -63,6 +63,18 @@
       </button>
     </section>
 
+    <!-- Data & privacy (PRD §10.2 — APP data-deletion) -->
+    <section class="q-mt-xl">
+      <h2 class="text-h6 q-mb-xs">Data &amp; privacy</h2>
+      <p class="jg-muted q-mb-sm">
+        You can delete your account and your kids' details at any time.
+      </p>
+      <q-btn
+        flat no-caps color="negative" icon="delete_forever" label="Delete my account"
+        @click="confirmDelete"
+      />
+    </section>
+
     <q-dialog v-model="showInvite">
       <q-card style="min-width: 360px; border-radius: 18px">
         <q-card-section>
@@ -123,11 +135,37 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useQuasar } from 'quasar'
 
+import { useRouter } from 'vue-router'
+
 import { api, apiError } from '@/lib/api'
 import { ageAt } from '@/lib/format'
 import type { Child, CoGuardian } from '@/lib/types'
+import { useAuthStore } from '@/stores/auth'
 
 const $q = useQuasar()
+const router = useRouter()
+const auth = useAuthStore()
+
+function confirmDelete(): void {
+  $q.dialog({
+    title: 'Delete your account?',
+    message:
+      "This permanently removes your profile and your kids' details. Bookings you've " +
+      'made stay on record with providers but no longer carry your data. This cannot be undone.',
+    cancel: true,
+    persistent: true,
+    ok: { label: 'Delete everything', color: 'negative', unelevated: true, noCaps: true },
+  }).onOk(async () => {
+    try {
+      await api.auth.deleteAccount()
+      auth.logout()
+      $q.notify({ type: 'info', message: 'Your account has been deleted.' })
+      router.push({ name: 'discover' })
+    } catch (err) {
+      $q.notify({ type: 'negative', message: apiError(err, 'Could not delete your account') })
+    }
+  })
+}
 const children = ref<Child[]>([])
 const coGuardians = ref<CoGuardian[]>([])
 const loading = ref(true)

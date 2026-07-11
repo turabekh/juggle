@@ -47,6 +47,12 @@ def me(principal: CurrentPrincipal, session: SessionDep) -> schemas.UserOut:
     return schemas.UserOut.model_validate(user)
 
 
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me(principal: CurrentPrincipal, session: SessionDep) -> None:
+    """Self-service account + data deletion (APP compliance, PRD §10.2)."""
+    service.delete_account(session, user_id=principal.user_id, actor_id=principal.user_id)
+
+
 @router.post(
     "/children", status_code=status.HTTP_201_CREATED, response_model=schemas.ChildOut
 )

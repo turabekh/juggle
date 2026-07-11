@@ -108,6 +108,9 @@ export const api = {
       const { data } = await http.get<User>('/identity/me')
       return data
     },
+    async deleteAccount(): Promise<void> {
+      await http.delete('/identity/me')
+    },
   },
   children: {
     async list(): Promise<Child[]> {
