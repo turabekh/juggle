@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # CORS origins for the Quasar PWA during development.
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:9000"])
 
+    # Public site origin — used to build absolute URLs in the SEO sitemap (§7.1).
+    public_base_url: str = Field(default="http://localhost:9000")
+
 
 @lru_cache
 def get_settings() -> Settings:

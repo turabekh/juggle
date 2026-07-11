@@ -6,6 +6,7 @@ organisation. It does not reach into org's models directly.
 """
 
 import uuid
+from datetime import UTC, datetime
 
 from geoalchemy2.elements import WKTElement
 from sqlalchemy import select
@@ -222,6 +223,26 @@ def get_public_session(db: Session, session_id: uuid.UUID) -> ProgramSession | N
     if session.status is SessionStatus.cancelled:
         return None
     return session
+
+
+def published_session_refs(
+    db: Session, *, now: datetime | None = None
+) -> list[tuple[uuid.UUID, datetime]]:
+    """(session_id, last_modified) for every indexable listing — published
+    program, not cancelled, still upcoming. Powers the SEO sitemap (§7.1)."""
+    if now is None:
+        now = datetime.now(UTC)
+    rows = db.execute(
+        select(ProgramSession.id, ProgramSession.updated_at)
+        .join(Program, Program.id == ProgramSession.program_id)
+        .where(
+            Program.status == ProgramStatus.published,
+            ProgramSession.status != SessionStatus.cancelled,
+            ProgramSession.starts_at > now,
+        )
+        .order_by(ProgramSession.starts_at)
+    ).all()
+    return [(session_id, updated_at) for session_id, updated_at in rows]
 
 
 def get_public_session_detail(

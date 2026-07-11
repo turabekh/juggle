@@ -266,6 +266,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import StarRating from '@/components/StarRating.vue'
 import { api, apiError } from '@/lib/api'
 import { ageAt, categoryMeta, dayLabel, money, timeRange } from '@/lib/format'
+import { useHead } from '@/lib/head'
 import { rememberSession } from '@/lib/sessionMemo'
 import type { Child, ReviewList, SessionDetail, WaitlistEntry } from '@/lib/types'
 import { useAuthStore } from '@/stores/auth'
@@ -299,6 +300,48 @@ const addLabel = computed(() =>
     ? `Add ${selectedChildIds.value.length} seats to cart`
     : 'Add to cart',
 )
+
+// SEO: per-listing title/description/canonical + schema.org Event (PRD §7.1).
+useHead(() => {
+  const s = session.value
+  if (!s) return null
+  const url = `${window.location.origin}/sessions/${s.id}`
+  const where = [s.suburb, s.postcode].filter(Boolean).join(' ') || 'Perth, WA'
+  const description = (
+    s.description ||
+    `${s.title} with ${s.organisation_name} in ${where}. ` +
+      `${money(s.price_cents)} per child, ages ${s.age_min}–${s.age_max}.`
+  ).slice(0, 300)
+  return {
+    title: `${s.title} — ${s.organisation_name} | Juggle`,
+    description,
+    canonical: url,
+    jsonLd: {
+      '@context': 'https://schema.org',
+      '@type': 'Event',
+      name: s.title,
+      description,
+      startDate: s.starts_at,
+      endDate: s.ends_at,
+      eventStatus: 'https://schema.org/EventScheduled',
+      eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+      location: { '@type': 'Place', name: s.venue_name, address: where },
+      organizer: { '@type': 'Organization', name: s.organisation_name },
+      typicalAgeRange: `${s.age_min}-${s.age_max}`,
+      url,
+      offers: {
+        '@type': 'Offer',
+        price: (s.price_cents / 100).toFixed(2),
+        priceCurrency: 'AUD',
+        availability:
+          seatsLeft.value > 0
+            ? 'https://schema.org/InStock'
+            : 'https://schema.org/SoldOut',
+        url,
+      },
+    },
+  }
+})
 
 function fullDay(iso: string): string {
   return new Date(iso).toLocaleDateString('en-AU', {

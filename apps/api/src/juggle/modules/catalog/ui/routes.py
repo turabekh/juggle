@@ -3,14 +3,16 @@ sessions, plus a public session-detail view."""
 
 import uuid
 from typing import Annotated
+from xml.sax.saxutils import escape
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from juggle.db import get_session
 from juggle.deps import CurrentPrincipal
 from juggle.modules.catalog.core import schemas, service
 from juggle.modules.catalog.core.models import ProgramStatus
+from juggle.settings import get_settings
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -169,3 +171,24 @@ def get_session_detail(
     if found is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     return found
+
+
+@router.get("/sitemap.xml", include_in_schema=False)
+def sitemap(session: SessionDep) -> Response:
+    """XML sitemap of every indexable listing (PRD §7.1 — SEO discovery). A web
+    server maps the site root ``/sitemap.xml`` to this endpoint."""
+    base = get_settings().public_base_url.rstrip("/")
+    urls = [
+        "<url>"
+        f"<loc>{escape(base)}/sessions/{session_id}</loc>"
+        f"<lastmod>{updated_at:%Y-%m-%d}</lastmod>"
+        "</url>"
+        for session_id, updated_at in service.published_session_refs(session)
+    ]
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        f"{''.join(urls)}"
+        "</urlset>"
+    )
+    return Response(content=body, media_type="application/xml")

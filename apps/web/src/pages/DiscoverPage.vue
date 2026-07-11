@@ -171,9 +171,18 @@ import EmptyState from '@/components/EmptyState.vue'
 import SessionCard from '@/components/SessionCard.vue'
 import { api, apiError } from '@/lib/api'
 import { CATEGORIES } from '@/lib/format'
+import { useHead } from '@/lib/head'
 import type { Category, SearchCard, SearchFilters } from '@/lib/types'
 
 const $q = useQuasar()
+
+useHead(() => ({
+  title: "Kids' school-holiday activities & birthday parties in Perth | Juggle",
+  description:
+    "Find and book kids' holiday programs and birthday parties near you — search " +
+    'by suburb, date and age with live seat availability, all in one cart.',
+  canonical: `${window.location.origin}/`,
+}))
 
 const dayTypeOptions = [
   { label: 'Half day', value: 'half_day' },

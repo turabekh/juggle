@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+# Provider/admin/account surfaces aren't useful in search.
+Disallow: /provider
+Disallow: /admin
+Disallow: /account
+Disallow: /cart
+Disallow: /checkout
+Disallow: /bookings
+
+Sitemap: /sitemap.xml
