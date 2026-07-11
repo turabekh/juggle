@@ -5,10 +5,11 @@ _Last updated: 2026-07-11. Read this first, then `CLAUDE.md` (engineering conven
 > **Latest slices (2026-07-11) — Phase-1, payments deferred per direction:**
 > - **Reviews & trust (PRD §7.6):** `reviews` module — verified-booking-only, 1–5★ + text, moderation queue, provider right-of-reply, child-PII auto-screen, published-only aggregates; parent/provider/admin UI.
 > - **Waitlist (PRD §7.7):** `waitlist` module — join a sold-out session, a freed seat is auto-offered to the FIFO front with a config-driven claim window (reserved via a seat hold), claim = normal checkout, expiry cascades; reconciliation runs lazily on reads + an admin ops sweep (no scheduler yet). Parent (join/claim) + provider (queue counts) UI. Browser-verified.
-> - **Provider comms (PRD §8.5):** `comms` module — template-guarded broadcast to a session's confirmed families via the notifications gateway; records outbound history. (Automated T-24h "what to bring" deferred — needs the scheduler.)
-> - **Provider analytics (PRD §8.6):** `analytics` module (no table) — fill rate, gross revenue, new-vs-returning family mix, per-program rollup. (Search impressions deferred — needs event instrumentation.) Both browser-verified.
+> - **Provider comms (PRD §8.5):** `comms` module — template-guarded broadcast to a session's confirmed families via the notifications gateway; records outbound history.
+> - **Provider analytics (PRD §8.6):** `analytics` module (no table) — fill rate, gross revenue, new-vs-returning family mix, per-program rollup. (Search impressions deferred — needs event instrumentation.)
+> - **Background scheduler (PRD §7.5/§7.7):** `scheduler` module — one idempotent maintenance tick: reclaim expired holds, sweep the waitlist (offer/expire), and send **T-48h/T-3h pre-session reminders** (deduped by a `session_reminder` marker). Driven by a **worker** (`make worker` / `make worker-loop`, `python -m juggle.worker [--loop]`) or the admin **Operations** page (`POST /scheduler/run`). Payout release stays manual (payments deferred). All browser/worker-verified.
 >
-> **17 domain modules** now; layering `admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ …`. See §5.
+> **18 domain modules** now; layering `scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ …`. See §5.
 
 ---
 
@@ -56,11 +57,12 @@ Open **http://localhost:9000**.
 
 ## 3. Current state (facts)
 
-- **30 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 109 pytest passing** (13 reviews + 10 waitlist + 4 comms + 3 analytics), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
+- **33 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
+- **Backend: 114 pytest passing** (13 reviews + 10 waitlist + 4 comms + 3 analytics + 5 scheduler), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
 - **Frontend: vue-tsc + vite build clean.**
-- **7 Alembic migrations**, head = `9aaf0095f9f4` (add_broadcast). Chain: initial → payment idempotency_key → booking seat_hold_id → notification_log → review → waitlist_entry → broadcast. The chain round-trips (down to base and back).
-- **17 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`).
+- **8 Alembic migrations**, head = `5ca826299aa4` (add_session_reminder). Chain: initial → payment idempotency_key → booking seat_hold_id → notification_log → review → waitlist_entry → broadcast → session_reminder. The chain round-trips (down to base and back).
+- **18 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`, `scheduler`).
+- **Background worker**: `make worker` (one tick) / `make worker-loop` (every 5 min).
 - Stack: FastAPI + SQLAlchemy 2 + PostgreSQL/PostGIS + Alembic (`apps/api`); Vite + Vue 3 (TS) + Quasar SPA (`apps/web`).
 
 ---
@@ -68,16 +70,17 @@ Open **http://localhost:9000**.
 ## 4. Architecture
 
 ### Backend module layering (enforced by import-linter)
-17 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
+18 domain modules under `apps/api/src/juggle/modules/`, each with a **`core/` (domain: models, schemas, service — NO FastAPI imports)** and **`ui/` (FastAPI router)** split. Two contracts in `pyproject.toml [tool.importlinter]`:
 
 1. **`core` never imports FastAPI/Starlette.**
 2. **Strict acyclic layering** (high→low — a module may import only modules **below** it):
 
    ```
-   admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ payments ▸ inventory ▸ catalog ▸ org ▸ identity ▸ notifications ▸ flags ▸ config ▸ audit
+   scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ payments ▸ inventory ▸ catalog ▸ org ▸ identity ▸ notifications ▸ flags ▸ config ▸ audit
    ```
 
    `analytics` (pure read rollup, no table) and `comms` (provider broadcasts) sit near the top with `roster` — both org-member-gated, both read down into `booking`/`catalog`; `comms` also fans out via `notifications`.
+   `scheduler` is the topmost module: it **orchestrates** lower modules on a periodic tick (`inventory.reclaim_all_expired`, `waitlist.process_all`, reminders) — pure domain logic driven by `src/juggle/worker.py` (not a module) or `POST /scheduler/run`.
 
    `reviews` sits between `search` and `booking`: it verifies against a confirmed+completed `booking` (below it) and reads catalog/org/identity for enrichment; it has its own admin-gated moderation routes (no need for the top `admin` module to import it).
 
@@ -94,6 +97,7 @@ Open **http://localhost:9000**.
 - `deps.py` — FastAPI auth deps (`CurrentPrincipal`, `CurrentAdmin`) + **impersonation enforcement** (view-as read-only, per-action audit, revoke-on-end). It queries `impersonation_session` **by raw SQL table name, not the admin model**, so this auth infra (imported by every ui) stays decoupled from the top `admin` module (importing the model would create a low→high cycle — import-linter caught exactly this).
 - `models.py` — imports every module's models so Alembic sees full metadata.
 - `settings.py` — deployment config (env, `JUGGLE_` prefix). **Product config lives in the DB `config` module, not here.**
+- `worker.py` — the background maintenance runner (`python -m juggle.worker [--loop --interval N]`). Each tick calls `scheduler.run_due_jobs` in its own committed transaction; the loop survives a failed tick. `make worker` / `make worker-loop`.
 
 ### Gateways (interface + fake, real impl is a swap)
 - **`payments.core.gateway`** — `PaymentGateway` Protocol + `FakeGateway` (in-memory) + `get_payment_gateway`. Methods: `create_payment_intent`, `confirm`, `refund`, `transfer` (Stripe Connect payout).
@@ -141,6 +145,7 @@ Open **http://localhost:9000**.
 - **Impersonation**: user email/name search → **view-as** (read-only) / **act-as** (mutations audited) → scoped time-boxed token → consumer app with a **persistent support banner** → exit restores admin. Can't impersonate admins/self; ended sessions revoke immediately.
 - **Bookings refund** (`POST /admin/payments/{id}/refund`).
 - **Review moderation** (`/admin/reviews`): pending/published/rejected queue; **approve** (→published) / **reject-with-reason** (audited). Providers reply from their org console; published reviews aggregate to a provider/program rating.
+- **Operations** (`/admin/operations`): **Run maintenance now** triggers one scheduler tick (`POST /scheduler/run`) and shows the summary — reminders sent, waitlist offers made/expired/queues checked, seat holds reclaimed. A worker normally runs this on a loop.
 
 ### Money & comms
 - **Payments**: Stripe-style intent → confirm; 10% application fee (from config); refunds; **payouts**: net (gross − fee) accrues per session on confirm, due at `session_end + payout_delay`, released by admin "Run payouts" (transfer + mark paid).
@@ -150,7 +155,7 @@ Open **http://localhost:9000**.
 
 ## 6. Data model & migrations
 
-18 initial tables + 2 added columns + 4 tables (`notification_log`, `review`, `waitlist_entry`, `broadcast`), across modules. Highlights:
+18 initial tables + 2 added columns + 5 tables (`notification_log`, `review`, `waitlist_entry`, `broadcast`, `session_reminder`), across modules. Highlights:
 - `user_account`, `child` (identity); `organisation`, `org_member`, `wwcc_record`, `insurance_doc` (org); `venue` (PostGIS `geography(POINT,4326)` + GiST index), `program`, `session` (catalog); `seat_hold` (inventory); `booking`, `booking_child` (booking); `payment`, `payout` (payments); `review` (reviews — `UNIQUE(booking_id)`, `CHECK(rating 1..5)`, native `review_status` enum); `waitlist_entry` (waitlist — identity `seq` for FIFO, partial `UNIQUE` on active status per guardian/session); `impersonation_session` (admin); `platform_setting` (versioned), `feature_flag`, `audit_event`, `notification_log`.
 - Cross-module references use **string-based FKs** (`ForeignKey("organisation.id")`) so no module imports another's models just for a relationship.
 - Migrations autogenerate cleanly because `alembic/env.py` **pins `search_path` to `public`** (the PostGIS image installs tiger/topology extensions whose schemas would otherwise leak into autogenerate) and uses GeoAlchemy2's alembic helpers.
@@ -182,7 +187,7 @@ Open **http://localhost:9000**.
 
 ## 9. Known limitations / gaps
 
-- **No background scheduler.** Payout release and (future) T-48h/T-3h reminders are manual/ops-triggered. A worker/cron loop is the main missing infra.
+- **Scheduler runs via the compose `worker` service** (`docker compose up` starts db + api + worker looping every 5 min); `make worker[-loop]` or cron hitting `POST /scheduler/run` also work. A non-compose production deploy still needs its own process/cron for the worker. Payout release is deliberately **not** in the tick (payments deferred) — it's still the manual admin "Run due payouts".
 - **Real integrations not wired**: Stripe (payments + Connect transfers), Postmark/SES (email). Both are gateway swaps.
 - **No file upload**: insurance is a URL/`file_ref`, not an uploaded document (needs presigned S3).
 - **No frontend unit/e2e tests committed** (only ad-hoc Playwright in scratchpad). Worth adding Vitest + a committed Playwright suite.
@@ -195,14 +200,14 @@ Open **http://localhost:9000**.
 
 ## 10. Suggested next work (roughly prioritized)
 
-**Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** Reviews (§7.6), Waitlist (§7.7), and provider Comms + Analytics (§8.5/§8.6) are done. The next payment-free P1 slices:
+**Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** Reviews (§7.6), Waitlist (§7.7), provider Comms + Analytics (§8.5/§8.6), and the **background scheduler/worker** (§7.5/§7.7) are done. The next payment-free P1 slices:
 
-1. **Background scheduler / worker** — the payment-free half is now well-motivated: **automated "what to bring" T-24h** (comms, deferred here), **T-48h/T-3h reminders**, the **waitlist offer-expiry sweep** (`POST /waitlist/process` is already cron-ready), and reclaiming expired holds. A single periodic worker unlocks several half-built features. Payout release is the payment-touching half.
-2. **Saved-kids / multi-guardian polish (§7.3 P1)**, **attendance check-in (§8.3 "tap to mark attended")** — small, self-contained.
-3. **Search-impression / funnel instrumentation (§13)** — the event taxonomy is specced; would complete the analytics "search impressions" gap.
+1. **Attendance check-in (§8.3 "tap to mark attended")** and **saved-kids / multi-guardian polish (§7.3 P1)** — small, self-contained product slices.
+2. **Automated "what to bring" T-24h (§8.5)** — now unblocked by the scheduler; needs a stored per-session "what to bring" field, then add a T-24h job that sends it (reuse the comms/reminder plumbing).
+3. **Search-impression / funnel instrumentation (§13)** — event taxonomy is specced; completes the analytics "search impressions" gap.
 
 Deferred (need payments or external integrations, revisit later):
-- **Payout release** side of the scheduler (payment-touching).
+- **Payout auto-release** in the scheduler (payment-touching — currently manual admin "Run due payouts").
 - **Real integrations** behind the gateways — Stripe (destination charges + Connect payouts), Postmark/SES email, SMS via Twilio.
 - **Provider doc upload** (S3 presigned) + strict approval-before-publish gate; **timezone correctness** (store venue tz); refund automation, promo codes.
 
@@ -217,12 +222,13 @@ apps/api/
   src/juggle/
     main.py, api.py, db.py, common.py, security.py, deps.py, models.py, settings.py
     modules/<name>/core/{models,schemas,service}.py  +  ui/routes.py
-      identity org catalog inventory booking payments roster
-      search reviews waitlist comms analytics admin config flags audit notifications
+      identity org catalog inventory booking payments roster search
+      reviews waitlist comms analytics scheduler admin config flags audit notifications
     modules/payments/core/gateway.py         # PaymentGateway + FakeGateway
     modules/notifications/core/{gateway,ical}.py
-  alembic/versions/*.py                        # 7 migrations
-  tests/test_*.py                              # 22 files, 109 tests
+    worker.py                                  # background maintenance runner
+  alembic/versions/*.py                        # 8 migrations
+  tests/test_*.py                              # 23 files, 114 tests
   scripts/seed_demo.py                         # demo data (admin + provider + sessions + reviews + waitlist)
 apps/web/
   src/lib/{api,types,format,jwt,sessionMemo}.ts

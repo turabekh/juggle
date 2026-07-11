@@ -35,5 +35,20 @@ services:
       - ./apps/api/src:/app/src
     command: uvicorn juggle.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # Background maintenance: waitlist offer/expiry sweep, expired-hold reclaim,
+  # and T-48h/T-3h pre-session reminders. Idempotent; safe to run on a loop.
+  worker:
+    build:
+      context: ./apps/api
+    environment:
+      JUGGLE_DATABASE_URL: postgresql+psycopg://juggle:juggle@db:5432/juggle
+      JUGGLE_ENVIRONMENT: docker
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./apps/api/src:/app/src
+    command: python -m juggle.worker --loop --interval 300
+
 volumes:
   db_data:

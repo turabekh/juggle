@@ -11,8 +11,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install dependencies first for layer caching.
-COPY pyproject.toml ./
+# Install dependencies first for layer caching. README is needed because
+# pyproject declares `readme = "README.md"` and the install builds the package.
+COPY pyproject.toml README.md ./
 RUN uv pip install --system --no-cache ".[dev]" || uv pip install --system --no-cache "."
 
 COPY . .
