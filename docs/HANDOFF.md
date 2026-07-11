@@ -11,7 +11,8 @@ _Last updated: 2026-07-11. Read this first, then `CLAUDE.md` (engineering conven
 > - **Attendance check-in (PRD §8.3):** the `roster` module gained its first table — morning-of **tap-to-check-in** (`Attendance`, keyed by booking_child_id). Roster rows carry `attended`/`attended_at` + an `attended_count`; CSV has an `attended` column; provider roster dialog toggles it.
 > - **Multiple guardians per family (PRD §7.3):** `identity.GuardianLink` (invite → accept; symmetric access once accepted). `list_children` + booking checkout/`list_bookings` use `family_guardian_ids`; account page "Family" section.
 > - **Automated "what to bring" T-24h (PRD §8.5):** sessions carry an optional `what_to_bring`; a scheduler T-24h job emails it to confirmed families, deduped (SessionReminder window `wtb`).
-> - **Funnel instrumentation (PRD §13):** bottom-tier `events` module (`analytics_event`, no child PII) records the 8-stage taxonomy from search/catalog/booking/org/inventory; admin **Funnel** page via `GET /analytics/funnel`. All browser-verified.
+> - **Funnel instrumentation (PRD §13):** bottom-tier `events` module (`analytics_event`, no child PII) records the 8-stage taxonomy from search/catalog/booking/org/inventory; admin **Funnel** page via `GET /analytics/funnel`.
+> - **Listing SEO (PRD §7.1):** `GET /catalog/sitemap.xml` + `robots.txt`; a dependency-free `useHead` composable sets per-listing title/description/canonical/OG + **schema.org Event JSON-LD** (Googlebot renders JS → indexed + rich-result eligible). Full request-time SSR (for non-JS crawlers) is the remaining follow-up. All browser-verified.
 >
 > **19 domain modules** now; layering `scheduler ▸ admin ▸ analytics ▸ comms ▸ roster ▸ search ▸ reviews ▸ waitlist ▸ booking ▸ … ▸ audit ▸ events`. See §5.
 
@@ -61,8 +62,8 @@ Open **http://localhost:9000**.
 
 ## 3. Current state (facts)
 
-- **39 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
-- **Backend: 129 pytest passing** (reviews/waitlist/comms/analytics/scheduler/attendance + 6 co-guardian + 3 funnel + 2 what-to-bring), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
+- **41 commits**, one per milestone/slice (see `git log --oneline`). All green at each step.
+- **Backend: 130 pytest passing** (adds 1 sitemap test on top of the P1 suites), mypy `--strict` clean, **import-linter 2/2 contracts KEPT**, ruff clean.
 - **Frontend: vue-tsc + vite build clean.**
 - **12 Alembic migrations**, head = `e08fed049dda` (add_analytics_event). Recent chain tail: … → attendance → guardian_link → session.what_to_bring → analytics_event. The chain round-trips (down to base and back).
 - **19 domain modules** (added `reviews`, `waitlist`, `comms`, `analytics`, `scheduler`, `events`).
@@ -125,6 +126,7 @@ Open **http://localhost:9000**.
 
 ### Parent marketplace (public + guardian)
 - **Discovery** (`GET /search/sessions`, public): PostGIS radius from lat/lng (`ST_DWithin`, distance-ordered) or suburb/postcode fallback; filters date/child-age/category/price/session-type; `available_only`; only published + future sessions; live `seats_remaining`.
+- **SEO (P1, §7.1)**: `GET /catalog/sitemap.xml` (indexable listings) + `robots.txt`; the `useHead` composable gives each listing page a real title/description/canonical/OG + **schema.org Event JSON-LD** (price, availability, dates, venue) for rich results. Client-rendered (fine for Googlebot); full request-time SSR is a follow-up for non-JS crawlers.
 - **Listing detail** (`GET /catalog/sessions/{id}`, public, published-only): enriched with title/org/venue/description.
 - **Auth**: signup/login (JWT), `/me`. **Child profiles** (data-minimised: first name + DOB only, no surname/photos). **Co-guardians (P1, §7.3)**: invite another parent by email → they accept → both share the family's kids and see each other's bookings ("Family" section on the account page).
 - **Booking**: hold seats (TTL) → cart → checkout (idempotent, per-cart key) → confirm/cancel. Age-gating + child-count checks at checkout.
@@ -198,7 +200,7 @@ Open **http://localhost:9000**.
 - **Real integrations not wired**: Stripe (payments + Connect transfers), Postmark/SES (email). Both are gateway swaps.
 - **No file upload**: insurance is a URL/`file_ref`, not an uploaded document (needs presigned S3).
 - **No frontend unit/e2e tests committed** (only ad-hoc Playwright in scratchpad). Worth adding Vitest + a committed Playwright suite.
-- **No SSR/PWA** (PRD wants SSR for SEO on listing pages + installable PWA). Currently SPA.
+- **No request-time SSR / PWA.** Listing SEO is handled by client-rendered meta + `sitemap.xml` + schema.org JSON-LD (§7.1 — indexed by JS-executing crawlers like Googlebot). True SSR (for non-JS crawlers / faster first paint) and an installable PWA remain follow-ups; still an SPA otherwise.
 - **No user-search-by-child / duplicate-account merge / data-deletion workflow** (PRD §10.2 admin niceties).
 - **Timezone handling** is naive (see gotcha #6).
 - **P1 features not built**: SMS (Twilio), promo codes, Google/Apple SSO, embeddable widget (P2), birthday-party vertical (P2). (Reviews, waitlists, provider analytics, comms, multi-guardian, and funnel instrumentation are now built.)
@@ -209,7 +211,7 @@ Open **http://localhost:9000**.
 
 **Direction (2026-07-11): payments work is deferred; focus on Phase-1 product.** The payment-free P1 surface is now largely built: Reviews (§7.6), Waitlist (§7.7), Comms + Analytics (§8.5/§8.6), scheduler/worker (§7.5/§7.7), attendance check-in (§8.3), multiple guardians (§7.3), automated T-24h "what to bring" (§8.5), and funnel instrumentation (§13). Remaining payment-free slices:
 
-1. **SSR for listing pages (§7.1)** — the last MVP-spec'd frontend-infra gap (SEO); currently SPA.
+1. **Full request-time SSR / PWA (§7.1)** — SEO for listing pages is now handled client-side (meta + JSON-LD + sitemap, indexed by Googlebot); true SSR (non-JS crawlers, faster first paint) + an installable PWA are the remaining frontend-infra items. This is a large, higher-risk change to the serving model — scope it deliberately.
 2. **Per-cycle funnel dashboards / conversion rates (§13)** — the `analytics_event` log is captured; build richer views on top if wanted.
 3. **Google/Apple SSO (§7.3)** and **SMS via Twilio behind a gateway (§8.5)** — need external integrations.
 
@@ -235,10 +237,11 @@ apps/api/
     modules/notifications/core/{gateway,ical}.py
     worker.py                                  # background maintenance runner
   alembic/versions/*.py                        # 12 migrations
-  tests/test_*.py                              # 26 files, 129 tests
+  tests/test_*.py                              # 27 files, 130 tests
   scripts/seed_demo.py                         # demo data (admin + provider + sessions + reviews + waitlist)
 apps/web/
-  src/lib/{api,types,format,jwt,sessionMemo}.ts
+  public/robots.txt                            # SEO (points at /sitemap.xml)
+  src/lib/{api,types,format,jwt,sessionMemo,head}.ts   # head.ts = SEO meta + JSON-LD
   src/stores/{auth,cart}.ts
   src/router/index.ts
   src/layouts/{MainLayout,AdminLayout}.vue
