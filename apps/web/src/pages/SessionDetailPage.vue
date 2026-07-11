@@ -127,6 +127,41 @@
           />
         </template>
 
+        <template v-else-if="seatsLeft === 0">
+          <div class="jg-waitlist">
+            <div class="text-weight-600">This session is sold out</div>
+            <template v-if="!myWait">
+              <p class="jg-muted text-caption q-mt-xs">
+                Join the waitlist — if a seat opens up we'll offer it to you with time to claim.
+              </p>
+              <q-btn
+                unelevated color="primary" no-caps class="full-width"
+                icon="notifications_active" label="Join the waitlist"
+                :loading="waitlisting" @click="joinWaitlist"
+              />
+            </template>
+            <template v-else-if="myWait.status === 'waiting'">
+              <p class="jg-muted text-caption q-mt-xs">
+                You're <b>#{{ myWait.position }}</b> on the waitlist. We'll email you if a seat opens.
+              </p>
+              <q-btn
+                flat dense no-caps color="negative" label="Leave waitlist"
+                :loading="waitlisting" @click="leaveWaitlist"
+              />
+            </template>
+            <template v-else-if="myWait.status === 'offered'">
+              <p class="text-positive text-weight-600 q-mt-xs">
+                <q-icon name="celebration" size="18px" /> A seat opened up for you!
+              </p>
+              <q-btn
+                unelevated color="positive" no-caps class="full-width"
+                icon="confirmation_number" label="Claim your seat"
+                :to="{ name: 'bookings' }"
+              />
+            </template>
+          </div>
+        </template>
+
         <template v-else>
           <div class="text-weight-600 q-mb-sm">Who's coming?</div>
 
@@ -232,7 +267,7 @@ import StarRating from '@/components/StarRating.vue'
 import { api, apiError } from '@/lib/api'
 import { ageAt, categoryMeta, dayLabel, money, timeRange } from '@/lib/format'
 import { rememberSession } from '@/lib/sessionMemo'
-import type { Child, ReviewList, SessionDetail } from '@/lib/types'
+import type { Child, ReviewList, SessionDetail, WaitlistEntry } from '@/lib/types'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 
@@ -250,6 +285,8 @@ const children = ref<Child[]>([])
 const selectedChildIds = ref<string[]>([])
 const holding = ref(false)
 const seatsLive = ref<number | null>(null)
+const myWait = ref<WaitlistEntry | null>(null)
+const waitlisting = ref(false)
 
 const showAddChild = ref(false)
 const savingChild = ref(false)
@@ -287,6 +324,42 @@ async function loadChildren(): Promise<void> {
   }
 }
 
+async function loadMyWait(): Promise<void> {
+  if (!auth.isAuthed) return
+  try {
+    const entries = await api.waitlist.mine()
+    myWait.value = entries.find((e) => e.session_id === props.id) ?? null
+  } catch {
+    myWait.value = null // non-fatal
+  }
+}
+
+async function joinWaitlist(): Promise<void> {
+  waitlisting.value = true
+  try {
+    myWait.value = await api.waitlist.join(props.id)
+    $q.notify({ type: 'positive', message: "You're on the waitlist — we'll email you if a seat opens." })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not join the waitlist') })
+  } finally {
+    waitlisting.value = false
+  }
+}
+
+async function leaveWaitlist(): Promise<void> {
+  if (!myWait.value) return
+  waitlisting.value = true
+  try {
+    await api.waitlist.leave(myWait.value.id)
+    myWait.value = null
+    $q.notify({ type: 'info', message: 'You left the waitlist.' })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    waitlisting.value = false
+  }
+}
+
 async function load(): Promise<void> {
   loading.value = true
   try {
@@ -310,6 +383,7 @@ async function load(): Promise<void> {
     loading.value = false
   }
   await loadChildren()
+  await loadMyWait()
 }
 
 async function saveChild(): Promise<void> {
@@ -427,4 +501,5 @@ onMounted(load)
   background: #fafbfd;
   border-radius: 0 10px 10px 0;
 }
+.jg-waitlist { display: flex; flex-direction: column; gap: 8px; }
 </style>

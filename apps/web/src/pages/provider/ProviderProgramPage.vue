@@ -44,6 +44,12 @@
           <div class="jg-srow__stat">
             <div class="text-weight-600">{{ s.seats_taken }}/{{ s.capacity }}</div>
             <div class="jg-faint text-caption">booked</div>
+            <div
+              v-if="waitlistLabel(s.id)"
+              class="text-primary text-caption text-weight-600 q-mt-xs"
+            >
+              <q-icon name="hourglass_top" size="13px" /> {{ waitlistLabel(s.id) }}
+            </div>
           </div>
           <div class="jg-srow__actions">
             <template v-if="s.status === 'cancelled'">
@@ -125,7 +131,7 @@ import { useQuasar } from 'quasar'
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
 import { categoryMeta, dayLabel, money, timeRange } from '@/lib/format'
-import type { CatalogSession, Program, RosterOut, Venue } from '@/lib/types'
+import type { CatalogSession, Program, RosterOut, SessionWaitlist, Venue } from '@/lib/types'
 
 const props = defineProps<{ id: string }>()
 const $q = useQuasar()
@@ -138,6 +144,7 @@ const saving = ref(false)
 const showSession = ref(false)
 const showRoster = ref(false)
 const roster = ref<RosterOut | null>(null)
+const waitlistCounts = ref<Record<string, SessionWaitlist>>({})
 let rosterSessionId = ''
 
 const dayTypeOptions = [
@@ -171,6 +178,32 @@ function venueName(id: string): string {
   return venues.value.find((v) => v.id === id)?.name ?? 'Venue'
 }
 
+function waitlistLabel(sessionId: string): string {
+  const c = waitlistCounts.value[sessionId]
+  if (!c) return ''
+  const parts = []
+  if (c.offered) parts.push(`${c.offered} offered`)
+  if (c.waiting) parts.push(`${c.waiting} waiting`)
+  return parts.join(' · ')
+}
+
+async function loadWaitlistCounts(): Promise<void> {
+  // Only full sessions can have a queue — fetch counts just for those.
+  const full = sessions.value.filter((s) => s.seats_taken >= s.capacity && s.status !== 'cancelled')
+  await Promise.all(
+    full.map((s) =>
+      api.waitlist
+        .sessionCounts(s.id)
+        .then((c) => {
+          waitlistCounts.value[s.id] = c
+        })
+        .catch(() => {
+          /* non-fatal */
+        }),
+    ),
+  )
+}
+
 async function load(): Promise<void> {
   try {
     program.value = await api.catalog.program(props.id)
@@ -178,6 +211,7 @@ async function load(): Promise<void> {
       api.catalog.programSessions(props.id),
       api.catalog.venues(program.value.organisation_id),
     ])
+    await loadWaitlistCounts()
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
   }

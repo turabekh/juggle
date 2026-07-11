@@ -36,6 +36,7 @@ import type {
   SessionCancelResult,
   SessionCreateInput,
   SessionDetail,
+  SessionWaitlist,
   SettingItem,
   SettingVersion,
   TokenResponse,
@@ -43,6 +44,7 @@ import type {
   UserSummary,
   Venue,
   VerificationStatus,
+  WaitlistEntry,
   WwccRecord,
 } from '@/lib/types'
 
@@ -335,6 +337,23 @@ export const api = {
         approve,
         reason,
       })
+      return data
+    },
+  },
+  waitlist: {
+    async join(sessionId: string): Promise<WaitlistEntry> {
+      const { data } = await http.post<WaitlistEntry>('/waitlist', { session_id: sessionId })
+      return data
+    },
+    async mine(): Promise<WaitlistEntry[]> {
+      const { data } = await http.get<WaitlistEntry[]>('/waitlist/mine')
+      return data
+    },
+    async leave(entryId: string): Promise<void> {
+      await http.delete(`/waitlist/${entryId}`)
+    },
+    async sessionCounts(sessionId: string): Promise<SessionWaitlist> {
+      const { data } = await http.get<SessionWaitlist>(`/waitlist/sessions/${sessionId}`)
       return data
     },
   },

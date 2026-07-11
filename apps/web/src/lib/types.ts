@@ -395,3 +395,27 @@ export interface ReviewableBooking {
   organisation_name: string
   starts_at: string
 }
+
+// --- Waitlist (PRD §7.7) -----------------------------------------------------
+
+export type WaitlistStatus = 'waiting' | 'offered' | 'claimed' | 'expired' | 'cancelled'
+
+export interface WaitlistEntry {
+  id: string
+  session_id: string
+  status: WaitlistStatus
+  position: number | null
+  program_title: string
+  organisation_name: string
+  starts_at: string
+  ends_at: string
+  offer_hold_id: string | null
+  offer_expires_at: string | null
+  created_at: string
+}
+
+export interface SessionWaitlist {
+  session_id: string
+  waiting: number
+  offered: number
+}
