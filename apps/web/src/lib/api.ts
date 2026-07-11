@@ -14,6 +14,7 @@ import type {
   ChildCreate,
   CoGuardian,
   Flag,
+  FunnelOut,
   Hold,
   ImpersonationMode,
   ImpersonationSession,
@@ -392,6 +393,10 @@ export const api = {
   analytics: {
     async org(organisationId: string): Promise<OrgAnalytics> {
       const { data } = await http.get<OrgAnalytics>(`/analytics/organisations/${organisationId}`)
+      return data
+    },
+    async funnel(days = 30): Promise<FunnelOut> {
+      const { data } = await http.get<FunnelOut>('/analytics/funnel', { params: { days } })
       return data
     },
   },

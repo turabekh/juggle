@@ -34,3 +34,15 @@ class OrgAnalytics(BaseModel):
     fill_rate: float          # 0..1 overall
     families: FamilyMix
     programs: list[ProgramStat]
+
+
+class FunnelStage(BaseModel):
+    event_type: str
+    count: int
+
+
+class FunnelOut(BaseModel):
+    """Platform funnel event counts over a window (PRD §13). Admin-only."""
+
+    days: int
+    stages: list[FunnelStage]

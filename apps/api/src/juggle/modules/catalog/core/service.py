@@ -19,6 +19,7 @@ from juggle.modules.catalog.core.models import (
 )
 from juggle.modules.catalog.core.models import Session as ProgramSession
 from juggle.modules.catalog.core.schemas import SessionCreate, SessionDetailOut
+from juggle.modules.events.core import service as events_service
 from juggle.modules.org.core import service as org_service
 from juggle.modules.org.core.models import OrgStatus
 
@@ -155,6 +156,10 @@ def set_program_status(
             raise OrgSuspended(str(program.organisation_id))
     program.status = status
     db.flush()
+    if status is ProgramStatus.published:
+        events_service.record(
+            db, event_type="listing_published", props={"program_id": str(program.id)}
+        )
     return program
 
 
@@ -230,6 +235,9 @@ def get_public_session_detail(
     venue = db.get(Venue, session.venue_id)
     if program is None or venue is None:
         return None
+    events_service.record(
+        db, event_type="listing_viewed", props={"session_id": str(session.id)}
+    )
     org = org_service.get_organisation(db, program.organisation_id)
     return SessionDetailOut(
         id=session.id,

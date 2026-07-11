@@ -36,6 +36,7 @@ from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.catalog.core.models import Program, SessionStatus, Venue
 from juggle.modules.catalog.core.models import Session as CatalogSession
 from juggle.modules.config.core import service as config_service
+from juggle.modules.events.core import service as events_service
 from juggle.modules.identity.core import service as identity_service
 from juggle.modules.identity.core.models import Child
 from juggle.modules.inventory.core import service as inventory_service
@@ -260,6 +261,11 @@ def checkout(
         hold.expires_at = now + timedelta(seconds=config_service.checkout_window_seconds(db))
 
     db.flush()
+    events_service.record(
+        db,
+        event_type="checkout_started",
+        props={"payment_id": str(payment.id), "sessions": len(prepared)},
+    )
     return _order_view(db, payment)
 
 
@@ -280,6 +286,9 @@ def confirm(
         raise PaymentNotPending(str(payment_id))
 
     payments_service.mark_succeeded(db, payment, gateway=gateway)
+    events_service.record(
+        db, event_type="checkout_completed", props={"payment_id": str(payment.id)}
+    )
     for booking in _bookings_for_payment(db, payment.id):
         booking.status = BookingStatus.confirmed
         if booking.seat_hold_id is not None:
@@ -338,6 +347,9 @@ def cancel(db: Session, *, payment_id: uuid.UUID, guardian_id: uuid.UUID) -> Ord
                 pass  # already released/expired — seats already accounted for
     payments_service.mark_failed(db, payment)
     db.flush()
+    events_service.record(
+        db, event_type="booking_cancelled", props={"payment_id": str(payment.id)}
+    )
     return _order_view(db, payment)
 
 

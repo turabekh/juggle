@@ -14,6 +14,7 @@ from juggle.modules.booking.core import models as booking_models  # noqa: F401
 from juggle.modules.catalog.core import models as catalog_models  # noqa: F401
 from juggle.modules.comms.core import models as comms_models  # noqa: F401
 from juggle.modules.config.core import models as config_models  # noqa: F401
+from juggle.modules.events.core import models as events_models  # noqa: F401
 from juggle.modules.flags.core import models as flags_models  # noqa: F401
 from juggle.modules.identity.core import models as identity_models  # noqa: F401
 from juggle.modules.inventory.core import models as inventory_models  # noqa: F401

@@ -95,6 +95,11 @@ const router = createRouter({
           component: () => import('@/pages/admin/AdminOperationsPage.vue'),
         },
         {
+          path: 'funnel',
+          name: 'admin-funnel',
+          component: () => import('@/pages/admin/AdminFunnelPage.vue'),
+        },
+        {
           path: 'flags',
           name: 'admin-flags',
           component: () => import('@/pages/admin/AdminFlagsPage.vue'),

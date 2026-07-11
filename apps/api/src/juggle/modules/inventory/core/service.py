@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from juggle.modules.catalog.core.models import Session as ProgramSession
 from juggle.modules.catalog.core.models import SessionStatus
 from juggle.modules.config.core import service as config_service
+from juggle.modules.events.core import service as events_service
 from juggle.modules.inventory.core.models import SeatHold, SeatHoldStatus
 
 
@@ -118,6 +119,10 @@ def hold_seats(
     )
     db.add(hold)
     db.flush()
+    if session_obj.seats_taken >= session_obj.capacity:
+        events_service.record(
+            db, event_type="session_filled", props={"session_id": str(session_obj.id)}
+        )
     return hold, session_obj
 
 

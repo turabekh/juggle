@@ -482,6 +482,18 @@ export interface OrgAnalytics {
   programs: ProgramStat[]
 }
 
+// --- Funnel analytics (PRD §13) ----------------------------------------------
+
+export interface FunnelStage {
+  event_type: string
+  count: number
+}
+
+export interface FunnelOut {
+  days: number
+  stages: FunnelStage[]
+}
+
 // --- Scheduler / maintenance worker ------------------------------------------
 
 export interface JobSummary {

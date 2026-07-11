@@ -118,4 +118,5 @@ layers = [
     "juggle.modules.flags",
     "juggle.modules.config",
     "juggle.modules.audit",
+    "juggle.modules.events",
 ]

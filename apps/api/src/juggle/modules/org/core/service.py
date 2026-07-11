@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from juggle.modules.events.core import service as events_service
 from juggle.modules.org.core.models import (
     InsuranceDoc,
     Organisation,
@@ -53,6 +54,9 @@ def create_organisation(
         OrgMember(organisation_id=org.id, user_account_id=owner_user_id, role=OrgRole.owner)
     )
     session.flush()
+    events_service.record(
+        session, event_type="provider_signup", props={"organisation_id": str(org.id)}
+    )
     return org
 
 

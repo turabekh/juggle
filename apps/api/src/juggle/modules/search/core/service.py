@@ -23,6 +23,7 @@ from juggle.modules.catalog.core.models import (
     Venue,
 )
 from juggle.modules.catalog.core.models import Session as ProgramSession
+from juggle.modules.events.core import service as events_service
 from juggle.modules.org.core.models import Organisation
 from juggle.modules.search.core.schemas import SearchCard
 
@@ -134,4 +135,7 @@ def search_sessions(
                 distance_km=distance_km,
             )
         )
+    events_service.record(
+        db, event_type="search_performed", props={"results": len(cards)}
+    )
     return cards

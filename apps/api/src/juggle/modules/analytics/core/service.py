@@ -11,18 +11,22 @@ not exist yet, so it is deliberately out of scope here.
 """
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from juggle.modules.analytics.core.schemas import (
     FamilyMix,
+    FunnelOut,
+    FunnelStage,
     OrgAnalytics,
     ProgramStat,
 )
 from juggle.modules.booking.core.models import Booking, BookingChild, BookingStatus
 from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.catalog.core.models import ProgramStatus, SessionStatus
+from juggle.modules.events.core import service as events_service
 from juggle.modules.org.core import service as org_service
 
 
@@ -32,6 +36,15 @@ class NotOrgMember(Exception):
 
 def _fill(booked: int, capacity: int) -> float:
     return round(booked / capacity, 4) if capacity > 0 else 0.0
+
+
+def platform_funnel(db: Session, *, days: int, since: datetime) -> FunnelOut:
+    """Platform-wide funnel event counts over a window (PRD §13, admin-only)."""
+    counts = events_service.funnel_counts(db, since=since)
+    return FunnelOut(
+        days=days,
+        stages=[FunnelStage(event_type=k, count=v) for k, v in counts.items()],
+    )
 
 
 def org_analytics(
