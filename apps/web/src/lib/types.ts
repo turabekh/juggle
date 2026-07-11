@@ -357,6 +357,12 @@ export interface PayoutRunResult {
   total_cents: number
 }
 
+export interface ConnectStatus {
+  onboarded: boolean
+  charges_enabled: boolean
+  payouts_enabled: boolean
+}
+
 export interface SessionCreateInput {
   venue_id: string
   starts_at: string

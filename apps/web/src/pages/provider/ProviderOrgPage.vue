@@ -125,6 +125,29 @@
           <h2 class="text-h6 q-my-none">Earnings</h2>
           <span v-if="scheduledTotal > 0" class="jg-pill">{{ money(scheduledTotal) }} upcoming</span>
         </div>
+
+        <!-- Stripe Connect payouts setup (PRD §8.4 · F-PAY-1) -->
+        <div class="jg-card q-pa-md q-mb-md">
+          <div class="row items-center justify-between q-col-gutter-sm">
+            <div class="col">
+              <div class="row items-center q-gutter-sm">
+                <span class="text-weight-600">Stripe payouts</span>
+                <q-chip
+                  v-if="connect" dense square :color="connectDisplay.color"
+                  text-color="white" :label="connectDisplay.label"
+                />
+              </div>
+              <div class="jg-faint text-caption q-mt-xs">{{ connectDisplay.hint }}</div>
+            </div>
+            <q-btn
+              v-if="connectDisplay.needsSetup"
+              unelevated no-caps color="primary"
+              :label="connectDisplay.ctaLabel"
+              :loading="connecting" @click="startConnect"
+            />
+          </div>
+        </div>
+
         <div v-if="payouts.length" class="jg-list">
           <div v-for="p in payouts" :key="p.id" class="jg-card jg-listrow">
             <div>
@@ -356,12 +379,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useQuasar } from 'quasar'
+import { useRoute, useRouter } from 'vue-router'
 
 import EmptyState from '@/components/EmptyState.vue'
 import StarRating from '@/components/StarRating.vue'
 import { api, apiError } from '@/lib/api'
-import { CATEGORIES, categoryMeta, dayLabel, money } from '@/lib/format'
+import { CATEGORIES, categoryMeta, dayLabel, money, payoutSetupDisplay } from '@/lib/format'
 import type {
+  ConnectStatus,
   InsuranceDoc,
   ListingQuestion,
   Org,
@@ -375,8 +400,12 @@ import type {
 
 const props = defineProps<{ id: string }>()
 const $q = useQuasar()
+const route = useRoute()
+const router = useRouter()
 
 const org = ref<Org | null>(null)
+const connect = ref<ConnectStatus | null>(null)
+const connecting = ref(false)
 const venues = ref<Venue[]>([])
 const programs = ref<Program[]>([])
 const wwcc = ref<WwccRecord[]>([])
@@ -414,6 +443,8 @@ const avgRating = computed(() =>
     : 0,
 )
 
+const connectDisplay = computed(() => payoutSetupDisplay(connect.value))
+
 function statusColor(s: string): string {
   return { pending: 'warning', approved: 'positive', suspended: 'grey-6' }[s] ?? 'grey'
 }
@@ -447,6 +478,11 @@ async function load(): Promise<void> {
         api.reviews.forProvider(props.id),
       ])
     try {
+      connect.value = await api.payments.connectStatus(props.id)
+    } catch {
+      connect.value = null // non-fatal
+    }
+    try {
       analytics.value = await api.analytics.org(props.id)
     } catch {
       analytics.value = null // non-fatal
@@ -458,6 +494,38 @@ async function load(): Promise<void> {
     }
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
+  }
+}
+
+async function startConnect(): Promise<void> {
+  connecting.value = true
+  try {
+    const origin = window.location.origin
+    const base = `${origin}/provider/orgs/${props.id}`
+    const url = await api.payments.connectOnboard(
+      props.id,
+      `${base}?connect=return`,
+      `${base}?connect=refresh`,
+    )
+    window.location.href = url
+  } catch (err) {
+    connecting.value = false
+    $q.notify({ type: 'negative', message: apiError(err) })
+  }
+}
+
+// Stripe bounces the provider back with ?connect=return; re-pull capability flags.
+async function handleConnectReturn(): Promise<void> {
+  if (route.query.connect !== 'return') return
+  try {
+    connect.value = await api.payments.connectRefresh(props.id)
+    if (connect.value.payouts_enabled) {
+      $q.notify({ type: 'positive', message: 'Payouts are now active.' })
+    }
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    await router.replace({ name: 'provider-org', params: { id: props.id } })
   }
 }
 
@@ -580,7 +648,10 @@ async function addProgram(): Promise<void> {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await handleConnectReturn()
+})
 </script>
 
 <style scoped>

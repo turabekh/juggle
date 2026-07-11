@@ -13,6 +13,7 @@ import type {
   Child,
   ChildCreate,
   CoGuardian,
+  ConnectStatus,
   Flag,
   FunnelOut,
   Hold,
@@ -345,6 +346,30 @@ export const api = {
     async payouts(organisationId: string): Promise<Payout[]> {
       const { data } = await http.get<Payout[]>('/payments/payouts', {
         params: { organisation_id: organisationId },
+      })
+      return data
+    },
+    async connectStatus(organisationId: string): Promise<ConnectStatus> {
+      const { data } = await http.get<ConnectStatus>('/payments/connect/status', {
+        params: { organisation_id: organisationId },
+      })
+      return data
+    },
+    async connectOnboard(
+      organisationId: string,
+      returnUrl: string,
+      refreshUrl: string,
+    ): Promise<string> {
+      const { data } = await http.post<{ url: string }>('/payments/connect/onboard', {
+        organisation_id: organisationId,
+        return_url: returnUrl,
+        refresh_url: refreshUrl,
+      })
+      return data.url
+    },
+    async connectRefresh(organisationId: string): Promise<ConnectStatus> {
+      const { data } = await http.post<ConnectStatus>('/payments/connect/refresh', {
+        organisation_id: organisationId,
       })
       return data
     },

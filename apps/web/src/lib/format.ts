@@ -1,5 +1,7 @@
 // Display helpers — currency (AUD), dates, ages, categories.
 
+import type { ConnectStatus } from '@/lib/types'
+
 const AUD = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' })
 
 export function money(cents: number): string {
@@ -50,4 +52,41 @@ export const CATEGORIES = [
 
 export function categoryMeta(value: string): { label: string; icon: string } {
   return CATEGORIES.find((c) => c.value === value) ?? { label: value, icon: 'category' }
+}
+
+// Stripe Connect payout-setup state → chip + copy + CTA (PRD §8.4 · F-PAY-1).
+export interface PayoutSetupDisplay {
+  color: string
+  label: string
+  hint: string
+  needsSetup: boolean
+  ctaLabel: string
+}
+
+export function payoutSetupDisplay(status: ConnectStatus | null): PayoutSetupDisplay {
+  if (status?.payouts_enabled) {
+    return {
+      color: 'positive',
+      label: 'Active',
+      hint: "Payouts are active — you're paid a few days after each session.",
+      needsSetup: false,
+      ctaLabel: 'Set up payouts',
+    }
+  }
+  if (status?.onboarded) {
+    return {
+      color: 'warning',
+      label: 'In review',
+      hint: 'Stripe is verifying your details. This usually takes a few minutes.',
+      needsSetup: true,
+      ctaLabel: 'Finish Stripe setup',
+    }
+  }
+  return {
+    color: 'grey-6',
+    label: 'Not set up',
+    hint: 'Connect a Stripe account to receive payouts from your bookings.',
+    needsSetup: true,
+    ctaLabel: 'Set up payouts',
+  }
 }
