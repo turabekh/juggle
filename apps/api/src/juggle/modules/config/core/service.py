@@ -29,6 +29,7 @@ KEY_SEARCH_DEFAULT_RADIUS_KM = "search_default_radius_km"
 KEY_PAYOUT_DELAY_DAYS = "payout_delay_days"
 KEY_IMPERSONATION_TTL_MINUTES = "impersonation_ttl_minutes"
 KEY_WAITLIST_CLAIM_WINDOW_MINUTES = "waitlist_claim_window_minutes"
+KEY_MAX_ACTIVE_HOLDS_PER_GUARDIAN = "max_active_holds_per_guardian"
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,10 @@ REGISTRY: dict[str, SettingSpec] = {
     KEY_WAITLIST_CLAIM_WINDOW_MINUTES: SettingSpec(
         KEY_WAITLIST_CLAIM_WINDOW_MINUTES, 240, int, 15, 2880,
         "Waitlist offer claim window (minutes)",
+    ),
+    KEY_MAX_ACTIVE_HOLDS_PER_GUARDIAN: SettingSpec(
+        KEY_MAX_ACTIVE_HOLDS_PER_GUARDIAN, 8, int, 1, 50,
+        "Max concurrent active seat holds per guardian (anti-hoarding)",
     ),
 }
 
@@ -202,3 +207,7 @@ def impersonation_ttl_minutes(db: Session) -> int:
 
 def waitlist_claim_window_minutes(db: Session) -> int:
     return int(get_value(db, KEY_WAITLIST_CLAIM_WINDOW_MINUTES))
+
+
+def max_active_holds_per_guardian(db: Session) -> int:
+    return int(get_value(db, KEY_MAX_ACTIVE_HOLDS_PER_GUARDIAN))

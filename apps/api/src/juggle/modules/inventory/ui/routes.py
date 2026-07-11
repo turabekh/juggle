@@ -28,6 +28,11 @@ def create_hold(
         )
     except service.SessionNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found") from exc
+    except service.TooManyHolds as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"You already have {exc.limit} seats on hold — check out or release some first.",
+        ) from exc
     except service.SoldOut as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT, f"Sold out — {exc.remaining} seat(s) remaining"

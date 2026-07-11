@@ -17,7 +17,7 @@ model directly to hold the lock.
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from juggle.modules.catalog.core.models import Session as ProgramSession
@@ -41,6 +41,14 @@ class SoldOut(Exception):
 
 class HoldNotFound(Exception):
     """No active hold with that id belonging to the caller."""
+
+
+class TooManyHolds(Exception):
+    """The guardian already holds the maximum concurrent seats (anti-hoarding)."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        super().__init__(f"at most {limit} active holds allowed")
 
 
 def _lock_session(db: Session, session_id: uuid.UUID) -> ProgramSession | None:
@@ -105,6 +113,22 @@ def hold_seats(
         raise SessionNotFound(str(session_id))
 
     _reclaim_expired(db, session_obj, now=now)
+
+    # Anti-hoarding: cap a guardian's concurrent live holds (PRD fraud basics).
+    # Counts holds that are still active and unexpired across all sessions.
+    limit = config_service.max_active_holds_per_guardian(db)
+    active_holds = (
+        db.scalar(
+            select(func.count(SeatHold.id)).where(
+                SeatHold.held_by_id == held_by_id,
+                SeatHold.status == SeatHoldStatus.active,
+                SeatHold.expires_at >= now,
+            )
+        )
+        or 0
+    )
+    if active_holds >= limit:
+        raise TooManyHolds(limit)
 
     if quantity > session_obj.seats_remaining:
         raise SoldOut(session_obj.seats_remaining)
