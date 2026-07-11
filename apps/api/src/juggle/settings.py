@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     # Public site origin — used to build absolute URLs in the SEO sitemap (§7.1).
     public_base_url: str = Field(default="http://localhost:9000")
 
+    # Stripe (test mode by default). When stripe_secret_key is unset the app uses
+    # the in-memory FakeGateway, so local dev and CI need no Stripe account.
+    # Prefixed JUGGLE_ like all app config; the Stripe CLI reads its own STRIPE_API_KEY.
+    stripe_secret_key: str = Field(default="")
+    stripe_publishable_key: str = Field(default="")
+    stripe_webhook_secret: str = Field(default="")
+
 
 @lru_cache
 def get_settings() -> Settings:

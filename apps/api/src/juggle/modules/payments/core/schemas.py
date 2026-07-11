@@ -30,3 +30,27 @@ class PayoutOut(BaseModel):
 class PayoutRunResult(BaseModel):
     released: int
     total_cents: int
+
+
+class OnboardIn(BaseModel):
+    organisation_id: uuid.UUID
+    return_url: str | None = None
+    refresh_url: str | None = None
+
+
+class OnboardLinkOut(BaseModel):
+    url: str
+
+
+class ConnectStatusOut(BaseModel):
+    onboarded: bool
+    charges_enabled: bool
+    payouts_enabled: bool
+
+
+class RefreshIn(BaseModel):
+    organisation_id: uuid.UUID
+
+
+class WebhookAck(BaseModel):
+    status: str

@@ -24,6 +24,16 @@ def _org_with_session(
     org_id = client.post(
         "/api/v1/org", headers=_auth(owner), json={"name": f"Org {uuid.uuid4().hex[:5]}"}
     ).json()["id"]
+    # Connect onboarding: create the Express account and (via the fake gateway's
+    # "completed" account) flip charges/payouts enabled so payouts can release.
+    client.post(
+        "/api/v1/payments/connect/onboard", headers=_auth(owner),
+        json={"organisation_id": org_id},
+    )
+    client.post(
+        "/api/v1/payments/connect/refresh", headers=_auth(owner),
+        json={"organisation_id": org_id},
+    )
     venue_id = client.post(
         "/api/v1/catalog/venues",
         headers=_auth(owner),

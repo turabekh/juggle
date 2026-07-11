@@ -5,7 +5,7 @@ import enum
 import uuid
 from datetime import date
 
-from sqlalchemy import Date, Enum, Float, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, Enum, Float, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from juggle.common import TimestampMixin, UUIDPkMixin
@@ -42,6 +42,11 @@ class Organisation(UUIDPkMixin, TimestampMixin, Base):
     # Decreases on provider-initiated cancellations (PRD §8.3).
     reliability_score: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     stripe_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Mirrored from Stripe via the account.updated webhook (PRD §8.1, §8.4). A provider
+    # may take marketplace charges only when charges_enabled, and receive payouts only
+    # when payouts_enabled — both gate the relevant flows (F-PAY-1).
+    charges_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    payouts_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     internal_notes: Mapped[str | None] = mapped_column(String(2000), nullable=True)
 
 

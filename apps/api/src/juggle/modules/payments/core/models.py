@@ -57,6 +57,17 @@ class Payment(UUIDPkMixin, TimestampMixin, Base):
     )
 
 
+class StripeEvent(UUIDPkMixin, TimestampMixin, Base):
+    """Webhook idempotency ledger (INV-2). Every processed Stripe event id is recorded
+    with a UNIQUE constraint; a redelivery (Stripe is at-least-once) collides and is
+    treated as an already-processed no-op."""
+
+    __tablename__ = "stripe_event"
+
+    event_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+
+
 class Payout(UUIDPkMixin, TimestampMixin, Base):
     __tablename__ = "payout"
     __table_args__ = (

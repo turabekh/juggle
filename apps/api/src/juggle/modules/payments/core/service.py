@@ -10,17 +10,34 @@ module is wired (M7) it is a module constant.
 import uuid
 from datetime import UTC, datetime
 
+import stripe
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from juggle.modules.config.core import service as config_service
+from juggle.modules.identity.core import service as identity_service
 from juggle.modules.org.core import service as org_service
-from juggle.modules.payments.core.gateway import PaymentGateway
-from juggle.modules.payments.core.models import Payment, PaymentStatus, Payout, PayoutStatus
+from juggle.modules.payments.core.gateway import AccountLinkResult, PaymentGateway
+from juggle.modules.payments.core.models import (
+    Payment,
+    PaymentStatus,
+    Payout,
+    PayoutStatus,
+    StripeEvent,
+)
 
 
 class NotOrgMember(Exception):
     """Caller is not a member of the organisation."""
+
+
+class OrgNotFound(Exception):
+    """No such organisation."""
+
+
+class WebhookVerificationError(Exception):
+    """The Stripe webhook signature did not verify."""
 
 
 class PayoutNotFound(Exception):
@@ -104,6 +121,139 @@ def refund(db: Session, payment: Payment, *, gateway: PaymentGateway) -> Payment
     return payment
 
 
+# --- Connect Express onboarding + webhooks (F-PAY-1) ------------------------
+
+def start_onboarding(
+    db: Session,
+    *,
+    organisation_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    gateway: PaymentGateway,
+    refresh_url: str,
+    return_url: str,
+) -> AccountLinkResult:
+    """Create (or reuse) the org's Stripe Express account and return a hosted
+    onboarding link. Member-gated. All Stripe calls stay in this module (INV-2)."""
+    org = org_service.get_organisation(db, organisation_id)
+    if org is None:
+        raise OrgNotFound(str(organisation_id))
+    if org_service.get_member(db, organisation_id, actor_id) is None:
+        raise NotOrgMember(str(organisation_id))
+    if org.stripe_account_id is None:
+        actor = identity_service.get_user(db, actor_id)
+        account = gateway.create_connect_account(
+            email=actor.email if actor is not None else None, business_name=org.name
+        )
+        org_service.set_stripe_account(db, organisation_id, account.id)
+        org_service.set_connect_flags(
+            db,
+            organisation_id,
+            charges_enabled=account.charges_enabled,
+            payouts_enabled=account.payouts_enabled,
+        )
+        account_id = account.id
+    else:
+        account_id = org.stripe_account_id
+    return gateway.create_account_link(
+        account_id=account_id, refresh_url=refresh_url, return_url=return_url
+    )
+
+
+def connect_status(
+    db: Session, *, organisation_id: uuid.UUID, actor_id: uuid.UUID
+) -> dict[str, bool]:
+    """The org's Stripe onboarding/capability state (member-gated)."""
+    org = org_service.get_organisation(db, organisation_id)
+    if org is None:
+        raise OrgNotFound(str(organisation_id))
+    if org_service.get_member(db, organisation_id, actor_id) is None:
+        raise NotOrgMember(str(organisation_id))
+    return {
+        "onboarded": org.stripe_account_id is not None,
+        "charges_enabled": org.charges_enabled,
+        "payouts_enabled": org.payouts_enabled,
+    }
+
+
+def refresh_account_status(
+    db: Session, *, organisation_id: uuid.UUID, gateway: PaymentGateway
+) -> dict[str, bool]:
+    """Pull the org's current capability flags from Stripe and mirror them locally.
+    A synchronous fallback for the ``account.updated`` webhook (e.g. on onboarding
+    return, or admin-triggered)."""
+    org = org_service.get_organisation(db, organisation_id)
+    if org is None:
+        raise OrgNotFound(str(organisation_id))
+    if org.stripe_account_id is None:
+        return {"onboarded": False, "charges_enabled": False, "payouts_enabled": False}
+    account = gateway.retrieve_account(org.stripe_account_id)
+    org_service.set_connect_flags(
+        db,
+        organisation_id,
+        charges_enabled=account.charges_enabled,
+        payouts_enabled=account.payouts_enabled,
+    )
+    return {
+        "onboarded": True,
+        "charges_enabled": account.charges_enabled,
+        "payouts_enabled": account.payouts_enabled,
+    }
+
+
+def _record_event(db: Session, event_id: str, event_type: str) -> bool:
+    """Insert the event id into the idempotency ledger. Returns False if it was
+    already recorded (a Stripe redelivery — at-least-once), so the caller no-ops.
+
+    The insert runs inside a SAVEPOINT so a duplicate-key collision rolls back only
+    this insert, not the surrounding transaction (INV-2)."""
+    savepoint = db.begin_nested()
+    db.add(StripeEvent(event_id=event_id, event_type=event_type))
+    try:
+        db.flush()
+    except IntegrityError:
+        savepoint.rollback()
+        return False
+    return True
+
+
+def _handle_account_updated(
+    db: Session, *, account_id: str, charges_enabled: bool, payouts_enabled: bool
+) -> None:
+    org = org_service.get_org_by_stripe_account(db, account_id)
+    if org is None:
+        return
+    org_service.set_connect_flags(
+        db, org.id, charges_enabled=charges_enabled, payouts_enabled=payouts_enabled
+    )
+
+
+def handle_webhook(db: Session, *, payload: bytes, sig_header: str, secret: str) -> str:
+    """Verify a Stripe webhook, dedupe it, and dispatch. The dedupe insert and the
+    handler side effects share one transaction (committed by the request), so a
+    redelivery cannot double-apply (INV-2). Signature is verified on the raw body
+    before any parsing — never trust an unverified payload.
+
+    F-PAY-1 handles ``account.updated``; the payment/charge handlers land in F-PAY-3.
+    """
+    try:
+        event = stripe.Webhook.construct_event(  # type: ignore[no-untyped-call]
+            payload, sig_header, secret
+        )
+    except (ValueError, stripe.SignatureVerificationError) as exc:
+        raise WebhookVerificationError(str(exc)) from exc
+    if not _record_event(db, event["id"], event["type"]):
+        return "duplicate"
+    if event["type"] == "account.updated":
+        obj = event["data"]["object"]
+        _handle_account_updated(
+            db,
+            account_id=str(obj["id"]),
+            charges_enabled=bool(obj["charges_enabled"]),
+            payouts_enabled=bool(obj["payouts_enabled"]),
+        )
+    return "ok"
+
+
 # --- Payouts (PRD §8.4) -----------------------------------------------------
 
 def provider_net_cents(gross_cents: int, fee_rate: float) -> int:
@@ -184,12 +334,20 @@ def release_due_payouts(
         )
     ).all()
     total = 0
+    released = 0
     for payout in due:
         org = org_service.get_organisation(db, payout.organisation_id)
-        destination = org.stripe_account_id if org is not None else None
-        result = gateway.transfer(destination=destination, amount_cents=payout.amount_cents)
+        # Gate on Connect readiness (F-PAY-1): a provider who is not payouts_enabled or
+        # has no connected account is skipped, leaving the payout scheduled for a later
+        # run — never transferred to a dead-end destination.
+        if org is None or not org.payouts_enabled or org.stripe_account_id is None:
+            continue
+        result = gateway.transfer(
+            destination=org.stripe_account_id, amount_cents=payout.amount_cents
+        )
         payout.stripe_transfer_id = result.id
         payout.status = PayoutStatus.paid
         total += payout.amount_cents
+        released += 1
     db.flush()
-    return len(due), total
+    return released, total

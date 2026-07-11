@@ -64,6 +64,42 @@ def get_organisation(session: Session, org_id: uuid.UUID) -> Organisation | None
     return session.get(Organisation, org_id)
 
 
+def get_org_by_stripe_account(session: Session, account_id: str) -> Organisation | None:
+    """Reverse-lookup used by the payments ``account.updated`` webhook (F-PAY-1)."""
+    return session.scalar(
+        select(Organisation).where(Organisation.stripe_account_id == account_id)
+    )
+
+
+def set_stripe_account(
+    session: Session, org_id: uuid.UUID, account_id: str
+) -> Organisation | None:
+    """Attach a newly created Stripe Connect account to the org (payments onboarding)."""
+    org = session.get(Organisation, org_id)
+    if org is None:
+        return None
+    org.stripe_account_id = account_id
+    session.flush()
+    return org
+
+
+def set_connect_flags(
+    session: Session,
+    org_id: uuid.UUID,
+    *,
+    charges_enabled: bool,
+    payouts_enabled: bool,
+) -> Organisation | None:
+    """Mirror Stripe's capability flags onto the org (payments onboarding / webhook)."""
+    org = session.get(Organisation, org_id)
+    if org is None:
+        return None
+    org.charges_enabled = charges_enabled
+    org.payouts_enabled = payouts_enabled
+    session.flush()
+    return org
+
+
 def expire_due_compliance(session: Session, *, today: date) -> int:
     """Transition WWCC/insurance whose expiry has passed to ``expired`` (PRD §8.1
     expiry tracking) — so a lapsed check no longer counts as verified. Returns the
