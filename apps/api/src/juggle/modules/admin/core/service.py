@@ -17,6 +17,8 @@ from juggle.modules.audit.core import service as audit_service
 from juggle.modules.booking.core import service as booking_service
 from juggle.modules.booking.core.models import Booking
 from juggle.modules.booking.core.schemas import BookingOut, OrderOut
+from juggle.modules.catalog.core import service as catalog_service
+from juggle.modules.catalog.core.models import Program
 from juggle.modules.config.core import service as config_service
 from juggle.modules.identity.core import service as identity_service
 from juggle.modules.identity.core.models import Child, GuardianLink, UserAccount
@@ -237,6 +239,24 @@ def suspend_org(db: Session, *, org_id: uuid.UUID, actor_id: uuid.UUID) -> Organ
     return _set_org_status(
         db, org_id=org_id, status=OrgStatus.suspended, actor_id=actor_id, action="admin.org.suspend"
     )
+
+
+def reject_listing(
+    db: Session, *, program_id: uuid.UUID, actor_id: uuid.UUID, reason: str, note: str | None
+) -> Program:
+    """Moderation: unpublish a listing that violates policy (ADR-0006 / EXT-1 §2-E2, §10).
+    The E2 fence — recurring/term-enrolment classes disguised as one-offs — is rejected here
+    with reason ``recurring_enrolment``. Audited with the true admin (INV-10-adjacent)."""
+    program = catalog_service.admin_unpublish_program(db, program_id=program_id)
+    audit_service.record(
+        db,
+        action="admin.listing.reject",
+        actor_id=actor_id,
+        entity_type="program",
+        entity_id=str(program_id),
+        detail={"reason": reason, "note": note},
+    )
+    return program
 
 
 def get_org_verifications(

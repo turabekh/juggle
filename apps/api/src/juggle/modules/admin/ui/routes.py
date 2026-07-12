@@ -11,6 +11,7 @@ from juggle.db import get_session
 from juggle.deps import CurrentAdmin
 from juggle.modules.admin.core import schemas, service
 from juggle.modules.booking.core.schemas import BookingOut, OrderOut
+from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.org.core.models import OrgStatus, VerificationStatus
 from juggle.modules.org.core.schemas import InsuranceOut, WwccOut
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
@@ -111,6 +112,29 @@ def suspend_org(
     except service.OrgNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Organisation not found") from exc
     return schemas.OrgAdminOut.model_validate(org)
+
+
+# --- Listing moderation (ADR-0006 / EXT-1 §2-E2) ----------------------------
+
+@router.post("/listings/{program_id}/reject", response_model=schemas.ListingModerationOut)
+def reject_listing(
+    program_id: uuid.UUID,
+    body: schemas.ListingRejectIn,
+    admin: CurrentAdmin,
+    session: SessionDep,
+) -> schemas.ListingModerationOut:
+    """Unpublish a listing that violates policy — notably `recurring_enrolment` (the E2
+    fence: recurring/term-enrolment classes disguised as one-offs)."""
+    try:
+        program = service.reject_listing(
+            session, program_id=program_id, actor_id=admin.user_id,
+            reason=body.reason, note=body.note,
+        )
+    except catalog_service.ProgramNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Listing not found") from exc
+    return schemas.ListingModerationOut(
+        program_id=program.id, status=program.status.value, reason=body.reason
+    )
 
 
 # --- Provider verification review -------------------------------------------

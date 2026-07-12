@@ -144,6 +144,17 @@ def list_org_programs(
     )
 
 
+def admin_unpublish_program(db: Session, *, program_id: uuid.UUID) -> Program:
+    """Unpublish a listing on platform authority (moderation) — no org-membership check.
+    Called only from the admin module, which gates + audits the action."""
+    program = db.get(Program, program_id)
+    if program is None:
+        raise ProgramNotFound(str(program_id))
+    program.status = ProgramStatus.unpublished
+    db.flush()
+    return program
+
+
 def set_program_status(
     db: Session, *, program_id: uuid.UUID, actor_id: uuid.UUID, status: ProgramStatus
 ) -> Program:
