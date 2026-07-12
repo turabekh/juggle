@@ -111,6 +111,7 @@ layers = [
     "juggle.modules.qanda",
     "juggle.modules.waitlist",
     "juggle.modules.booking",
+    "juggle.modules.parties",
     "juggle.modules.payments",
     "juggle.modules.inventory",
     "juggle.modules.catalog",

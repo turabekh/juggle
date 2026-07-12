@@ -105,6 +105,10 @@ def get_session(db: Session, session_id: uuid.UUID) -> ProgramSession | None:
     return db.get(ProgramSession, session_id)
 
 
+def get_venue(db: Session, venue_id: uuid.UUID) -> Venue | None:
+    return db.get(Venue, venue_id)
+
+
 def list_org_venues(
     db: Session, *, organisation_id: uuid.UUID, actor_id: uuid.UUID
 ) -> list[Venue]:
