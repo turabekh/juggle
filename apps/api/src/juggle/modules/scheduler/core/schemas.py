@@ -8,6 +8,7 @@ class JobSummary(BaseModel):
 
     holds_reclaimed: int
     abandoned_checkouts_swept: int
+    party_deposits_swept: int
     waitlist_sessions_processed: int
     waitlist_offers_made: int
     waitlist_offers_expired: int

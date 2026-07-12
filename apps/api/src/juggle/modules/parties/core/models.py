@@ -20,9 +20,11 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -76,6 +78,12 @@ class PartyPackage(UUIDPkMixin, TimestampMixin, Base):
     )
 
 
+class PartyBookingStatus(enum.StrEnum):
+    pending_deposit = "pending_deposit"  # awaiting the deposit PaymentIntent to succeed
+    confirmed = "confirmed"              # deposit paid; slot held (balance due at T-7d)
+    cancelled = "cancelled"
+
+
 class PartySlot(UUIDPkMixin, TimestampMixin, Base):
     __tablename__ = "party_slot"
     __table_args__ = (
@@ -90,5 +98,53 @@ class PartySlot(UUIDPkMixin, TimestampMixin, Base):
     status: Mapped[PartySlotStatus] = mapped_column(
         Enum(PartySlotStatus, name="party_slot_status"),
         default=PartySlotStatus.available,
+        nullable=False,
+    )
+
+
+class PartyBooking(UUIDPkMixin, TimestampMixin, Base):
+    __tablename__ = "party_booking"
+    __table_args__ = (
+        CheckConstraint("headcount >= 1", name="ck_party_booking_headcount"),
+        CheckConstraint("total_cents >= 0", name="ck_party_booking_total_nonneg"),
+        CheckConstraint(
+            "deposit_cents >= 0 AND deposit_cents <= total_cents",
+            name="ck_party_booking_deposit_range",
+        ),
+        # Capacity-1 (INV-1) DB backstop: at most one non-cancelled booking per slot.
+        Index(
+            "uq_party_slot_active_booking",
+            "slot_id",
+            unique=True,
+            postgresql_where=text("status <> 'cancelled'"),
+        ),
+    )
+
+    slot_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("party_slot.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    package_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("party_package.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    guardian_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_account.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    organisation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organisation.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    headcount: Mapped[int] = mapped_column(Integer, nullable=False)
+    per_head_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)  # snapshot
+    total_cents: Mapped[int] = mapped_column(Integer, nullable=False)          # GST-inclusive
+    deposit_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    balance_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    deposit_payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("payment.id", ondelete="SET NULL"), nullable=True
+    )
+    balance_payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("payment.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[PartyBookingStatus] = mapped_column(
+        Enum(PartyBookingStatus, name="party_booking_status"),
+        default=PartyBookingStatus.pending_deposit,
         nullable=False,
     )

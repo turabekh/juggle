@@ -15,8 +15,11 @@ merchant-of-record / O-1 stakes).
 - **Default deposit = 30%** of the GST-inclusive party total.
 - **Bounds 10–100%** (100% = "pay in full at booking", no balance step).
 - A **runtime config key** `party_deposit_pct` (INV-11), per-venue override allowed later.
-- The deposit is a **partial capture** on the PaymentIntent; the balance is a separate off-session
-  charge at T-7d (ADR-0008). Display is GST-inclusive throughout (INV-6): the parent sees the full
+- **Two separate charges, not a partial capture** (revised at B2 implementation): the deposit is its
+  own PaymentIntent, charged in full at booking, with `setup_future_usage="off_session"` so the card
+  is saved; the balance is a **second off-session PaymentIntent** at T-7d (ADR-0008). This is cleaner
+  than manual-capture partial settlement (no 7-day uncaptured auth to expire) and reuses the F-PAY
+  webhook/settlement rails. Display is GST-inclusive throughout (INV-6): the parent sees the full
   price and "X due today, Y on <date>".
 
 ## Consequences

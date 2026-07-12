@@ -71,6 +71,7 @@ class PaymentGateway(Protocol):
         application_fee_cents: int,
         currency: str,
         idempotency_key: str,
+        setup_future_usage: str | None = None,
     ) -> PaymentIntentResult: ...
 
     def confirm(self, intent_id: str) -> PaymentConfirmResult: ...
@@ -114,6 +115,7 @@ class FakeGateway:
         application_fee_cents: int,
         currency: str,
         idempotency_key: str,
+        setup_future_usage: str | None = None,
     ) -> PaymentIntentResult:
         intent_id = f"pi_fake_{uuid.uuid4().hex}"
         self._intents[intent_id] = "requires_confirmation"
@@ -173,18 +175,23 @@ class StripeGateway:
         application_fee_cents: int,
         currency: str,
         idempotency_key: str,
+        setup_future_usage: str | None = None,
     ) -> PaymentIntentResult:
         # Separate charges: a plain charge on the PLATFORM account — deliberately NO
         # transfer_data.destination and NO application_fee_amount (ADR 0001). Card-only
         # so success/failure lands within the checkout window (ADR 0005). The fee is
-        # internal accounting, carried as metadata only.
+        # internal accounting, carried as metadata only. setup_future_usage="off_session"
+        # saves the card so a party balance can be charged off-session at T-7d (B3).
+        params: dict[str, object] = {
+            "amount": amount_cents,
+            "currency": currency,
+            "payment_method_types": ["card"],
+            "metadata": {"application_fee_cents": str(application_fee_cents)},
+        }
+        if setup_future_usage is not None:
+            params["setup_future_usage"] = setup_future_usage
         intent = self._client.payment_intents.create(
-            params={
-                "amount": amount_cents,
-                "currency": currency,
-                "payment_method_types": ["card"],
-                "metadata": {"application_fee_cents": str(application_fee_cents)},
-            },
+            params=params,  # type: ignore[arg-type]
             options={"idempotency_key": idempotency_key},
         )
         return PaymentIntentResult(

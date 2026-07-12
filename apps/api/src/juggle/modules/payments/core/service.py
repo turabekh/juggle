@@ -27,6 +27,7 @@ from juggle.modules.payments.core.gateway import (
 )
 from juggle.modules.payments.core.models import (
     Payment,
+    PaymentPurpose,
     PaymentStatus,
     Payout,
     PayoutStatus,
@@ -78,16 +79,19 @@ def create_payment(
     idempotency_key: str,
     gateway: PaymentGateway,
     currency: str = "aud",
+    purpose: PaymentPurpose = PaymentPurpose.cart,
+    setup_future_usage: str | None = None,
 ) -> tuple[Payment, PaymentIntentResult]:
     """Create the Stripe PaymentIntent (separate charge — no application_fee/destination,
     ADR-0001/0005) and the local Payment row. The caller passes the per-session-summed
-    fee + GST so rounding stays per-session (ADR-0002). Returns the payment and the intent
-    so the caller can hand the client_secret to the Payment Element."""
+    fee + GST so rounding stays per-session (ADR-0002). ``purpose`` routes the shared webhook
+    (cart vs party); ``setup_future_usage`` saves the card for an off-session party balance."""
     intent = gateway.create_payment_intent(
         amount_cents=amount_cents,
         application_fee_cents=application_fee_cents,
         currency=currency,
         idempotency_key=idempotency_key,
+        setup_future_usage=setup_future_usage,
     )
     payment = Payment(
         guardian_id=guardian_id,
@@ -98,6 +102,7 @@ def create_payment(
         fee_gst_cents=fee_gst_cents,
         currency=currency,
         status=PaymentStatus.pending,
+        purpose=purpose,
     )
     db.add(payment)
     db.flush()

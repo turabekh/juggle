@@ -27,6 +27,7 @@ from juggle.modules.inventory.core import service as inventory_service
 from juggle.modules.notifications.core import service as notifications_service
 from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
 from juggle.modules.org.core import service as org_service
+from juggle.modules.parties.core import service as parties_service
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
 from juggle.modules.scheduler.core.models import SessionReminder
 from juggle.modules.scheduler.core.schemas import JobSummary
@@ -178,6 +179,9 @@ def run_due_jobs(
     abandoned = booking_service.sweep_abandoned_checkouts(
         db, gateway=payment_gateway, now=now
     )
+    party_deposits_swept = parties_service.sweep_abandoned_deposits(
+        db, gateway=payment_gateway, now=now
+    )
     holds_reclaimed = inventory_service.reclaim_all_expired(db, now=now)
     waitlist_run = waitlist_service.process_all(db)
     reminders_sent = _send_reminders(db, now=now, gateway=gateway)
@@ -187,6 +191,7 @@ def run_due_jobs(
     return JobSummary(
         holds_reclaimed=holds_reclaimed,
         abandoned_checkouts_swept=abandoned,
+        party_deposits_swept=party_deposits_swept,
         waitlist_sessions_processed=waitlist_run.sessions_processed,
         waitlist_offers_made=waitlist_run.offers_made,
         waitlist_offers_expired=waitlist_run.offers_expired,

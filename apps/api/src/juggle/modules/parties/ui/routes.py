@@ -10,10 +10,12 @@ from sqlalchemy.orm import Session
 from juggle.db import get_session
 from juggle.deps import CurrentPrincipal
 from juggle.modules.parties.core import schemas, service
+from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
 
 router = APIRouter(prefix="/parties", tags=["parties"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
+GatewayDep = Annotated[PaymentGateway, Depends(get_payment_gateway)]
 
 
 @router.post(
@@ -122,3 +124,43 @@ def list_slots(package_id: uuid.UUID, session: SessionDep) -> list[schemas.SlotO
     return [
         schemas.SlotOut.model_validate(s) for s in service.list_slots(session, package_id)
     ]
+
+
+@router.post(
+    "/slots/{slot_id}/book",
+    status_code=status.HTTP_201_CREATED,
+    response_model=schemas.PartyBookingOut,
+)
+def book_slot(
+    slot_id: uuid.UUID,
+    body: schemas.BookSlotIn,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+    gateway: GatewayDep,
+) -> schemas.PartyBookingOut:
+    """Reserve a party slot and start the deposit (ADR-0007). Returns the deposit
+    client_secret for the Payment Element; the booking confirms via the Stripe webhook."""
+    try:
+        booking, intent = service.book_slot(
+            session, slot_id=slot_id, guardian_id=principal.user_id,
+            headcount=body.headcount, gateway=gateway,
+        )
+    except service.SlotNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Slot not found") from exc
+    except service.SlotUnavailable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, "That slot is no longer available") from exc
+    except service.HeadcountOutOfBand as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Headcount is outside the package's min/max"
+        ) from exc
+    return schemas.PartyBookingOut(
+        id=booking.id,
+        slot_id=booking.slot_id,
+        package_id=booking.package_id,
+        headcount=booking.headcount,
+        total_cents=booking.total_cents,
+        deposit_cents=booking.deposit_cents,
+        balance_cents=booking.balance_cents,
+        status=booking.status.value,
+        client_secret=intent.client_secret,
+    )

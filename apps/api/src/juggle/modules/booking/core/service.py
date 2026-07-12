@@ -51,9 +51,10 @@ from juggle.modules.notifications.core.gateway import EmailGateway
 from juggle.modules.notifications.core.schemas import ConfirmationSession
 from juggle.modules.org.core import service as org_service
 from juggle.modules.org.core.models import OrgRole
+from juggle.modules.parties.core import service as parties_service
 from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import PaymentGateway
-from juggle.modules.payments.core.models import Payment, PaymentStatus
+from juggle.modules.payments.core.models import Payment, PaymentPurpose, PaymentStatus
 from juggle.settings import get_settings
 
 # The seat-hold window is extended to cover the payment step so a pending
@@ -507,12 +508,30 @@ def handle_stripe_webhook(
             payouts_enabled=bool(obj["payouts_enabled"]),
         )
     elif event.type == "payment_intent.succeeded":
-        settle_payment_succeeded(
-            db, intent_id=str(obj["id"]), gateway=gateway, email_gateway=email_gateway
-        )
+        intent_id = str(obj["id"])
+        if _is_party_payment(db, intent_id):
+            parties_service.settle_deposit_succeeded(db, intent_id=intent_id, gateway=gateway)
+        else:
+            settle_payment_succeeded(
+                db, intent_id=intent_id, gateway=gateway, email_gateway=email_gateway
+            )
     elif event.type == "payment_intent.canceled":
-        settle_payment_canceled(db, intent_id=str(obj["id"]))
+        intent_id = str(obj["id"])
+        if _is_party_payment(db, intent_id):
+            parties_service.settle_deposit_canceled(db, intent_id=intent_id)
+        else:
+            settle_payment_canceled(db, intent_id=intent_id)
     return "ok"
+
+
+def _is_party_payment(db: Session, intent_id: str) -> bool:
+    """Route the shared Stripe webhook: a party deposit/balance settles in `parties`, not
+    the cart settlement (which would otherwise auto-refund an unknown-to-it payment)."""
+    payment = payments_service.get_payment_by_intent(db, intent_id)
+    return payment is not None and payment.purpose in (
+        PaymentPurpose.party_deposit,
+        PaymentPurpose.party_balance,
+    )
 
 
 def cancel(db: Session, *, payment_id: uuid.UUID, guardian_id: uuid.UUID) -> OrderOut:

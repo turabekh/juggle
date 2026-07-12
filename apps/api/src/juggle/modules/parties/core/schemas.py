@@ -56,3 +56,20 @@ class SlotOut(BaseModel):
     starts_at: datetime
     ends_at: datetime
     status: str
+
+
+class BookSlotIn(BaseModel):
+    headcount: int = Field(ge=1)
+
+
+class PartyBookingOut(BaseModel):
+    id: uuid.UUID
+    slot_id: uuid.UUID
+    package_id: uuid.UUID
+    headcount: int
+    total_cents: int
+    deposit_cents: int
+    balance_cents: int
+    status: str
+    # Deposit PaymentIntent client_secret — only on a fresh booking, for the Payment Element.
+    client_secret: str | None = None
