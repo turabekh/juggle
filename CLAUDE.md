@@ -137,7 +137,7 @@ Run `make check` before considering a change finished.
 Scope tags come from `docs/juggle-prd.md` and `docs/juggle-prd-ext-1.md`. Only build what's in the active gate; anything else, raise it, don't build it.
 
 - **MVP + Phase-1 core** — done/underway (see Status above): search/listing/checkout, provider tools, admin console, reviews/waitlist/comms/analytics/scheduler/qanda, and the **payments track (F-PAY-0…6)**.
-- **Active gate (ADR-0006 — always-on repositioning):** **E2** any-day one-off/drop-in sessions, the **parties vertical** (PRD §9, instant-book + request-to-quote), and **G2 party invites+RSVP** — pulled up from P2, built A→B→C→D per `docs/PLANS/always-on-marketplace.md`. **SSR** promoted to launch-blocking.
+- **Active gate (ADR-0006 — always-on repositioning):** **E2** any-day one-off/drop-in sessions, the **parties vertical** (PRD §9, instant-book + request-to-quote), and **G2 Party Planner — vote-to-book invites + RSVP** (ADR-0011: host picks ≤4 options → invitees RSVP+vote via a tokenized public link → deadline resolves to a winner + one-tap booking through the existing parties/payments rails; a planning layer only, no new money code; new `party_planner` module above `parties`; behind the `party_planner` flag, OFF until real email lands) — pulled up from P2, built A→B→C→D per `docs/PLANS/always-on-marketplace.md`. **SSR** promoted to launch-blocking.
 - **Still P1/P2/P3 (locked until raised):** the rest of PRD-EXT-1 (G1/G3-full/G4/G5, E1/E3, G6, B-series, E4), SMS, SSO, KidSport.
 
 ## What NOT to do

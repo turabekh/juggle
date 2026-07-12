@@ -52,11 +52,29 @@ Post-booking share sheet → deep link to the exact session with live seats.
 - **Attribution:** `share_link` carries referrer guardian; booking through it records the edge (feeds metrics + future referral credit).
 - **Placement:** confirmation screen, confirmation email, bookings dashboard.
 
-### G2 — Party invites + RSVP [P2, ships with parties vertical]
-The acquisition sleeper: one party booking pushes 10–15 parent emails through a Juggle-branded moment.
+### G2 — Party Planner (invites + vote-to-book) [active gate per ADR-0006; evolved by ADR-0011]
+The acquisition sleeper: one party pushes 10–15 parent emails through a Juggle-branded moment. G2
+**evolves from plain invite/RSVP into a vote-to-book planner** — the vote is the engagement/virality
+mechanic and doubles as the date + headcount decision. Full decision set: **ADR-0011**.
 
-- Host builds invite from the party booking (theme auto-styled, details prefilled); guests RSVP without accounts; headcount syncs to the booking (respecting the T-72h adjustment rule, base §9); "powered by Juggle" with age-relevant discovery teaser after RSVP.
-- **Privacy/consent:** guest emails are the host's data, used solely for that party's transactional comms; any marketing contact requires an explicit separate opt-in at RSVP (Spam Act 2003: transactional vs marketing kept strictly apart). No public guest lists; kids' names visible only within the invite audience.
+- **Host** picks up to 4 party options (Juggle packages, each carrying its specific slot datetime — a
+  vote is implicitly a date vote — plus max 1 custom free-text option), sets a voting deadline, ranks
+  their own child's favourites (⭐ badge), and shares a link (open + optional per-guest email invites).
+- **Invitees** RSVP without accounts via an opaque, noindex, deadline-expiring token: parent
+  name/email + attending-kid count + optional nickname/avatar, then **one vote** (editable until the
+  deadline). They see a live tally, countdown, and a pseudonymous who's-in board.
+- **Resolution** at the deadline (scheduler tick): winner announced to all invitees automatically;
+  host prompted to confirm the booking (headcount prefilled from "yes" RSVPs, T-72h rule per base §9)
+  or override (sends a "change of plans" notice). Package winners book through the existing parties +
+  payments rails; custom winners get a "book something similar" nudge. **Votes are non-binding on
+  inventory** — no holds/deposits during voting; options show live availability (INV-12).
+- **Privacy/consent (INV-13):** votes anonymous to everyone (tallies only, no vote-by-invite endpoint);
+  guest emails are transactional-only; marketing contact needs a separate opt-in at RSVP (Spam Act
+  2003). **No public rosters or attendee visibility (§10):** the who's-in board is audience-scoped,
+  pseudonymous (parent nickname/avatar only, never a child identity), and never public/indexable;
+  child first name + dietary are collected only post-resolution from confirmed guests and are visible
+  to host + provider only. Guest PII auto-purges N days after the event; marketing opt-ins persist
+  separately. Ships behind the `party_planner` flag, OFF until the real email gateway lands.
 
 ### G3 — Sold-out capture: waitlists + availability alerts [P1]
 Extends base §7.7 waitlists into a subscription asset: "notify me when spots open," "tell me when summer programs drop," per category/suburb/age-band alerts — all capturable **pre-account** (email + kids' ages only). Every disappointment becomes a subscriber. *G3-lite (landing-page email capture with age fields) is already live in the GTM plan and is the only pre-launch EXT item.*
@@ -89,12 +107,19 @@ Scarcity display thresholds; referral give/get amounts + expiry; trial lead fee 
 
 `school, guardian_school, pd_day, share_link, referral, referral_credit, invite, invite_rsvp, alert_subscription, partner, partner_attribution, trial_booking, lead_fee_event`. Module placement (`growth` module vs distributing into catalog/notifications) is an ADR at build time per house rules — recommendation: new `growth` module owning share/referral/invite/alerts + partner attribution; `school`/`pd_day` into `catalog` as geo reference data.
 
+**Party Planner (G2, ADR-0011)** supersedes the flat `invite`/`invite_rsvp` pair above with a
+planner set in a new **`party_planner`** module (layered immediately above `parties`):
+`party_plan, plan_option, plan_invite, plan_rsvp, plan_vote`. No child columns live in these tables —
+the post-resolution roster (child first name + dietary) lives on the resulting `party_booking`
+(INV-3). `plan_vote` has `UNIQUE(plan_invite_id)` (one editable vote per invite) and no read path
+exposes vote-by-invite (votes anonymous).
+
 ## 8. Success metrics (per feature, conservative)
 
 | Loop | Metric | Healthy |
 |---|---|---|
 | G1 share links | share→visit→booking conversion | ≥8% of bookings shared; ≥15% of visits book |
-| G2 invites | RSVPs per party; RSVP→signup within 60d | ≥10; ≥10% |
+| G2 Party Planner | resolved plan→package booking; RSVPs per plan; invitee→signup within 60d | ≥40%; ≥10; ≥10% |
 | G3 alerts | alert→booking next cycle | ≥20% |
 | G5 digest | open rate; digest→session views | ≥45%; ≥10% CTR |
 | E1 PD days | bookings per PD date (top-20 schools) | ≥15 by 3rd occurrence |
