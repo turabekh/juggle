@@ -350,13 +350,18 @@ def _settle_confirmed(db: Session, payment: Payment, *, email_gateway: EmailGate
             continue
         quantity = _charged_quantity(db, booking)
         gross = booking.unit_price_cents * quantity
-        payments_service.accrue_payout(
+        net = payments_service.provider_net_cents(gross, fee_rate, gst_rate)
+        payout = payments_service.accrue_payout(
             db,
             organisation_id=booking.organisation_id,
             session_id=session_obj.id,
-            net_cents=payments_service.provider_net_cents(gross, fee_rate, gst_rate),
+            net_cents=net,
             scheduled_for=session_obj.ends_at + timedelta(days=delay_days),
         )
+        # Persist exactly what was accrued and where, so a later refund claws back this
+        # amount from this payout — immune to config drift or a shared session payout.
+        booking.accrued_net_cents = net
+        booking.payout_id = payout.id
 
 
 def confirm(
@@ -575,19 +580,37 @@ def list_bookings(db: Session, guardian_id: uuid.UUID) -> list[BookingOut]:
     return [_booking_out(db, b) for b in bookings]
 
 
+def _clawback_booking(db: Session, booking: Booking, *, gateway: PaymentGateway) -> None:
+    """Reverse exactly the net this booking accrued out of exactly the payout it fed
+    (ADR-0005 §7). Uses the persisted ``accrued_net_cents``/``payout_id`` — no recomputation
+    (config-drift-proof) and no per-session guessing (multi-payout-proof)."""
+    if booking.payout_id is None or booking.accrued_net_cents <= 0:
+        return
+    payments_service.adjust_payout_for_refund(
+        db,
+        payout_id=booking.payout_id,
+        net_cents=booking.accrued_net_cents,
+        gateway=gateway,
+        idempotency_key=f"rev-{booking.id}",
+    )
+
+
 def refund_order(
     db: Session, *, payment_id: uuid.UUID, gateway: PaymentGateway
 ) -> OrderOut:
-    """Refund a whole order (admin bookings-console action): refund the payment,
-    release every seat, and mark the bookings refunded. Idempotent."""
+    """Refund a whole order (admin bookings-console action): refund the payment, claw back
+    every booking's payout, release every seat, and mark the bookings refunded. Idempotent."""
     payment = payments_service.get_payment_for_update(db, payment_id)
     if payment is None:
         raise PaymentNotFound(str(payment_id))
     if payment.status is PaymentStatus.refunded:
         return _order_view(db, payment)
 
-    if payment.status is PaymentStatus.succeeded:
-        payments_service.refund(db, payment, gateway=gateway)
+    if payment.status in (PaymentStatus.succeeded, PaymentStatus.partially_refunded):
+        payments_service.refund(db, payment, gateway=gateway)  # full remaining
+        for booking in _bookings_for_payment(db, payment.id):
+            if booking.status is not BookingStatus.refunded:
+                _clawback_booking(db, booking, gateway=gateway)
     elif payment.status is PaymentStatus.pending:
         payments_service.mark_failed(db, payment)
 
@@ -640,17 +663,23 @@ def cancel_session(
         )
     )
 
-    # Refund each distinct paid payment once; fail still-pending ones.
-    refunded = 0
-    for payment_id in {b.payment_id for b in bookings if b.payment_id is not None}:
-        payment = payments_service.get_payment_for_update(db, payment_id)
+    # Refund ONLY this session's portion of each order (a cart may span other sessions
+    # that still stand): refund the cancelled bookings' line total, claw back their payouts.
+    refunded_payment_ids: set[uuid.UUID] = set()
+    for booking in bookings:
+        if booking.payment_id is None:
+            continue
+        payment = payments_service.get_payment_for_update(db, booking.payment_id)
         if payment is None:
             continue
-        if payment.status is PaymentStatus.succeeded:
-            payments_service.refund(db, payment, gateway=gateway)
-            refunded += 1
+        if payment.status in (PaymentStatus.succeeded, PaymentStatus.partially_refunded):
+            line = booking.unit_price_cents * _charged_quantity(db, booking)
+            payments_service.refund(db, payment, gateway=gateway, amount_cents=line)
+            _clawback_booking(db, booking, gateway=gateway)
+            refunded_payment_ids.add(booking.payment_id)
         elif payment.status is PaymentStatus.pending:
             payments_service.mark_failed(db, payment)
+    refunded = len(refunded_payment_ids)
 
     for booking in bookings:
         if booking.seat_hold_id is not None:

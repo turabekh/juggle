@@ -46,6 +46,12 @@ class TransferResult:
 
 
 @dataclass(frozen=True)
+class TransferReversalResult:
+    id: str
+    amount_cents: int
+
+
+@dataclass(frozen=True)
 class ConnectAccountResult:
     id: str
     charges_enabled: bool
@@ -73,7 +79,13 @@ class PaymentGateway(Protocol):
 
     def refund(self, intent_id: str, amount_cents: int) -> RefundResult: ...
 
-    def transfer(self, *, destination: str | None, amount_cents: int) -> TransferResult: ...
+    def transfer(
+        self, *, destination: str | None, amount_cents: int, idempotency_key: str | None = None
+    ) -> TransferResult: ...
+
+    def reverse_transfer(
+        self, *, transfer_id: str, amount_cents: int, idempotency_key: str
+    ) -> TransferReversalResult: ...
 
     # --- Connect Express onboarding (F-PAY-1) ---
     def create_connect_account(
@@ -120,8 +132,15 @@ class FakeGateway:
     def refund(self, intent_id: str, amount_cents: int) -> RefundResult:
         return RefundResult(id=f"re_fake_{uuid.uuid4().hex}", status="succeeded")
 
-    def transfer(self, *, destination: str | None, amount_cents: int) -> TransferResult:
+    def transfer(
+        self, *, destination: str | None, amount_cents: int, idempotency_key: str | None = None
+    ) -> TransferResult:
         return TransferResult(id=f"tr_fake_{uuid.uuid4().hex}", status="paid")
+
+    def reverse_transfer(
+        self, *, transfer_id: str, amount_cents: int, idempotency_key: str
+    ) -> TransferReversalResult:
+        return TransferReversalResult(id=f"trr_fake_{uuid.uuid4().hex}", amount_cents=amount_cents)
 
     def create_connect_account(
         self, *, email: str | None, business_name: str
@@ -196,15 +215,40 @@ class StripeGateway:
         )
         return RefundResult(id=refund.id, status=refund.status or "")
 
-    def transfer(self, *, destination: str | None, amount_cents: int) -> TransferResult:
-        transfer = self._client.transfers.create(
-            params={
-                "amount": amount_cents,
-                "currency": "aud",
-                "destination": destination or "",
-            }
-        )
+    def transfer(
+        self, *, destination: str | None, amount_cents: int, idempotency_key: str | None = None
+    ) -> TransferResult:
+        if idempotency_key:
+            transfer = self._client.transfers.create(
+                params={
+                    "amount": amount_cents,
+                    "currency": "aud",
+                    "destination": destination or "",
+                },
+                options={"idempotency_key": idempotency_key},
+            )
+        else:
+            transfer = self._client.transfers.create(
+                params={
+                    "amount": amount_cents,
+                    "currency": "aud",
+                    "destination": destination or "",
+                },
+            )
         return TransferResult(id=transfer.id, status="paid")
+
+    def reverse_transfer(
+        self, *, transfer_id: str, amount_cents: int, idempotency_key: str
+    ) -> TransferReversalResult:
+        # Claw back money already transferred to a provider when a paid-out booking is
+        # refunded (separate charges & transfers, ADR-0001/0005 §7). The idempotency key
+        # makes a retry after a mid-batch failure safe (no double reversal).
+        reversal = self._client.transfers.reversals.create(
+            id=transfer_id,
+            params={"amount": amount_cents},
+            options={"idempotency_key": idempotency_key},
+        )
+        return TransferReversalResult(id=reversal.id, amount_cents=amount_cents)
 
     def create_connect_account(
         self, *, email: str | None, business_name: str

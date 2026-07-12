@@ -54,6 +54,9 @@ class Payment(UUIDPkMixin, TimestampMixin, Base):
     application_fee_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # GST on the commission (ADR-0002); platform remits to the ATO. Deducted from payout.
     fee_gst_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Cumulative amount refunded so partial (per-session) refunds are exact and can't
+    # exceed the charge; status becomes partially_refunded until it reaches amount_cents.
+    refunded_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="aud", nullable=False)
     status: Mapped[PaymentStatus] = mapped_column(
         Enum(PaymentStatus, name="payment_status"), default=PaymentStatus.pending, nullable=False

@@ -141,13 +141,27 @@ def mark_failed(db: Session, payment: Payment) -> Payment:
     return payment
 
 
-def refund(db: Session, payment: Payment, *, gateway: PaymentGateway) -> Payment:
-    """Full refund via the gateway; idempotent once already refunded."""
+def refund(
+    db: Session, payment: Payment, *, gateway: PaymentGateway, amount_cents: int | None = None
+) -> Payment:
+    """Refund ``amount_cents`` (default: the whole un-refunded remainder) via the gateway.
+    Tracks cumulative ``refunded_cents`` so partial (per-session) refunds are exact and can
+    never exceed the charge; status is ``partially_refunded`` until fully refunded. Idempotent
+    once fully refunded."""
     if payment.status is PaymentStatus.refunded:
         return payment
+    remaining = payment.amount_cents - payment.refunded_cents
+    to_refund = remaining if amount_cents is None else min(amount_cents, remaining)
+    if to_refund <= 0:
+        return payment
     if payment.stripe_payment_intent_id is not None:
-        gateway.refund(payment.stripe_payment_intent_id, payment.amount_cents)
-    payment.status = PaymentStatus.refunded
+        gateway.refund(payment.stripe_payment_intent_id, to_refund)
+    payment.refunded_cents += to_refund
+    payment.status = (
+        PaymentStatus.refunded
+        if payment.refunded_cents >= payment.amount_cents
+        else PaymentStatus.partially_refunded
+    )
     db.flush()
     return payment
 
@@ -336,6 +350,51 @@ def accrue_payout(
     return payout
 
 
+def adjust_payout_for_refund(
+    db: Session,
+    *,
+    payout_id: uuid.UUID,
+    net_cents: int,
+    gateway: PaymentGateway,
+    idempotency_key: str,
+) -> int:
+    """Claw back a refunded booking's net from the EXACT payout it fed (its
+    ``booking.payout_id``), under a row lock (ADR-0005 §7): decrement it if still
+    scheduled/held (provider not yet paid), or issue a Stripe **Transfer Reversal** if
+    already paid. Never reverses more than the payout holds. Returns the amount clawed back.
+
+    Targeting the exact payout (not a per-session guess) is what makes this correct when a
+    session accrues more than one payout over time (e.g. a released payout + a fresh one)."""
+    if net_cents <= 0:
+        return 0
+    payout = db.scalar(
+        select(Payout)
+        .where(
+            Payout.id == payout_id,
+            Payout.status.in_(
+                [PayoutStatus.scheduled, PayoutStatus.held, PayoutStatus.paid]
+            ),
+        )
+        .with_for_update()
+    )
+    if payout is None:
+        return 0
+    reverse = min(net_cents, payout.amount_cents)
+    if reverse <= 0:
+        return 0
+    if payout.status is PayoutStatus.paid and payout.stripe_transfer_id is not None:
+        gateway.reverse_transfer(
+            transfer_id=payout.stripe_transfer_id,
+            amount_cents=reverse,
+            idempotency_key=idempotency_key,
+        )
+    payout.amount_cents -= reverse
+    if payout.amount_cents == 0:
+        payout.status = PayoutStatus.reversed
+    db.flush()
+    return reverse
+
+
 def list_org_payouts(
     db: Session, *, organisation_id: uuid.UUID, actor_id: uuid.UUID
 ) -> list[Payout]:
@@ -372,23 +431,32 @@ def release_due_payouts(
 ) -> tuple[int, int]:
     """Pay out every scheduled payout whose time has come. Returns (count, total)."""
     moment = now or datetime.now(UTC)
+    # FOR UPDATE SKIP LOCKED so two concurrent runs never send the same transfer twice;
+    # a payout locked by another run is picked up on the next pass (ADR-0005 §7).
     due = db.scalars(
-        select(Payout).where(
+        select(Payout)
+        .where(
             Payout.status == PayoutStatus.scheduled,
             Payout.scheduled_for <= moment,
         )
+        .with_for_update(skip_locked=True)
     ).all()
     total = 0
     released = 0
     for payout in due:
+        if payout.amount_cents <= 0:
+            continue  # fully clawed back by refunds before release — nothing to send
         org = org_service.get_organisation(db, payout.organisation_id)
         # Gate on Connect readiness (F-PAY-1): a provider who is not payouts_enabled or
         # has no connected account is skipped, leaving the payout scheduled for a later
         # run — never transferred to a dead-end destination.
         if org is None or not org.payouts_enabled or org.stripe_account_id is None:
             continue
+        # Idempotency key = payout.id so a retry after a mid-batch failure can't double-send.
         result = gateway.transfer(
-            destination=org.stripe_account_id, amount_cents=payout.amount_cents
+            destination=org.stripe_account_id,
+            amount_cents=payout.amount_cents,
+            idempotency_key=str(payout.id),
         )
         payout.stripe_transfer_id = result.id
         payout.status = PayoutStatus.paid
