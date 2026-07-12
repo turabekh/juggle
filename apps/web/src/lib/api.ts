@@ -25,6 +25,8 @@ import type {
   JobSummary,
   Notification,
   Order,
+  PaymentConfig,
+  PaymentStatus,
   Org,
   OrgAdmin,
   OrgAnalytics,
@@ -343,6 +345,14 @@ export const api = {
     },
   },
   payments: {
+    async config(): Promise<PaymentConfig> {
+      const { data } = await http.get<PaymentConfig>('/payments/config')
+      return data
+    },
+    async status(paymentId: string): Promise<PaymentStatus> {
+      const { data } = await http.get<PaymentStatus>(`/payments/${paymentId}`)
+      return data
+    },
     async payouts(organisationId: string): Promise<Payout[]> {
       const { data } = await http.get<Payout[]>('/payments/payouts', {
         params: { organisation_id: organisationId },

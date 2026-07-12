@@ -20,6 +20,18 @@ SessionDep = Annotated[Session, Depends(get_session)]
 GatewayDep = Annotated[PaymentGateway, Depends(get_payment_gateway)]
 
 
+@router.get("/config", response_model=schemas.PaymentConfigOut)
+def payment_config() -> schemas.PaymentConfigOut:
+    """Public: the Stripe publishable key + whether live payments are enabled. When
+    ``live`` is false (no secret key) the client uses the dev sync-confirm flow instead of
+    the Payment Element. The publishable key is not secret."""
+    settings = get_settings()
+    return schemas.PaymentConfigOut(
+        live=bool(settings.stripe_secret_key),
+        publishable_key=settings.stripe_publishable_key or None,
+    )
+
+
 @router.post("/connect/onboard", response_model=schemas.OnboardLinkOut)
 def start_onboarding(
     body: schemas.OnboardIn,

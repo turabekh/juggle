@@ -138,9 +138,25 @@ export interface Order {
   payment_id: string
   amount_cents: number
   application_fee_cents: number
+  fee_gst_cents: number
   currency: string
   status: string
+  client_secret: string | null
   bookings: Booking[]
+}
+
+export interface PaymentConfig {
+  live: boolean
+  publishable_key: string | null
+}
+
+export interface PaymentStatus {
+  id: string
+  amount_cents: number
+  application_fee_cents: number
+  fee_gst_cents: number
+  currency: string
+  status: string
 }
 
 export type Category = 'sport' | 'art' | 'stem' | 'drama' | 'outdoor' | 'other'

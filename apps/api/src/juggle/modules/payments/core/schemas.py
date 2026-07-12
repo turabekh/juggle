@@ -51,3 +51,8 @@ class ConnectStatusOut(BaseModel):
 
 class RefreshIn(BaseModel):
     organisation_id: uuid.UUID
+
+
+class PaymentConfigOut(BaseModel):
+    live: bool
+    publishable_key: str | None

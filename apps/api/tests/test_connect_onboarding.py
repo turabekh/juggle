@@ -51,6 +51,12 @@ def webhook_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(get_settings(), "stripe_webhook_secret", _WEBHOOK_SECRET)
 
 
+def test_payment_config_reports_dev_mode_without_stripe_keys(client: TestClient) -> None:
+    # No JUGGLE_STRIPE_SECRET_KEY in the test env → the client uses the dev sync-confirm flow.
+    body = client.get("/api/v1/payments/config").json()
+    assert body == {"live": False, "publishable_key": None}
+
+
 def test_onboarding_creates_account_and_link(client: TestClient) -> None:
     owner = _signup(client)
     org_id = _make_org(client, owner)
