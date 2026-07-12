@@ -487,6 +487,58 @@ def test_html_and_urls_stripped_from_public_text(
     assert "<" not in custom["custom_text"] and "http" not in custom["custom_text"]
 
 
+# --- Milestone C: theme + reactions ----------------------------------------
+
+
+def test_set_theme_and_reject_unknown(client: TestClient, db: Session, flag_on: None) -> None:
+    host = _signup(client)
+    plan = client.post(f"{PREFIX}/plans", headers=_auth(host), json={}).json()
+    pid = plan["id"]
+    ok = client.put(f"{PREFIX}/plans/{pid}/theme", headers=_auth(host), json={"theme": "dino"})
+    assert ok.status_code == 200 and ok.json()["theme"] == "dino"
+    bad = client.put(f"{PREFIX}/plans/{pid}/theme", headers=_auth(host), json={"theme": "hacker"})
+    assert bad.status_code == 400
+
+
+def test_emoji_reaction_toggles_and_aggregates(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots)
+    pid, token = opened["id"], opened["share_token"]
+    inv = _rsvp(client, token)
+    view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
+    client.post(f"{PREFIX}/plans/{pid}/invites/{view['invites'][0]['id']}/approve",
+                headers=_auth(host))
+    opt = next(o["id"] for o in view["options"] if o["kind"] == "package")
+
+    # React → count 1.
+    client.put(f"{PREFIX}/invite/{inv}/react", json={"option_id": opt, "emoji": "🎉"})
+    pub = client.get(f"{PREFIX}/public/{token}").json()
+    assert next(o for o in pub["options"] if o["id"] == opt)["reactions"].get("🎉") == 1
+    # Tap again → toggles off.
+    client.put(f"{PREFIX}/invite/{inv}/react", json={"option_id": opt, "emoji": "🎉"})
+    pub = client.get(f"{PREFIX}/public/{token}").json()
+    assert "🎉" not in next(o for o in pub["options"] if o["id"] == opt)["reactions"]
+
+
+def test_reaction_rejects_unknown_emoji(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots)
+    pid, token = opened["id"], opened["share_token"]
+    inv = _rsvp(client, token)
+    view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
+    client.post(f"{PREFIX}/plans/{pid}/invites/{view['invites'][0]['id']}/approve",
+                headers=_auth(host))
+    opt = next(o["id"] for o in view["options"] if o["kind"] == "package")
+    resp = client.put(f"{PREFIX}/invite/{inv}/react", json={"option_id": opt, "emoji": "💣"})
+    assert resp.status_code == 400
+
+
 def test_non_host_cannot_view_plan(client: TestClient, db: Session, flag_on: None) -> None:
     host, other = _signup(client), _signup(client)
     package_id, slots = _package_with_slots(client, host)

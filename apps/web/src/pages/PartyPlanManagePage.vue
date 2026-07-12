@@ -47,6 +47,16 @@
         </section>
 
         <section class="jg-card q-pa-lg q-mb-md">
+          <div class="text-weight-600 q-mb-sm">Theme</div>
+          <div class="row q-gutter-sm">
+            <q-btn v-for="t in PLAN_THEMES" :key="t.key" no-caps unelevated
+                   :color="plan.theme === t.key ? 'primary' : 'grey-3'"
+                   :text-color="plan.theme === t.key ? 'white' : 'dark'"
+                   :label="`${t.emoji} ${t.label}`" @click="setTheme(t.key)" />
+          </div>
+        </section>
+
+        <section class="jg-card q-pa-lg q-mb-md">
           <div class="text-weight-600 q-mb-sm">Voting deadline</div>
           <div class="row items-end q-gutter-sm">
             <q-input v-model="deadlineInput" type="datetime-local" outlined dense stack-label
@@ -66,6 +76,21 @@
 
       <!-- ============ OPEN: share, tally, approvals ============ -->
       <template v-else-if="plan.status === 'open'">
+        <section class="jg-card q-pa-lg q-mb-md">
+          <div class="row items-center justify-between q-mb-sm">
+            <div class="text-weight-600">Party readiness</div>
+            <span class="text-weight-700">{{ Math.round(readiness.pct * 100) }}%</span>
+          </div>
+          <q-linear-progress :value="readiness.pct" color="positive" track-color="grey-3"
+                             size="10px" rounded class="q-mb-sm" />
+          <div class="row q-gutter-sm">
+            <span v-for="s in readiness.steps" :key="s.label" class="text-caption"
+                  :class="s.done ? 'text-positive' : 'jg-muted'">
+              {{ s.done ? '✓' : '○' }} {{ s.label }}
+            </span>
+          </div>
+        </section>
+
         <section class="jg-card q-pa-lg q-mb-md">
           <div class="text-weight-600 q-mb-xs">Share this link to collect votes</div>
           <div class="row items-center q-gutter-sm">
@@ -220,6 +245,7 @@ import { useQuasar } from 'quasar'
 import StripePaymentPanel from '@/components/StripePaymentPanel.vue'
 import { api, apiError } from '@/lib/api'
 import { dayLabel, money, timeRange } from '@/lib/format'
+import { PLAN_THEMES } from '@/lib/planTheme'
 import type { PartyPackageDetail, PlanOptionView, PlanView } from '@/lib/types'
 
 const props = defineProps<{ id: string }>()
@@ -280,6 +306,21 @@ const STATUS: Record<string, { label: string; color: string }> = {
 }
 const statusLabel = computed(() => STATUS[plan.value?.status ?? '']?.label ?? '')
 const statusColor = computed(() => STATUS[plan.value?.status ?? '']?.color ?? 'grey')
+
+// Host readiness — REAL counts only (INV-12), never fabricated.
+const readiness = computed(() => {
+  const p = plan.value
+  if (!p) return { pct: 0, steps: [] as { label: string; done: boolean }[] }
+  const approved = p.invites.filter((i) => i.status === 'approved')
+  const votes = liveOptions.value.reduce((n, o) => n + o.votes, 0)
+  const steps = [
+    { label: 'Options added', done: liveOptions.value.length >= 2 },
+    { label: 'Voting open', done: !!p.share_token },
+    { label: 'First guest RSVP’d', done: approved.length >= 1 },
+    { label: 'First vote cast', done: votes >= 1 },
+  ]
+  return { pct: steps.filter((s) => s.done).length / steps.length, steps }
+})
 
 function optionTitle(o: PlanOptionView): string {
   return o.kind === 'custom' ? o.custom_text || 'Custom' : o.package_name || 'Party'
@@ -360,6 +401,9 @@ async function saveFavourite(fav: string | null): Promise<void> {
 }
 async function saveDeadline(): Promise<void> {
   await guard(() => api.partyPlanner.setDeadline(props.id, new Date(deadlineInput.value).toISOString()))
+}
+async function setTheme(themeKey: string): Promise<void> {
+  await guard(() => api.partyPlanner.setTheme(props.id, themeKey))
 }
 async function openVoting(): Promise<void> {
   await guard(() => api.partyPlanner.openPlan(props.id))

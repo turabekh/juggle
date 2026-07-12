@@ -70,6 +70,15 @@ class VoteIn(BaseModel):
     option_id: uuid.UUID
 
 
+class ThemeIn(BaseModel):
+    theme: str = Field(max_length=40)
+
+
+class ReactIn(BaseModel):
+    option_id: uuid.UUID
+    emoji: str = Field(max_length=16)
+
+
 # --- Responses -------------------------------------------------------------
 
 
@@ -89,6 +98,7 @@ class OptionView(BaseModel):
     available: bool | None = None  # live inventory (INV-12); None for custom options
     votes: int = 0
     is_favourite: bool = False  # ⭐ birthday kid's top-ranked non-voided option
+    reactions: dict[str, int] = {}  # emoji → count (aggregate, unattributed)
 
 
 class BoardEntry(BaseModel):

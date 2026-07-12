@@ -168,6 +168,20 @@ def set_deadline(
     return _host_plan(session, plan_id, principal.user_id)
 
 
+@router.put("/plans/{plan_id}/theme", response_model=schemas.PlanView)
+def set_theme(
+    plan_id: uuid.UUID, body: schemas.ThemeIn,
+    principal: CurrentPrincipal, session: SessionDep,
+) -> schemas.PlanView:
+    try:
+        service.set_theme(session, plan_id=plan_id, actor_id=principal.user_id, theme=body.theme)
+    except service.InvalidTheme as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown theme") from exc
+    except Exception as exc:
+        raise _map_host_error(exc) from exc
+    return _host_plan(session, plan_id, principal.user_id)
+
+
 @router.post("/plans/{plan_id}/open", response_model=schemas.PlanView)
 def open_plan(
     plan_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
@@ -354,4 +368,26 @@ def cast_vote(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Awaiting host approval") from exc
     except service.OptionNotEligible as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, "That option can't be voted for") from exc
+    return service.invite_self_view(session, invite)
+
+
+@router.put("/invite/{invite_token}/react", response_model=schemas.InviteSelfView)
+def react(
+    invite_token: str, body: schemas.ReactIn, request: Request, session: SessionDep
+) -> schemas.InviteSelfView:
+    invite = service.get_invite_by_token(session, invite_token)
+    if invite is None:
+        raise _GENERIC_404
+    try:
+        service.rate_limit(session, scope_key=f"ip:{_client_ip(request)}")
+        service.rate_limit(session, scope_key=f"invite:{invite_token}")
+        service.react(session, invite=invite, option_id=body.option_id, emoji=body.emoji)
+    except service.RateLimited as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many requests") from exc
+    except service.RsvpClosed as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Reactions are closed") from exc
+    except service.InviteNotApproved as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Awaiting host approval") from exc
+    except (service.OptionNotEligible, service.InvalidReaction) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid reaction") from exc
     return service.invite_self_view(session, invite)

@@ -219,6 +219,7 @@ export interface PlanOptionView {
   available: boolean | null
   votes: number
   is_favourite: boolean
+  reactions: Record<string, number>
 }
 
 export interface PlanBoardEntry {

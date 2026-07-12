@@ -513,6 +513,10 @@ export const api = {
       })
       return data
     },
+    async setTheme(id: string, theme: string): Promise<PlanView> {
+      const { data } = await http.put<PlanView>(`/party-planner/plans/${id}/theme`, { theme })
+      return data
+    },
     async openPlan(id: string): Promise<PlanView> {
       const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/open`)
       return data
@@ -588,6 +592,13 @@ export const api = {
       const { data } = await http.put<InviteSelfView>(
         `/party-planner/invite/${inviteToken}/vote`,
         { option_id: optionId },
+      )
+      return data
+    },
+    async react(inviteToken: string, optionId: string, emoji: string): Promise<InviteSelfView> {
+      const { data } = await http.put<InviteSelfView>(
+        `/party-planner/invite/${inviteToken}/react`,
+        { option_id: optionId, emoji },
       )
       return data
     },

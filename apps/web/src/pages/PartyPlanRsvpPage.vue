@@ -1,5 +1,5 @@
 <template>
-  <q-page class="jg-page" style="max-width: 560px">
+  <q-page class="jg-page" style="max-width: 560px" :style="themeStyle">
     <div v-if="loading" class="jg-card q-pa-lg row items-center q-gutter-md">
       <q-spinner color="primary" size="24px" /><span>Loading the party…</span>
     </div>
@@ -15,7 +15,7 @@
 
     <template v-else>
       <div class="jg-party-hero q-mb-lg">
-        <div class="jg-party-hero__emoji">🎉</div>
+        <div class="jg-party-hero__emoji">{{ theme.emoji }}</div>
         <h1 class="jg-party-hero__title">You're invited!</h1>
         <p class="jg-party-hero__sub">Help pick the party — vote for your favourite below.</p>
       </div>
@@ -83,19 +83,30 @@
           </div>
           <div v-for="o in liveOptions" :key="o.id"
                class="jg-vote" :class="{ 'jg-vote--mine': o.id === myVote }"
-               data-testid="vote-option" @click="vote(o.id)">
-            <div class="col">
-              <div class="text-weight-500">
-                {{ optionTitle(o) }}
-                <q-icon v-if="o.is_favourite" name="star" color="amber" size="14px" />
+               data-testid="vote-option">
+            <div class="jg-vote__main" @click="vote(o.id, $event)">
+              <div class="col">
+                <div class="text-weight-500">
+                  {{ optionTitle(o) }}
+                  <q-badge v-if="o.is_favourite" color="amber-8" class="q-ml-xs">
+                    ⭐ Birthday kid's pick
+                  </q-badge>
+                </div>
+                <div class="jg-faint text-caption">{{ optionSub(o) }}</div>
+                <q-linear-progress :value="voteFraction(o)" color="deep-purple-5"
+                                   track-color="grey-3" size="7px" rounded class="q-mt-xs jg-bar" />
               </div>
-              <div class="jg-faint text-caption">{{ optionSub(o) }}</div>
-              <q-linear-progress :value="voteFraction(o)" color="primary" track-color="grey-3"
-                                 size="6px" rounded class="q-mt-xs" />
+              <div class="text-center q-ml-sm">
+                <div class="text-weight-700 text-h6">{{ o.votes }}</div>
+                <q-icon v-if="o.id === myVote" name="check_circle" color="positive" size="18px" />
+              </div>
             </div>
-            <div class="text-center q-ml-sm">
-              <div class="text-weight-700">{{ o.votes }}</div>
-              <q-icon v-if="o.id === myVote" name="check_circle" color="positive" size="18px" />
+            <div class="jg-reacts">
+              <button v-for="e in REACTIONS" :key="e" type="button" class="jg-react"
+                      :class="{ 'jg-react--on': myReactions.has(reactionKey(o.id, e)) }"
+                      :disabled="!canVote" @click.stop="react(o.id, e)">
+                {{ e }}<span v-if="o.reactions[e]" class="jg-react__n">{{ o.reactions[e] }}</span>
+              </button>
             </div>
           </div>
           <div v-if="!canVote" class="jg-faint text-caption q-mt-sm">
@@ -106,10 +117,13 @@
 
         <section class="jg-card q-pa-md q-mb-md">
           <div class="text-weight-600 q-mb-xs">Who's coming ({{ view.rsvp_count }})</div>
-          <div class="row q-gutter-xs">
-            <q-avatar v-for="(b, i) in view.board" :key="i" color="grey-3" size="34px">
-              {{ avatarEmoji(b.avatar_key) }}
-            </q-avatar>
+          <div class="row q-gutter-md">
+            <div v-for="(b, i) in view.board" :key="i" class="text-center" style="width: 56px">
+              <q-avatar color="grey-2" size="40px" style="font-size: 22px">
+                {{ avatarEmoji(b.avatar_key) }}
+              </q-avatar>
+              <div v-if="b.nickname" class="jg-faint text-caption ellipsis">{{ b.nickname }}</div>
+            </div>
             <span v-if="!view.board.length" class="jg-muted text-caption">Be the first!</span>
           </div>
         </section>
@@ -129,8 +143,10 @@ import { useQuasar } from 'quasar'
 
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
+import { confettiBurst } from '@/lib/confetti'
 import { dayLabel, money, timeRange } from '@/lib/format'
 import { useHead } from '@/lib/head'
+import { planTheme } from '@/lib/planTheme'
 import type { InviteSelfView, PlanOptionView, PublicPlanView } from '@/lib/types'
 
 const props = defineProps<{ token: string }>()
@@ -138,6 +154,13 @@ const $q = useQuasar()
 
 // Private invite page — keep it out of search indexes (INV-13).
 useHead(() => ({ title: "You're invited! · Juggle party vote", noindex: true }))
+
+const REACTIONS = ['❤️', '🎉', '🔥', '😍', '👍', '🤩']
+const theme = computed(() => planTheme(view.value?.theme))
+const themeStyle = computed(() => theme.value.vars)
+const myReactions = ref<Set<string>>(new Set())
+const nowMs = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | undefined
 
 const AVATARS = [
   { key: 'dino', emoji: '🦖' }, { key: 'rocket', emoji: '🚀' }, { key: 'unicorn', emoji: '🦄' },
@@ -171,11 +194,18 @@ const winner = computed(() =>
 const canVote = computed(() => view.value?.is_open && mine.value?.status === 'approved')
 const countdown = computed(() => {
   if (!view.value?.deadline_at) return ''
-  const ms = new Date(view.value.deadline_at).getTime() - Date.now()
+  const ms = new Date(view.value.deadline_at).getTime() - nowMs.value
   if (ms <= 0) return 'Voting closed'
-  const h = Math.floor(ms / 3_600_000)
-  return h >= 24 ? `${Math.floor(h / 24)} days left` : `${h}h left`
+  const s = Math.floor(ms / 1000)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (d > 0) return `${d}d ${h}h left`
+  if (h > 0) return `${h}h ${m}m left`
+  return `${m}m ${String(sec).padStart(2, '0')}s left`
 })
+const reactionKey = (optionId: string, emoji: string): string => `${optionId}:${emoji}`
 
 function optionTitle(o: PlanOptionView): string {
   return o.kind === 'custom' ? o.custom_text || 'Custom' : o.package_name || 'Party'
@@ -227,22 +257,44 @@ async function submitRsvp(): Promise<void> {
   }
 }
 
-async function vote(optionId: string): Promise<void> {
+async function vote(optionId: string, event?: MouseEvent): Promise<void> {
   if (!canVote.value || !inviteToken.value) return
   try {
     mine.value = await api.partyPlanner.vote(inviteToken.value, optionId)
     view.value = mine.value.plan
     myVote.value = optionId
     localStorage.setItem(VOTE_KEY.value, optionId)
+    if (event) confettiBurst(event.clientX, event.clientY)
     $q.notify({ type: 'positive', message: 'Vote counted ✓' })
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err, 'Could not record your vote') })
   }
 }
 
+const REACT_KEY = computed(() => `juggle.plan.reacts.${props.token}`)
+
+async function react(optionId: string, emoji: string): Promise<void> {
+  if (!canVote.value || !inviteToken.value) return
+  const key = reactionKey(optionId, emoji)
+  try {
+    mine.value = await api.partyPlanner.react(inviteToken.value, optionId, emoji)
+    view.value = mine.value.plan
+    if (myReactions.value.has(key)) myReactions.value.delete(key)
+    else myReactions.value.add(key)
+    localStorage.setItem(REACT_KEY.value, JSON.stringify([...myReactions.value]))
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not react') })
+  }
+}
+
 onMounted(async () => {
   inviteToken.value = localStorage.getItem(INVITE_KEY.value)
   myVote.value = localStorage.getItem(VOTE_KEY.value)
+  try {
+    myReactions.value = new Set(JSON.parse(localStorage.getItem(REACT_KEY.value) ?? '[]'))
+  } catch {
+    myReactions.value = new Set()
+  }
   try {
     await refresh()
   } catch {
@@ -253,32 +305,55 @@ onMounted(async () => {
   poller = setInterval(() => {
     if (view.value?.is_open) void refresh()
   }, 10_000)
+  ticker = setInterval(() => (nowMs.value = Date.now()), 1000)
 })
-onUnmounted(() => clearInterval(poller))
+onUnmounted(() => {
+  clearInterval(poller)
+  clearInterval(ticker)
+})
 </script>
 
 <style scoped>
 .jg-party-hero {
   text-align: center;
-  padding: 20px;
-  background: linear-gradient(120% 140% at 15% 0%, #fff4e6 0%, #ffe9f2 100%);
+  padding: 24px 20px;
+  background: linear-gradient(120% 140% at 15% 0%, var(--pt-from, #fff4e6) 0%, var(--pt-to, #ffe9f2) 100%);
   border-radius: 18px;
 }
-.jg-party-hero__emoji { font-size: 40px; }
+.jg-party-hero__emoji { font-size: 46px; animation: jg-bob 2.4s ease-in-out infinite; }
 .jg-party-hero__title { font-size: 28px; margin: 4px 0; }
 .jg-party-hero__sub { color: var(--jg-ink-soft); margin: 0; }
-.jg-vote {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--jg-line);
-  border-radius: 12px;
-  margin-bottom: 8px;
-  cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
+@keyframes jg-bob {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-6px) rotate(3deg); }
 }
-.jg-vote:hover { border-color: var(--jg-primary); }
-.jg-vote--mine { border-color: var(--jg-primary); background: rgba(25, 118, 210, 0.06); }
+.jg-vote {
+  border: 1px solid var(--jg-line);
+  border-radius: 14px;
+  margin-bottom: 10px;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.jg-vote__main { display: flex; align-items: center; gap: 10px; padding: 12px; cursor: pointer; }
+.jg-vote:hover { border-color: var(--pt-accent, var(--jg-primary)); }
+.jg-vote--mine {
+  border-color: var(--pt-accent, var(--jg-primary));
+  background: color-mix(in srgb, var(--pt-accent, #7b1fa2) 8%, transparent);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--pt-accent, #7b1fa2) 18%, transparent);
+}
+.jg-bar :deep(.q-linear-progress__model) { transition: width 500ms cubic-bezier(.2,.7,.3,1); }
+.jg-reacts { display: flex; gap: 6px; padding: 0 12px 10px; flex-wrap: wrap; }
+.jg-react {
+  border: 1px solid var(--jg-line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.jg-react:hover:not(:disabled) { transform: scale(1.15); }
+.jg-react:disabled { opacity: 0.45; cursor: default; }
+.jg-react--on { border-color: var(--pt-accent, var(--jg-primary)); background: color-mix(in srgb, var(--pt-accent, #7b1fa2) 12%, #fff); }
+.jg-react__n { font-size: 12px; font-weight: 600; margin-left: 3px; color: var(--jg-ink-soft); }
 .jg-hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
 </style>

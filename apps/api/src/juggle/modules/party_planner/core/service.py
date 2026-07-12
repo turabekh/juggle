@@ -39,6 +39,7 @@ from juggle.modules.party_planner.core.models import (
     PlanMarketingConsent,
     PlanOption,
     PlanOptionKind,
+    PlanReaction,
     PlanRsvp,
     PlanStatus,
     PlanThrottle,
@@ -113,12 +114,24 @@ class SlotUnavailable(Exception):
     pass
 
 
+class InvalidTheme(Exception):
+    pass
+
+
+class InvalidReaction(Exception):
+    pass
+
+
 # --- Constants / sanitisation ----------------------------------------------
 
 AVATAR_KEYS = frozenset(
     {"dino", "rocket", "unicorn", "star", "cat", "dog", "robot", "fox", "panda", "owl",
      "dragon", "balloon"}
 )
+THEMES = frozenset({"default", "dino", "space", "unicorn"})
+# Fixed emoji set for one-tap reactions — a closed allow-list (no arbitrary strings on the
+# public page).
+REACTION_EMOJIS = frozenset({"❤️", "🎉", "🔥", "😍", "👍", "🤩"})
 _URL_RE = re.compile(r"(https?://\S+|www\.\S+)", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]*>")  # strip HTML tags (defense-in-depth; the JSON client escapes too)
 # Small profanity mask — the public page is untrusted input (edge 8). Not exhaustive; the
@@ -230,6 +243,21 @@ def _approved_yes_headcount(db: Session, plan_id: uuid.UUID) -> int:
 def create_plan(db: Session, *, host_id: uuid.UUID, theme: str = "default") -> PartyPlan:
     plan = PartyPlan(host_user_id=host_id, status=PlanStatus.draft, theme=theme[:40])
     db.add(plan)
+    db.flush()
+    return plan
+
+
+def set_theme(
+    db: Session, *, plan_id: uuid.UUID, actor_id: uuid.UUID, theme: str
+) -> PartyPlan:
+    plan = _lock_plan(db, plan_id)
+    if plan is None:
+        raise PlanNotFound(str(plan_id))
+    _require_host(plan, actor_id)
+    _editable(plan)
+    if theme not in THEMES:
+        raise InvalidTheme(theme)
+    plan.theme = theme
     db.flush()
     return plan
 
@@ -564,6 +592,56 @@ def cast_vote(
     return vote
 
 
+def react(
+    db: Session, *, invite: PlanInvite, option_id: uuid.UUID, emoji: str,
+    now: datetime | None = None,
+) -> bool:
+    """Toggle a one-tap emoji reaction on an option. Approved invite + open window + closed emoji
+    allow-list. Returns True if the reaction is now on, False if it was toggled off. Aggregate
+    counts only are ever surfaced (unattributed)."""
+    now = now or _now()
+    plan = _lock_plan(db, invite.plan_id)
+    if plan is None:
+        raise PlanNotFound(str(invite.plan_id))
+    _rsvp_open(plan, now)
+    if invite.status is not PlanInviteStatus.approved:
+        raise InviteNotApproved(str(invite.id))
+    if emoji not in REACTION_EMOJIS:
+        raise InvalidReaction(emoji)
+    option = db.get(PlanOption, option_id)
+    if option is None or option.plan_id != plan.id or option.voided:
+        raise OptionNotEligible(str(option_id))
+    existing = db.scalar(
+        select(PlanReaction).where(
+            PlanReaction.plan_invite_id == invite.id,
+            PlanReaction.plan_option_id == option_id,
+            PlanReaction.emoji == emoji,
+        )
+    )
+    if existing is not None:
+        db.delete(existing)
+        db.flush()
+        return False
+    db.add(PlanReaction(
+        plan_id=plan.id, plan_option_id=option_id, plan_invite_id=invite.id, emoji=emoji
+    ))
+    db.flush()
+    return True
+
+
+def _reactions(db: Session, plan_id: uuid.UUID) -> dict[uuid.UUID, dict[str, int]]:
+    """Aggregate emoji reaction counts per option (unattributed)."""
+    rows = db.execute(
+        select(PlanReaction.plan_option_id, PlanReaction.emoji, func.count())
+        .where(PlanReaction.plan_id == plan_id)
+        .group_by(PlanReaction.plan_option_id, PlanReaction.emoji)
+    ).all()
+    result: dict[uuid.UUID, dict[str, int]] = {}
+    for option_id, emoji, count in rows:
+        result.setdefault(option_id, {})[emoji] = int(count)
+    return result
+
+
 # --- Resolution + reconciliation (scheduler tick) --------------------------
 
 
@@ -714,6 +792,7 @@ def _option_views(
     db: Session, plan: PartyPlan, *, include_voided: bool = False
 ) -> list[schemas.OptionView]:
     tally = _tally(db, plan.id)
+    reactions = _reactions(db, plan.id)
     options = _options(db, plan.id, include_voided=include_voided)
     favourite = _favourite_option_id(plan, {o.id for o in options if not o.voided})
     views: list[schemas.OptionView] = []
@@ -721,7 +800,7 @@ def _option_views(
         view = schemas.OptionView(
             id=opt.id, kind=opt.kind.value, position=opt.position, voided=opt.voided,
             custom_text=opt.custom_text, votes=tally.get(opt.id, 0),
-            is_favourite=(opt.id == favourite),
+            is_favourite=(opt.id == favourite), reactions=reactions.get(opt.id, {}),
         )
         if opt.kind is PlanOptionKind.package and opt.package_id and opt.slot_id:
             package = db.get(PartyPackage, opt.package_id)

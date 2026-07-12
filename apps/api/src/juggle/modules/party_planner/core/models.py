@@ -183,6 +183,28 @@ class PlanVote(UUIDPkMixin, TimestampMixin, Base):
     )
 
 
+class PlanReaction(UUIDPkMixin, TimestampMixin, Base):
+    """A one-tap emoji reaction by an invite on an option (ADR-0011 Milestone C, gamified layer).
+    Aggregate counts only are ever surfaced — reactions are not attributed, consistent with the
+    vote-anonymity posture. UNIQUE(invite, option, emoji) makes a tap idempotent/toggleable."""
+
+    __tablename__ = "plan_reaction"
+    __table_args__ = (
+        Index("uq_plan_reaction", "plan_invite_id", "plan_option_id", "emoji", unique=True),
+    )
+
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("party_plan.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    plan_option_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("plan_option.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    plan_invite_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("plan_invite.id", ondelete="CASCADE"), nullable=False
+    )
+    emoji: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
 class PlanMarketingConsent(UUIDPkMixin, TimestampMixin, Base):
     """Store-only marketing consent (Spam Act 2003), deliberately detached from the purgeable
     ``PlanInvite`` so it survives the post-event PII purge (ADR-0011 edge 7). No plan FK."""
