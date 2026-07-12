@@ -178,6 +178,8 @@ def test_run_endpoint_requires_admin(client: TestClient, make_admin) -> None:
         "reminders_sent",
         "what_to_bring_sent",
         "compliance_expired",
+        "plans_resolved",
+        "plans_swept",
     }
 
 

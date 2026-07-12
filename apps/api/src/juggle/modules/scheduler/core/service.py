@@ -28,6 +28,7 @@ from juggle.modules.notifications.core import service as notifications_service
 from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
 from juggle.modules.org.core import service as org_service
 from juggle.modules.parties.core import service as parties_service
+from juggle.modules.party_planner.core import service as party_planner_service
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
 from juggle.modules.scheduler.core.models import SessionReminder
 from juggle.modules.scheduler.core.schemas import JobSummary
@@ -190,6 +191,9 @@ def run_due_jobs(
     reminders_sent = _send_reminders(db, now=now, gateway=gateway)
     what_to_bring_sent = _send_what_to_bring(db, now=now, gateway=gateway)
     compliance_expired = org_service.expire_due_compliance(db, today=now.date())
+    # Party Planner (ADR-0011): resolve plans past their deadline, then sweep stale/orphaned ones.
+    plans_resolved = party_planner_service.resolve_due_plans(db, now=now)
+    plans_swept = party_planner_service.sweep_stale_resolved(db, now=now)
 
     return JobSummary(
         holds_reclaimed=holds_reclaimed,
@@ -202,4 +206,6 @@ def run_due_jobs(
         reminders_sent=reminders_sent,
         what_to_bring_sent=what_to_bring_sent,
         compliance_expired=compliance_expired,
+        plans_resolved=plans_resolved,
+        plans_swept=plans_swept,
     )

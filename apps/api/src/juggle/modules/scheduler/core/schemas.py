@@ -16,3 +16,5 @@ class JobSummary(BaseModel):
     reminders_sent: int
     what_to_bring_sent: int
     compliance_expired: int
+    plans_resolved: int = 0
+    plans_swept: int = 0
