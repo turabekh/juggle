@@ -150,6 +150,58 @@ export interface PaymentConfig {
   publishable_key: string | null
 }
 
+export interface PartyPackage {
+  id: string
+  organisation_id: string
+  venue_id: string
+  name: string
+  description: string | null
+  per_head_price_cents: number
+  min_headcount: number
+  max_headcount: number
+  deposit_pct: number | null
+  outdoor: boolean
+  status: string
+}
+
+export interface PartyPackageCreate {
+  venue_id: string
+  name: string
+  description?: string | null
+  per_head_price_cents: number
+  min_headcount: number
+  max_headcount: number
+  deposit_pct?: number | null
+  outdoor?: boolean
+}
+
+export interface PartyPackageDetail extends PartyPackage {
+  organisation_name: string
+  venue_name: string
+  venue_suburb: string | null
+  deposit_pct_effective: number
+}
+
+export interface PartySlot {
+  id: string
+  package_id: string
+  starts_at: string
+  ends_at: string
+  status: string
+}
+
+export interface PartyBooking {
+  id: string
+  slot_id: string
+  package_id: string
+  headcount: number
+  total_cents: number
+  deposit_cents: number
+  balance_cents: number
+  status: string
+  client_secret: string | null
+}
+
 export interface ProviderOrderSummary {
   payment_id: string
   ordered_at: string

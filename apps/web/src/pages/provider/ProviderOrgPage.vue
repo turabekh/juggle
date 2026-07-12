@@ -119,6 +119,40 @@
         <EmptyState v-else icon="event_note" title="No programs yet" subtitle="Create a program, then add sessions to it." />
       </section>
 
+      <!-- Party packages (PRD §9 · ADR-0006) -->
+      <section class="q-mt-xl">
+        <div class="row items-center justify-between q-mb-sm">
+          <h2 class="text-h6 q-my-none">Party packages</h2>
+          <q-btn
+            flat dense no-caps color="primary" icon="add" label="New package"
+            :disable="!venues.length" @click="showParty = true"
+          />
+        </div>
+        <div v-if="partyPackages.length" class="jg-list">
+          <div v-for="p in partyPackages" :key="p.id" class="jg-card q-pa-md">
+            <div class="row items-center justify-between">
+              <div>
+                <div class="text-weight-600">
+                  {{ p.name }}
+                  <q-chip v-if="p.status !== 'active'" dense square color="grey-5" text-color="white" :label="p.status" />
+                </div>
+                <div class="jg-faint text-caption">
+                  {{ money(p.per_head_price_cents) }}/head · {{ p.min_headcount }}–{{ p.max_headcount }} guests{{ p.outdoor ? ' · outdoor' : '' }}
+                </div>
+              </div>
+              <div class="row items-center q-gutter-xs">
+                <q-btn flat dense no-caps size="sm" icon="event" label="Add slots" @click="openSlots(p)" />
+                <q-btn flat dense no-caps size="sm" icon="link" label="Booking link" @click="copyPartyLink(p.id)" />
+                <q-btn v-if="p.status === 'active'" flat dense round size="sm" icon="archive" color="grey-7" @click="archiveParty(p.id)" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="jg-muted text-caption">
+          {{ venues.length ? 'Offer birthday parties — create a package with per-head pricing and bookable slots.' : 'Add a venue first, then create party packages there.' }}
+        </div>
+      </section>
+
       <!-- Earnings -->
       <section class="q-mt-xl">
         <div class="row items-center justify-between q-mb-sm">
@@ -437,6 +471,61 @@
       </q-card>
     </q-dialog>
 
+    <!-- New party package dialog -->
+    <q-dialog v-model="showParty">
+      <q-card style="min-width: 400px; border-radius: 18px">
+        <q-card-section><div class="text-h6">New party package</div></q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-select
+            v-model="partyForm.venue_id" outlined dense :options="venueOptions"
+            emit-value map-options label="Venue"
+          />
+          <q-input v-model="partyForm.name" outlined dense label="Package name" autofocus />
+          <q-input
+            v-model.number="partyForm.per_head_dollars" outlined dense type="number"
+            label="Price per head ($)" min="0"
+          />
+          <div class="row q-col-gutter-md">
+            <q-input v-model.number="partyForm.min_headcount" outlined dense type="number" label="Min guests" class="col" min="1" />
+            <q-input v-model.number="partyForm.max_headcount" outlined dense type="number" label="Max guests" class="col" min="1" />
+          </div>
+          <q-input
+            v-model.number="partyForm.deposit_pct" outlined dense type="number"
+            label="Deposit % (blank = default 30%)" min="10" max="100"
+          />
+          <q-toggle v-model="partyForm.outdoor" label="Outdoor (weather clause)" color="primary" />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated no-caps color="primary" label="Create" :loading="saving"
+            :disable="!partyValid" @click="addParty"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- Add party slots dialog -->
+    <q-dialog v-model="showSlots">
+      <q-card style="min-width: 400px; border-radius: 18px">
+        <q-card-section>
+          <div class="text-h6">Add slots</div>
+          <div class="jg-faint text-caption">{{ slotsFor?.name }} — each slot is one bookable party.</div>
+        </q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-input v-model="slotForm.starts_at" outlined dense type="datetime-local" label="Starts" stack-label />
+          <q-input v-model="slotForm.ends_at" outlined dense type="datetime-local" label="Ends" stack-label />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated no-caps color="primary" label="Add slot" :loading="saving"
+            :disable="!slotForm.starts_at || !slotForm.ends_at" @click="addSlot"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <!-- Add WWCC dialog -->
     <q-dialog v-model="showWwcc">
       <q-card style="min-width: 360px; border-radius: 18px">
@@ -487,6 +576,7 @@ import type {
   ListingQuestion,
   Org,
   OrgAnalytics,
+  PartyPackage,
   Payout,
   Program,
   Review,
@@ -525,6 +615,20 @@ const showWwcc = ref(false)
 const showInsurance = ref(false)
 const showReply = ref(false)
 const replyForm = reactive({ reviewId: '', text: '' })
+const partyPackages = ref<PartyPackage[]>([])
+const showParty = ref(false)
+const showSlots = ref(false)
+const slotsFor = ref<PartyPackage | null>(null)
+const partyForm = reactive({
+  venue_id: '' as string,
+  name: '',
+  per_head_dollars: null as number | null,
+  min_headcount: 8,
+  max_headcount: 20,
+  deposit_pct: null as number | null,
+  outdoor: false,
+})
+const slotForm = reactive({ starts_at: '', ends_at: '' })
 
 const categoryOptions = CATEGORIES.map((c) => ({ label: c.label, value: c.value }))
 const venueForm = reactive({ name: '', suburb: '', postcode: '', latitude: null as number | null, longitude: null as number | null })
@@ -533,6 +637,16 @@ const wwccForm = reactive({ staff_name: '', wwcc_number: '', expiry_date: '' })
 const insForm = reactive({ file_ref: '', expiry_date: '' })
 
 const wwccValid = computed(() => wwccForm.staff_name && wwccForm.wwcc_number && wwccForm.expiry_date)
+const venueOptions = computed(() => venues.value.map((v) => ({ label: v.name, value: v.id })))
+const partyValid = computed(
+  () =>
+    !!partyForm.venue_id &&
+    !!partyForm.name.trim() &&
+    typeof partyForm.per_head_dollars === 'number' &&
+    partyForm.per_head_dollars > 0 &&
+    partyForm.min_headcount >= 1 &&
+    partyForm.max_headcount >= partyForm.min_headcount,
+)
 const scheduledTotal = computed(() =>
   payouts.value.filter((p) => p.status === 'scheduled').reduce((n, p) => n + p.amount_cents, 0),
 )
@@ -595,6 +709,11 @@ async function load(): Promise<void> {
       orders.value = await api.booking.providerOrders(props.id)
     } catch {
       orders.value = [] // non-fatal
+    }
+    try {
+      partyPackages.value = await api.parties.providerPackages(props.id)
+    } catch {
+      partyPackages.value = [] // non-fatal
     }
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
@@ -760,6 +879,79 @@ async function addProgram(): Promise<void> {
     $q.notify({ type: 'negative', message: apiError(err) })
   } finally {
     saving.value = false
+  }
+}
+
+async function addParty(): Promise<void> {
+  if (!partyValid.value || typeof partyForm.per_head_dollars !== 'number') return
+  saving.value = true
+  try {
+    await api.parties.createPackage(props.id, {
+      venue_id: partyForm.venue_id,
+      name: partyForm.name.trim(),
+      per_head_price_cents: Math.round(partyForm.per_head_dollars * 100),
+      min_headcount: partyForm.min_headcount,
+      max_headcount: partyForm.max_headcount,
+      deposit_pct: partyForm.deposit_pct ?? null,
+      outdoor: partyForm.outdoor,
+    })
+    showParty.value = false
+    Object.assign(partyForm, {
+      venue_id: '',
+      name: '',
+      per_head_dollars: null,
+      min_headcount: 8,
+      max_headcount: 20,
+      deposit_pct: null,
+      outdoor: false,
+    })
+    partyPackages.value = await api.parties.providerPackages(props.id)
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    saving.value = false
+  }
+}
+
+function openSlots(p: PartyPackage): void {
+  slotsFor.value = p
+  slotForm.starts_at = ''
+  slotForm.ends_at = ''
+  showSlots.value = true
+}
+
+async function addSlot(): Promise<void> {
+  if (!slotsFor.value || !slotForm.starts_at || !slotForm.ends_at) return
+  saving.value = true
+  try {
+    await api.parties.addSlots(slotsFor.value.id, [
+      { starts_at: new Date(slotForm.starts_at).toISOString(), ends_at: new Date(slotForm.ends_at).toISOString() },
+    ])
+    showSlots.value = false
+    $q.notify({ type: 'positive', message: 'Slot added' })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    saving.value = false
+  }
+}
+
+async function archiveParty(packageId: string): Promise<void> {
+  try {
+    await api.parties.archivePackage(packageId)
+    partyPackages.value = await api.parties.providerPackages(props.id)
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  }
+}
+
+async function copyPartyLink(packageId: string): Promise<void> {
+  const url = `${window.location.origin}/parties/packages/${packageId}`
+  try {
+    await navigator.clipboard.writeText(url)
+    $q.notify({ type: 'positive', message: 'Booking link copied' })
+  } catch {
+    $q.notify({ type: 'info', message: url })
   }
 }
 

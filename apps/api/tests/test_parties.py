@@ -188,6 +188,35 @@ def test_archive_removes_from_public_listing(client: TestClient) -> None:
     assert any(p["id"] == pkg["id"] and p["status"] == "archived" for p in manage)
 
 
+def test_public_package_detail_enriched(client: TestClient) -> None:
+    owner = _signup(client)
+    org_id, venue_id = _org_with_venue(client, owner)
+    pkg = client.post(
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
+        json=_package_body(venue_id),
+    ).json()
+
+    resp = client.get(f"/api/v1/parties/packages/{pkg['id']}")
+    assert resp.status_code == 200, resp.text
+    detail = resp.json()
+    assert detail["id"] == pkg["id"]
+    assert detail["organisation_name"]
+    assert detail["venue_name"]
+    assert detail["deposit_pct_effective"] == 30  # config default (ADR-0007)
+
+
+def test_public_package_detail_hidden_when_archived(client: TestClient) -> None:
+    owner = _signup(client)
+    org_id, venue_id = _org_with_venue(client, owner)
+    pkg = client.post(
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
+        json=_package_body(venue_id),
+    ).json()
+    client.post(f"/api/v1/parties/packages/{pkg['id']}/archive", headers=_auth(owner))
+
+    assert client.get(f"/api/v1/parties/packages/{pkg['id']}").status_code == 404
+
+
 # --- B2: book a slot with a deposit -----------------------------------------
 
 def _package_with_slot(
@@ -434,6 +463,21 @@ def test_charge_exception_is_isolated_not_wedged(
     booking = db.get(PartyBooking, uuid.UUID(booking_id))
     assert booking is not None
     assert not booking.balance_captured and booking.status is PartyBookingStatus.confirmed
+
+
+def test_dev_confirm_settles_the_deposit(client: TestClient, db: Session) -> None:
+    """Dev/FakeGateway: confirm the deposit synchronously (no webhook)."""
+    owner, guardian = _signup(client), _signup(client)
+    _org, _pkg, slot_id = _package_with_slot(client, owner)
+    booking_id = client.post(
+        f"/api/v1/parties/slots/{slot_id}/book", headers=_auth(guardian), json={"headcount": 10}
+    ).json()["id"]
+    resp = client.post(
+        f"/api/v1/parties/bookings/{booking_id}/dev-confirm", headers=_auth(guardian)
+    )
+    assert resp.status_code == 200 and resp.json()["status"] == "confirmed"
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None and booking.status is PartyBookingStatus.confirmed
 
 
 # --- B4: guest-count adjustment + cancellation ------------------------------

@@ -33,6 +33,15 @@ class PackageOut(BaseModel):
     status: str
 
 
+class PackageDetailOut(PackageOut):
+    """Public package view enriched with provider + venue names for the booking page."""
+
+    organisation_name: str
+    venue_name: str
+    venue_suburb: str | None
+    deposit_pct_effective: int
+
+
 class SlotCreate(BaseModel):
     starts_at: datetime
     ends_at: datetime

@@ -25,6 +25,11 @@ import type {
   JobSummary,
   Notification,
   Order,
+  PartyBooking,
+  PartyPackage,
+  PartyPackageCreate,
+  PartyPackageDetail,
+  PartySlot,
   PaymentConfig,
   PaymentStatus,
   ProviderOrderSummary,
@@ -395,6 +400,63 @@ export const api = {
       const { data } = await http.post<ConnectStatus>('/payments/connect/refresh', {
         organisation_id: organisationId,
       })
+      return data
+    },
+  },
+  parties: {
+    // Provider
+    async providerPackages(orgId: string): Promise<PartyPackage[]> {
+      const { data } = await http.get<PartyPackage[]>(`/parties/orgs/${orgId}/packages/manage`)
+      return data
+    },
+    async createPackage(orgId: string, payload: PartyPackageCreate): Promise<PartyPackage> {
+      const { data } = await http.post<PartyPackage>(`/parties/orgs/${orgId}/packages`, payload)
+      return data
+    },
+    async archivePackage(packageId: string): Promise<PartyPackage> {
+      const { data } = await http.post<PartyPackage>(`/parties/packages/${packageId}/archive`)
+      return data
+    },
+    async addSlots(
+      packageId: string,
+      slots: { starts_at: string; ends_at: string }[],
+    ): Promise<PartySlot[]> {
+      const { data } = await http.post<PartySlot[]>(`/parties/packages/${packageId}/slots`, {
+        slots,
+      })
+      return data
+    },
+    // Public / parent
+    async activePackages(orgId: string): Promise<PartyPackage[]> {
+      const { data } = await http.get<PartyPackage[]>(`/parties/orgs/${orgId}/packages`)
+      return data
+    },
+    async package(packageId: string): Promise<PartyPackageDetail> {
+      const { data } = await http.get<PartyPackageDetail>(`/parties/packages/${packageId}`)
+      return data
+    },
+    async slots(packageId: string): Promise<PartySlot[]> {
+      const { data } = await http.get<PartySlot[]>(`/parties/packages/${packageId}/slots`)
+      return data
+    },
+    async book(slotId: string, headcount: number): Promise<PartyBooking> {
+      const { data } = await http.post<PartyBooking>(`/parties/slots/${slotId}/book`, {
+        headcount,
+      })
+      return data
+    },
+    async devConfirm(bookingId: string): Promise<PartyBooking> {
+      const { data } = await http.post<PartyBooking>(`/parties/bookings/${bookingId}/dev-confirm`)
+      return data
+    },
+    async adjust(bookingId: string, headcount: number): Promise<PartyBooking> {
+      const { data } = await http.post<PartyBooking>(`/parties/bookings/${bookingId}/adjust`, {
+        headcount,
+      })
+      return data
+    },
+    async cancel(bookingId: string): Promise<PartyBooking> {
+      const { data } = await http.post<PartyBooking>(`/parties/bookings/${bookingId}/cancel`)
       return data
     },
   },

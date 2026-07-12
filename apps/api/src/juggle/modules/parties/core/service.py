@@ -200,6 +200,11 @@ def _deposit_pct(db: Session, package: PartyPackage) -> int:
     return package.deposit_pct or config_service.party_deposit_pct(db)
 
 
+def effective_deposit_pct(db: Session, package: PartyPackage) -> int:
+    """Public: the deposit % that will apply to this package (its own, or the config default)."""
+    return _deposit_pct(db, package)
+
+
 def get_booking(db: Session, booking_id: uuid.UUID) -> PartyBooking | None:
     return db.get(PartyBooking, booking_id)
 
@@ -274,6 +279,26 @@ def _booking_for_payment(db: Session, payment_id: uuid.UUID) -> PartyBooking | N
     return db.scalar(
         select(PartyBooking).where(PartyBooking.deposit_payment_id == payment_id)
     )
+
+
+def dev_confirm_deposit(
+    db: Session, *, booking_id: uuid.UUID, actor_id: uuid.UUID, gateway: PaymentGateway
+) -> PartyBooking:
+    """FakeGateway/dev only: settle the deposit synchronously (real Stripe confirms via the
+    webhook). The route gates this to the fake gateway. Guardian-owned."""
+    booking = _lock_booking(db, booking_id)
+    if booking is None:
+        raise PartyBookingNotFound(str(booking_id))
+    if booking.guardian_id != actor_id:
+        raise NotBookingParty(str(booking_id))
+    if booking.deposit_payment_id is not None:
+        deposit = db.get(Payment, booking.deposit_payment_id)
+        if deposit is not None and deposit.stripe_payment_intent_id is not None:
+            settle_deposit_succeeded(
+                db, intent_id=deposit.stripe_payment_intent_id, gateway=gateway
+            )
+    db.refresh(booking)
+    return booking
 
 
 def settle_deposit_succeeded(

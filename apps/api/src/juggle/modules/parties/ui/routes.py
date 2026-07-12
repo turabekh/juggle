@@ -9,10 +9,16 @@ from sqlalchemy.orm import Session
 
 from juggle.db import get_session
 from juggle.deps import CurrentPrincipal
+from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
+from juggle.modules.org.core import service as org_service
 from juggle.modules.parties.core import schemas, service
 from juggle.modules.parties.core.models import PartyBooking
-from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
+from juggle.modules.payments.core.gateway import (
+    PaymentGateway,
+    StripeGateway,
+    get_payment_gateway,
+)
 
 router = APIRouter(prefix="/parties", tags=["parties"])
 
@@ -78,6 +84,33 @@ def list_active_packages(
         schemas.PackageOut.model_validate(p)
         for p in service.list_active_packages(session, organisation_id)
     ]
+
+
+@router.get("/packages/{package_id}", response_model=schemas.PackageDetailOut)
+def get_package(package_id: uuid.UUID, session: SessionDep) -> schemas.PackageDetailOut:
+    """Public — a single bookable package with provider + venue names for the booking page."""
+    package = service.get_package(session, package_id)
+    if package is None or package.status.value != "active":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Package not found")
+    org = org_service.get_organisation(session, package.organisation_id)
+    venue = catalog_service.get_venue(session, package.venue_id)
+    return schemas.PackageDetailOut(
+        id=package.id,
+        organisation_id=package.organisation_id,
+        venue_id=package.venue_id,
+        name=package.name,
+        description=package.description,
+        per_head_price_cents=package.per_head_price_cents,
+        min_headcount=package.min_headcount,
+        max_headcount=package.max_headcount,
+        deposit_pct=package.deposit_pct,
+        outdoor=package.outdoor,
+        status=package.status.value,
+        organisation_name=org.name if org else "",
+        venue_name=venue.name if venue else "",
+        venue_suburb=venue.suburb if venue else None,
+        deposit_pct_effective=service.effective_deposit_pct(session, package),
+    )
 
 
 @router.post("/packages/{package_id}/archive", response_model=schemas.PackageOut)
@@ -173,6 +206,29 @@ def _booking_out(
         status=booking.status.value,
         client_secret=client_secret,
     )
+
+
+@router.post("/bookings/{booking_id}/dev-confirm", response_model=schemas.PartyBookingOut)
+def dev_confirm_deposit(
+    booking_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+    gateway: GatewayDep,
+) -> schemas.PartyBookingOut:
+    """Dev/FakeGateway only: confirm the deposit synchronously (live Stripe uses the webhook)."""
+    if isinstance(gateway, StripeGateway):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Deposit confirmation is webhook-driven for live payments"
+        )
+    try:
+        booking = service.dev_confirm_deposit(
+            session, booking_id=booking_id, actor_id=principal.user_id, gateway=gateway,
+        )
+    except service.PartyBookingNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Booking not found") from exc
+    except service.NotBookingParty as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your booking") from exc
+    return _booking_out(booking)
 
 
 @router.post("/bookings/{booking_id}/adjust", response_model=schemas.PartyBookingOut)
