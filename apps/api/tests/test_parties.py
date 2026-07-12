@@ -188,6 +188,67 @@ def test_archive_removes_from_public_listing(client: TestClient) -> None:
     assert any(p["id"] == pkg["id"] and p["status"] == "archived" for p in manage)
 
 
+def test_update_package_edits_fields(client: TestClient) -> None:
+    owner = _signup(client)
+    org_id, venue_id = _org_with_venue(client, owner)
+    pkg = client.post(
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
+        json=_package_body(venue_id),
+    ).json()
+    resp = client.put(
+        f"/api/v1/parties/packages/{pkg['id']}", headers=_auth(owner),
+        json=_package_body(venue_id, name="Deluxe Party", per_head_price_cents=5000,
+                           min_headcount=10, max_headcount=30, deposit_pct=50),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "Deluxe Party"
+    assert body["per_head_price_cents"] == 5000
+    assert (body["min_headcount"], body["max_headcount"], body["deposit_pct"]) == (10, 30, 50)
+
+
+def test_update_package_requires_membership(client: TestClient) -> None:
+    owner, outsider = _signup(client), _signup(client)
+    org_id, venue_id = _org_with_venue(client, owner)
+    pkg = client.post(
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
+        json=_package_body(venue_id),
+    ).json()
+    resp = client.put(
+        f"/api/v1/parties/packages/{pkg['id']}", headers=_auth(outsider),
+        json=_package_body(venue_id, name="Hijacked"),
+    )
+    assert resp.status_code == 403
+
+
+def test_update_package_rejects_bad_band(client: TestClient) -> None:
+    owner = _signup(client)
+    org_id, venue_id = _org_with_venue(client, owner)
+    pkg = client.post(
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
+        json=_package_body(venue_id),
+    ).json()
+    resp = client.put(
+        f"/api/v1/parties/packages/{pkg['id']}", headers=_auth(owner),
+        json=_package_body(venue_id, min_headcount=20, max_headcount=8),
+    )
+    assert resp.status_code == 400
+
+
+def test_unarchive_restores_to_public_listing(client: TestClient) -> None:
+    owner = _signup(client)
+    org_id, venue_id = _org_with_venue(client, owner)
+    pkg = client.post(
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
+        json=_package_body(venue_id),
+    ).json()
+    client.post(f"/api/v1/parties/packages/{pkg['id']}/archive", headers=_auth(owner))
+    resp = client.post(f"/api/v1/parties/packages/{pkg['id']}/unarchive", headers=_auth(owner))
+    assert resp.status_code == 200 and resp.json()["status"] == "active"
+    public = client.get(f"/api/v1/parties/orgs/{org_id}/packages").json()
+    assert any(p["id"] == pkg["id"] for p in public)
+
+
 def test_public_package_detail_enriched(client: TestClient) -> None:
     owner = _signup(client)
     org_id, venue_id = _org_with_venue(client, owner)

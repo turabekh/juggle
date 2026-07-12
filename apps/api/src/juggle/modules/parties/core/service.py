@@ -28,7 +28,7 @@ from juggle.modules.parties.core.models import (
     PartySlot,
     PartySlotStatus,
 )
-from juggle.modules.parties.core.schemas import PackageCreate, SlotCreate
+from juggle.modules.parties.core.schemas import PackageCreate, PackageUpdate, SlotCreate
 from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import PaymentGateway, PaymentIntentResult
 from juggle.modules.payments.core.models import Payment, PaymentPurpose, PaymentStatus
@@ -162,6 +162,32 @@ def list_all_active_packages(db: Session) -> list[PartyPackage]:
     )
 
 
+def update_package(
+    db: Session, *, package_id: uuid.UUID, actor_id: uuid.UUID, data: PackageUpdate
+) -> PartyPackage:
+    """Edit a package (member-gated). Existing bookings keep the price they were booked at — the
+    booking snapshots ``per_head_price_cents`` — so a later edit only affects new bookings."""
+    package = db.get(PartyPackage, package_id)
+    if package is None:
+        raise PackageNotFound(str(package_id))
+    _require_member(db, package.organisation_id, actor_id)
+    if data.max_headcount < data.min_headcount:
+        raise InvalidHeadcountBand(f"{data.max_headcount} < {data.min_headcount}")
+    venue = catalog_service.get_venue(db, data.venue_id)
+    if venue is None or venue.organisation_id != package.organisation_id:
+        raise VenueNotFound(str(data.venue_id))
+    package.venue_id = data.venue_id
+    package.name = data.name
+    package.description = data.description
+    package.per_head_price_cents = data.per_head_price_cents
+    package.min_headcount = data.min_headcount
+    package.max_headcount = data.max_headcount
+    package.deposit_pct = data.deposit_pct
+    package.outdoor = data.outdoor
+    db.flush()
+    return package
+
+
 def archive_package(
     db: Session, *, package_id: uuid.UUID, actor_id: uuid.UUID
 ) -> PartyPackage:
@@ -170,6 +196,18 @@ def archive_package(
         raise PackageNotFound(str(package_id))
     _require_member(db, package.organisation_id, actor_id)
     package.status = PartyPackageStatus.archived
+    db.flush()
+    return package
+
+
+def unarchive_package(
+    db: Session, *, package_id: uuid.UUID, actor_id: uuid.UUID
+) -> PartyPackage:
+    package = db.get(PartyPackage, package_id)
+    if package is None:
+        raise PackageNotFound(str(package_id))
+    _require_member(db, package.organisation_id, actor_id)
+    package.status = PartyPackageStatus.active
     db.flush()
     return package
 

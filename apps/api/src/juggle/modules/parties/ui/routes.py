@@ -146,12 +146,57 @@ def get_package(package_id: uuid.UUID, session: SessionDep) -> schemas.PackageDe
     )
 
 
+@router.put("/packages/{package_id}", response_model=schemas.PackageOut)
+def update_package(
+    package_id: uuid.UUID,
+    body: schemas.PackageUpdate,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+) -> schemas.PackageOut:
+    try:
+        package = service.update_package(
+            session, package_id=package_id, actor_id=principal.user_id, data=body
+        )
+    except service.PackageNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Package not found") from exc
+    except service.NotOrgMember as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Not a member of this organisation"
+        ) from exc
+    except service.InvalidHeadcountBand as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "max_headcount must be ≥ min_headcount"
+        ) from exc
+    except service.VenueNotFound as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "Venue not found for this organisation"
+        ) from exc
+    return schemas.PackageOut.model_validate(package)
+
+
 @router.post("/packages/{package_id}/archive", response_model=schemas.PackageOut)
 def archive_package(
     package_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
 ) -> schemas.PackageOut:
     try:
         package = service.archive_package(
+            session, package_id=package_id, actor_id=principal.user_id
+        )
+    except service.PackageNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Package not found") from exc
+    except service.NotOrgMember as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Not a member of this organisation"
+        ) from exc
+    return schemas.PackageOut.model_validate(package)
+
+
+@router.post("/packages/{package_id}/unarchive", response_model=schemas.PackageOut)
+def unarchive_package(
+    package_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep
+) -> schemas.PackageOut:
+    try:
+        package = service.unarchive_package(
             session, package_id=package_id, actor_id=principal.user_id
         )
     except service.PackageNotFound as exc:

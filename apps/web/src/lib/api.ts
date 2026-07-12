@@ -417,8 +417,16 @@ export const api = {
       const { data } = await http.post<PartyPackage>(`/parties/orgs/${orgId}/packages`, payload)
       return data
     },
+    async updatePackage(packageId: string, payload: PartyPackageCreate): Promise<PartyPackage> {
+      const { data } = await http.put<PartyPackage>(`/parties/packages/${packageId}`, payload)
+      return data
+    },
     async archivePackage(packageId: string): Promise<PartyPackage> {
       const { data } = await http.post<PartyPackage>(`/parties/packages/${packageId}/archive`)
+      return data
+    },
+    async unarchivePackage(packageId: string): Promise<PartyPackage> {
+      const { data } = await http.post<PartyPackage>(`/parties/packages/${packageId}/unarchive`)
       return data
     },
     async addSlots(

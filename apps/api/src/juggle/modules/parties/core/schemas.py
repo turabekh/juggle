@@ -17,6 +17,19 @@ class PackageCreate(BaseModel):
     outdoor: bool = False
 
 
+class PackageUpdate(BaseModel):
+    """Editable fields of a package. Venue may change (must stay within the org)."""
+
+    venue_id: uuid.UUID
+    name: str = Field(min_length=1, max_length=160)
+    description: str | None = None
+    per_head_price_cents: int = Field(ge=0)
+    min_headcount: int = Field(ge=1)
+    max_headcount: int = Field(ge=1)
+    deposit_pct: int | None = Field(default=None, ge=10, le=100)
+    outdoor: bool = False
+
+
 class PackageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
