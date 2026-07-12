@@ -54,9 +54,13 @@ class Booking(UUIDPkMixin, TimestampMixin, Base):
         Enum(BookingStatus, name="booking_status"), default=BookingStatus.pending, nullable=False
     )
     unit_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
-    # The provider net accrued for this booking at confirm + the payout it fed, so a later
-    # refund claws back exactly what was accrued from exactly that payout (ADR-0005 §7),
-    # immune to config drift or a sibling session sharing the session's payout.
+    # The money split captured at confirm (ADR-0002), so refunds and the provider tax
+    # invoice use the amounts actually charged — immune to later fee/gst config changes.
+    # gross (unit_price×qty) = commission + commission_gst + net.
+    commission_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    commission_gst_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # The provider net accrued for this booking + the payout it fed, so a later refund claws
+    # back exactly what was accrued from exactly that payout (ADR-0005 §7).
     accrued_net_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     payout_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("payout.id", ondelete="SET NULL"), index=True, nullable=True

@@ -135,6 +135,29 @@ def list_my_bookings(
     return service.list_bookings(session, principal.user_id)
 
 
+@router.get("/orders/{payment_id}/tax-invoice", response_model=schemas.TaxInvoiceOut)
+def provider_tax_invoice(
+    payment_id: uuid.UUID,
+    organisation_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+) -> schemas.TaxInvoiceOut:
+    """A provider's commission tax invoice for one order (member-gated, ADR-0002 §8.4)."""
+    try:
+        return service.provider_tax_invoice(
+            session,
+            payment_id=payment_id,
+            organisation_id=organisation_id,
+            actor_id=principal.user_id,
+        )
+    except service.NotOrgMember as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Not a member of this organisation"
+        ) from exc
+    except service.PaymentNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No invoice for this order") from exc
+
+
 @router.get("/payments/{payment_id}/calendar.ics")
 def order_calendar(
     payment_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep

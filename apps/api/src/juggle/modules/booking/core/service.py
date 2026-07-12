@@ -31,6 +31,10 @@ from juggle.modules.booking.core.schemas import (
     CheckoutItem,
     OrderOut,
     SessionCancelResult,
+    TaxInvoiceLine,
+    TaxInvoiceOut,
+    TaxInvoiceParty,
+    TaxInvoiceTotals,
 )
 from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.catalog.core.models import Program, SessionStatus, Venue
@@ -49,6 +53,7 @@ from juggle.modules.org.core.models import OrgRole
 from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import PaymentGateway
 from juggle.modules.payments.core.models import Payment, PaymentStatus
+from juggle.settings import get_settings
 
 # The seat-hold window is extended to cover the payment step so a pending
 # booking's seats aren't reclaimed mid-checkout. TODO(M7): source from config.
@@ -93,6 +98,10 @@ class SessionNotFound(Exception):
 
 class NotSessionOwner(Exception):
     """Actor is not an owner of the organisation that runs this session."""
+
+
+class NotOrgMember(Exception):
+    """Actor is not a member of the organisation (tax-invoice access)."""
 
 
 def _age_at(dob: date, at: datetime) -> int:
@@ -350,7 +359,7 @@ def _settle_confirmed(db: Session, payment: Payment, *, email_gateway: EmailGate
             continue
         quantity = _charged_quantity(db, booking)
         gross = booking.unit_price_cents * quantity
-        net = payments_service.provider_net_cents(gross, fee_rate, gst_rate)
+        fee, gst, net = payments_service.take_rate(gross, fee_rate, gst_rate)
         payout = payments_service.accrue_payout(
             db,
             organisation_id=booking.organisation_id,
@@ -358,8 +367,11 @@ def _settle_confirmed(db: Session, payment: Payment, *, email_gateway: EmailGate
             net_cents=net,
             scheduled_for=session_obj.ends_at + timedelta(days=delay_days),
         )
-        # Persist exactly what was accrued and where, so a later refund claws back this
-        # amount from this payout — immune to config drift or a shared session payout.
+        # Persist the full money split + the payout it fed, so a later refund claws back
+        # this amount from this payout and the provider tax invoice itemises the exact
+        # commission/GST charged — immune to config drift or a shared session payout.
+        booking.commission_cents = fee
+        booking.commission_gst_cents = gst
         booking.accrued_net_cents = net
         booking.payout_id = payout.id
 
@@ -592,6 +604,74 @@ def _clawback_booking(db: Session, booking: Booking, *, gateway: PaymentGateway)
         net_cents=booking.accrued_net_cents,
         gateway=gateway,
         idempotency_key=f"rev-{booking.id}",
+    )
+
+
+def provider_tax_invoice(
+    db: Session, *, payment_id: uuid.UUID, organisation_id: uuid.UUID, actor_id: uuid.UUID
+) -> TaxInvoiceOut:
+    """Provider-facing tax invoice for the platform's commission on one order (ADR-0002,
+    §8.4). The supplier is the platform (commission + GST — the taxable supply); the
+    recipient is the provider. Itemises only THIS org's confirmed lines in the order, using
+    the money split persisted at confirm. Member-gated."""
+    if org_service.get_member(db, organisation_id, actor_id) is None:
+        raise NotOrgMember(str(organisation_id))
+    payment = payments_service.get_payment(db, payment_id)
+    if payment is None:
+        raise PaymentNotFound(str(payment_id))
+    org = org_service.get_organisation(db, organisation_id)
+
+    lines: list[TaxInvoiceLine] = []
+    tot_gross = tot_fee = tot_gst = tot_net = 0
+    for booking in _bookings_for_payment(db, payment.id):
+        if booking.organisation_id != organisation_id:
+            continue
+        if booking.status is not BookingStatus.confirmed:
+            continue  # refunded/cancelled lines are not a standing taxable supply
+        session_obj = db.get(CatalogSession, booking.session_id)
+        if session_obj is None:
+            continue
+        program = db.get(Program, session_obj.program_id)
+        gross = booking.commission_cents + booking.commission_gst_cents + booking.accrued_net_cents
+        lines.append(
+            TaxInvoiceLine(
+                session_id=booking.session_id,
+                session_title=program.title if program is not None else "Session",
+                starts_at=session_obj.starts_at,
+                status=booking.status.value,
+                gross_cents=gross,
+                commission_cents=booking.commission_cents,
+                commission_gst_cents=booking.commission_gst_cents,
+                net_cents=booking.accrued_net_cents,
+            )
+        )
+        tot_gross += gross
+        tot_fee += booking.commission_cents
+        tot_gst += booking.commission_gst_cents
+        tot_net += booking.accrued_net_cents
+
+    if not lines:
+        raise PaymentNotFound(str(payment_id))  # this org has no invoiceable line in the order
+
+    settings = get_settings()
+    return TaxInvoiceOut(
+        invoice_number=f"INV-{str(payment.id)[:8]}-{str(organisation_id)[:8]}".upper(),
+        issued_at=datetime.now(UTC),
+        payment_id=payment.id,
+        currency=payment.currency,
+        supplier=TaxInvoiceParty(
+            name=settings.platform_legal_name, abn=settings.platform_abn or None
+        ),
+        recipient=TaxInvoiceParty(
+            name=org.name if org is not None else "", abn=org.abn if org is not None else None
+        ),
+        lines=lines,
+        totals=TaxInvoiceTotals(
+            gross_cents=tot_gross,
+            commission_cents=tot_fee,
+            commission_gst_cents=tot_gst,
+            net_cents=tot_net,
+        ),
     )
 
 

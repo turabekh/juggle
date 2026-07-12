@@ -1,6 +1,7 @@
 """Pydantic schemas for the booking module (cart checkout + order views)."""
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -61,3 +62,40 @@ class SessionCancelResult(BaseModel):
 
 class WebhookAck(BaseModel):
     status: str
+
+
+class TaxInvoiceLine(BaseModel):
+    session_id: uuid.UUID
+    session_title: str
+    starts_at: datetime
+    status: str
+    gross_cents: int          # what the family paid for this session (GST-inclusive)
+    commission_cents: int     # platform commission (ex-GST) — the taxable supply
+    commission_gst_cents: int  # GST on the commission
+    net_cents: int            # provider payout for the line
+
+
+class TaxInvoiceParty(BaseModel):
+    name: str
+    abn: str | None
+
+
+class TaxInvoiceTotals(BaseModel):
+    gross_cents: int
+    commission_cents: int
+    commission_gst_cents: int
+    net_cents: int
+
+
+class TaxInvoiceOut(BaseModel):
+    """Provider-facing tax invoice for the platform's commission on one order (ADR-0002).
+    The supplier is the platform (commission + GST); the recipient is the provider."""
+
+    invoice_number: str
+    issued_at: datetime
+    payment_id: uuid.UUID
+    currency: str
+    supplier: TaxInvoiceParty   # the platform
+    recipient: TaxInvoiceParty  # the provider
+    lines: list[TaxInvoiceLine]
+    totals: TaxInvoiceTotals

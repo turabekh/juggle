@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     stripe_publishable_key: str = Field(default="")
     stripe_webhook_secret: str = Field(default="")
 
+    # Platform legal identity — the supplier on provider commission tax invoices (§8.4,
+    # ADR-0002). Real ABN/name injected via env before charging in production.
+    platform_legal_name: str = Field(default="Juggle Marketplace Pty Ltd")
+    platform_abn: str = Field(default="")
+
 
 @lru_cache
 def get_settings() -> Settings:
