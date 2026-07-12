@@ -182,6 +182,9 @@ def run_due_jobs(
     party_deposits_swept = parties_service.sweep_abandoned_deposits(
         db, gateway=payment_gateway, now=now
     )
+    party_balances_processed = parties_service.process_party_balances(
+        db, gateway=payment_gateway, email_gateway=gateway, now=now
+    )
     holds_reclaimed = inventory_service.reclaim_all_expired(db, now=now)
     waitlist_run = waitlist_service.process_all(db)
     reminders_sent = _send_reminders(db, now=now, gateway=gateway)
@@ -192,6 +195,7 @@ def run_due_jobs(
         holds_reclaimed=holds_reclaimed,
         abandoned_checkouts_swept=abandoned,
         party_deposits_swept=party_deposits_swept,
+        party_balances_processed=party_balances_processed,
         waitlist_sessions_processed=waitlist_run.sessions_processed,
         waitlist_offers_made=waitlist_run.offers_made,
         waitlist_offers_expired=waitlist_run.offers_expired,

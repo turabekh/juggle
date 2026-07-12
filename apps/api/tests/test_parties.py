@@ -6,12 +6,16 @@ import hmac
 import json
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from juggle.modules.notifications.core.gateway import FakeEmailGateway
+from juggle.modules.parties.core import service as parties_service
 from juggle.modules.parties.core.models import PartyBooking, PartyBookingStatus
+from juggle.modules.payments.core.gateway import FakeGateway, PaymentIntentResult
 from juggle.modules.payments.core.models import Payment
 from juggle.settings import get_settings
 
@@ -283,11 +287,6 @@ def test_deposit_canceled_releases_slot(
 
 def test_abandoned_deposit_sweep_releases_the_slot(client: TestClient, db: Session) -> None:
     """A deposit that never completes leaves the slot held; the sweep frees it (INV-1)."""
-    from datetime import UTC, datetime, timedelta
-
-    from juggle.modules.parties.core import service as parties_service
-    from juggle.modules.payments.core.gateway import FakeGateway
-
     owner, guardian = _signup(client), _signup(client)
     _org, pkg_id, slot_id = _package_with_slot(client, owner)
     booking_id = client.post(
@@ -304,3 +303,128 @@ def test_abandoned_deposit_sweep_releases_the_slot(client: TestClient, db: Sessi
     assert len(client.get(f"/api/v1/parties/packages/{pkg_id}/slots").json()) == 1  # freed
     # Idempotent.
     assert parties_service.sweep_abandoned_deposits(db, gateway=FakeGateway(), now=later) == 0
+
+
+# --- B3: T-7d balance auto-charge + auto-cancel -----------------------------
+
+# Party slot starts 2026-11-07T04:00Z. Defaults: offset 7d (window opens 2026-10-31T04:00Z),
+# cutoff 72h (2026-11-04T04:00Z).
+BEFORE_WINDOW = datetime(2026, 10, 20, tzinfo=UTC)
+IN_WINDOW = datetime(2026, 11, 1, tzinfo=UTC)
+PAST_CUTOFF = datetime(2026, 11, 5, tzinfo=UTC)
+
+
+class _DecliningGateway(FakeGateway):
+    def charge_saved_card(self, **kw: object) -> PaymentIntentResult:
+        return PaymentIntentResult(id="pi_decl", client_secret="", status="requires_payment_method")
+
+
+class _RaisingGateway(FakeGateway):
+    def charge_saved_card(self, **kw: object) -> PaymentIntentResult:
+        raise RuntimeError("gateway blew up")
+
+
+def _run_balances(db: Session, gw: FakeGateway, now: datetime) -> int:
+    return parties_service.process_party_balances(
+        db, gateway=gw, email_gateway=FakeEmailGateway(), now=now
+    )
+
+
+def _book_and_confirm(client: TestClient, db: Session, owner: str, guardian: str) -> str:
+    _org, _pkg, slot_id = _package_with_slot(client, owner)
+    booking_id = client.post(
+        f"/api/v1/parties/slots/{slot_id}/book", headers=_auth(guardian), json={"headcount": 10}
+    ).json()["id"]
+    _post_pi_event(
+        client, event_id=f"evt_{uuid.uuid4().hex[:8]}",
+        event_type="payment_intent.succeeded", intent_id=_deposit_pi(db, booking_id),
+    )
+    return booking_id
+
+
+def test_balance_not_charged_before_window(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    booking_id = _book_and_confirm(client, db, owner, guardian)
+    assert _run_balances(db, FakeGateway(), BEFORE_WINDOW) == 0
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None and not booking.balance_captured
+
+
+def test_balance_charged_in_window_accrues_payout(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    org_id, _venue = _org_with_venue(client, owner)  # ensure owner is a member for payouts read
+    booking_id = _book_and_confirm(client, db, owner, guardian)
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None
+    org_id = str(booking.organisation_id)
+
+    processed = _run_balances(db, FakeGateway(), IN_WINDOW)
+    assert processed == 1
+    db.refresh(booking)
+    assert booking.balance_captured is True
+    assert booking.payout_id is not None
+    # $350 total − 10% fee − GST = $311.50 net (ADR-0002).
+    payouts = client.get(
+        "/api/v1/payments/payouts", headers=_auth(owner), params={"organisation_id": org_id}
+    ).json()
+    assert any(p["amount_cents"] == 31150 for p in payouts)
+
+    # Idempotent: already captured → not processed again.
+    assert _run_balances(db, FakeGateway(), IN_WINDOW) == 0
+
+
+def test_unpaid_balance_auto_cancels_and_refunds_deposit(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    booking_id = _book_and_confirm(client, db, owner, guardian)
+
+    processed = _run_balances(db, FakeGateway(), PAST_CUTOFF)
+    assert processed == 1
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None and booking.status is PartyBookingStatus.cancelled
+    assert not booking.balance_captured
+    # Deposit refunded (ADR-0010).
+    deposit = db.get(Payment, booking.deposit_payment_id)
+    assert deposit is not None and deposit.status.value == "refunded"
+
+
+def test_declining_card_retries_in_window_then_cancels_at_cutoff(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    booking_id = _book_and_confirm(client, db, owner, guardian)
+    gw = _DecliningGateway()
+
+    # Two in-window attempts (≥48h apart) both decline — booking stays confirmed, uncaptured.
+    _run_balances(db, gw, datetime(2026, 11, 1, tzinfo=UTC))
+    _run_balances(db, gw, datetime(2026, 11, 3, tzinfo=UTC))
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None and booking.balance_attempts == 2 and not booking.balance_captured
+    assert booking.status is PartyBookingStatus.confirmed
+
+    # Past the T-72h cutoff, still unpaid → auto-cancel + refund the deposit (ADR-0008/0010).
+    _run_balances(db, gw, PAST_CUTOFF)
+    db.refresh(booking)
+    assert booking.status is PartyBookingStatus.cancelled
+    deposit = db.get(Payment, booking.deposit_payment_id)
+    assert deposit is not None and deposit.status.value == "refunded"
+
+
+def test_charge_exception_is_isolated_not_wedged(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    """An unexpected error charging one booking must not abort the whole tick (savepoint)."""
+    owner, guardian = _signup(client), _signup(client)
+    booking_id = _book_and_confirm(client, db, owner, guardian)
+    # Must not raise out of the tick.
+    parties_service.process_party_balances(
+        db, gateway=_RaisingGateway(), email_gateway=FakeEmailGateway(), now=IN_WINDOW
+    )
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None
+    assert not booking.balance_captured and booking.status is PartyBookingStatus.confirmed

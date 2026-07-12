@@ -15,6 +15,10 @@ from sqlalchemy.orm import Session
 
 from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.config.core import service as config_service
+from juggle.modules.events.core import service as events_service
+from juggle.modules.identity.core import service as identity_service
+from juggle.modules.notifications.core import service as notifications_service
+from juggle.modules.notifications.core.gateway import EmailGateway
 from juggle.modules.org.core import service as org_service
 from juggle.modules.parties.core.models import (
     PartyBooking,
@@ -328,3 +332,189 @@ def sweep_abandoned_deposits(
         swept += 1
     db.flush()
     return swept
+
+
+# --- Balance auto-charge (Milestone B3, ADR-0008) ---------------------------
+
+def _accrue_party_payout(db: Session, booking: PartyBooking) -> None:
+    """Accrue the provider's net on the full party total once the balance captures
+    (take-rate per ADR-0002), due after the party runs (ADR-0004). Stores payout_id so a
+    later refund claws it back (ADR-0010 / F-PAY-5)."""
+    fee_rate = config_service.platform_fee_rate(db)
+    gst_rate = config_service.gst_rate(db)
+    net = payments_service.provider_net_cents(booking.total_cents, fee_rate, gst_rate)
+    slot = db.get(PartySlot, booking.slot_id)
+    party_start = slot.starts_at if slot is not None else datetime.now(UTC)
+    payout = payments_service.accrue_party_payout(
+        db,
+        organisation_id=booking.organisation_id,
+        net_cents=net,
+        scheduled_for=party_start + timedelta(days=config_service.payout_delay_days(db)),
+    )
+    booking.payout_id = payout.id
+
+
+def _notify_host(
+    db: Session, booking: PartyBooking, *, email_gateway: EmailGateway, cancelled: bool
+) -> None:
+    guardian = identity_service.get_user(db, booking.guardian_id)
+    if guardian is None:
+        return
+    package = db.get(PartyPackage, booking.package_id)
+    title = package.name if package is not None else "your party"
+    if cancelled:
+        notifications_service.notify_party_cancelled(
+            db, user_id=guardian.id, to_email=guardian.email, party_title=title,
+            gateway=email_gateway,
+        )
+    else:
+        notifications_service.notify_party_payment_action_needed(
+            db, user_id=guardian.id, to_email=guardian.email, party_title=title,
+            balance_cents=booking.balance_cents, gateway=email_gateway,
+        )
+
+
+def _attempt_balance(
+    db: Session,
+    booking: PartyBooking,
+    *,
+    gateway: PaymentGateway,
+    email_gateway: EmailGateway,
+    now: datetime,
+) -> bool:
+    """One off-session balance charge attempt. Records the payment + accrues the payout only
+    on success; a decline just increments the attempt counter for the next tick."""
+    booking.balance_attempts += 1
+    booking.last_balance_attempt_at = now
+    deposit = (
+        db.get(Payment, booking.deposit_payment_id)
+        if booking.deposit_payment_id is not None
+        else None
+    )
+    if deposit is None or deposit.stripe_payment_intent_id is None:
+        db.flush()
+        return False
+    # STABLE idempotency key (ADR-0008): retries are ≥ retry-interval (48h) apart, well beyond
+    # Stripe's 24h idempotency window, so each real retry is fresh; but a same-tick redelivery
+    # (or an ambiguous success whose response was lost) replays the ONE charge — no double-charge.
+    key = f"party-balance-{booking.id}"
+    result = gateway.charge_saved_card(
+        deposit_intent_id=deposit.stripe_payment_intent_id,
+        amount_cents=booking.balance_cents,
+        currency=deposit.currency,
+        idempotency_key=key,
+    )
+    if result.status != "succeeded":
+        _notify_host(db, booking, email_gateway=email_gateway, cancelled=False)
+        db.flush()
+        return False
+    payment = payments_service.record_payment(
+        db,
+        guardian_id=booking.guardian_id,
+        amount_cents=booking.balance_cents,
+        stripe_payment_intent_id=result.id,
+        purpose=PaymentPurpose.party_balance,
+        status=PaymentStatus.succeeded,
+        idempotency_key=key,
+    )
+    booking.balance_payment_id = payment.id
+    booking.balance_captured = True
+    _accrue_party_payout(db, booking)
+    db.flush()
+    return True
+
+
+def _auto_cancel_unpaid(
+    db: Session, booking: PartyBooking, *, gateway: PaymentGateway, email_gateway: EmailGateway
+) -> None:
+    """Balance unpaid by the cutoff (ADR-0008): refund the deposit (ADR-0010 — a card-glitch
+    is not the parent's forfeit), release the slot, cancel the booking, notify the host."""
+    if booking.deposit_payment_id is not None:
+        deposit = db.get(Payment, booking.deposit_payment_id)
+        # Refund unless already fully refunded (refund() is idempotent + handles partials).
+        if deposit is not None and deposit.status is not PaymentStatus.refunded:
+            payments_service.refund(db, deposit, gateway=gateway)
+    _notify_host(db, booking, email_gateway=email_gateway, cancelled=True)
+    _release(db, booking)
+    events_service.record(
+        db, event_type="party_balance_unpaid_cancelled",
+        props={"party_booking_id": str(booking.id)},
+    )
+
+
+def process_party_balances(
+    db: Session,
+    *,
+    gateway: PaymentGateway,
+    email_gateway: EmailGateway,
+    now: datetime | None = None,
+) -> int:
+    """Scheduler tick (ADR-0008): from T-<offset>d charge each confirmed party's balance
+    off-session; retry no more often than the interval, up to max attempts; at T-<cutoff>h
+    (or attempts exhausted) auto-cancel + refund the deposit. Idempotent per tick."""
+    moment = now or datetime.now(UTC)
+    offset_days = config_service.party_balance_offset_days(db)
+    cutoff_hours = config_service.party_balance_cutoff_hours(db)
+    interval_hours = config_service.party_balance_retry_interval_hours(db)
+    max_attempts = config_service.party_balance_max_attempts(db)
+    # Guard the config footgun: the charge window must open at or before the cutoff, else a
+    # party would auto-cancel un-attempted. Widen the window to always cover the cutoff.
+    offset_days = max(offset_days, -(-cutoff_hours // 24))
+
+    # FOR UPDATE SKIP LOCKED so two overlapping ticks never double-process a booking (matches
+    # the sibling sweeps); a locked booking is picked up next tick.
+    bookings = db.scalars(
+        select(PartyBooking)
+        .where(
+            PartyBooking.status == PartyBookingStatus.confirmed,
+            PartyBooking.balance_captured.is_(False),
+            PartyBooking.balance_cents > 0,
+        )
+        .with_for_update(skip_locked=True)
+    ).all()
+    processed = 0
+    for booking in bookings:
+        # Isolate each booking in a savepoint so one unexpected error can't wedge the tick.
+        savepoint = db.begin_nested()
+        try:
+            if _process_one_balance(
+                db, booking, gateway=gateway, email_gateway=email_gateway, moment=moment,
+                offset_days=offset_days, cutoff_hours=cutoff_hours,
+                interval_hours=interval_hours, max_attempts=max_attempts,
+            ):
+                processed += 1
+            savepoint.commit()
+        except Exception:  # noqa: BLE001 — one bad booking must not abort the whole tick
+            savepoint.rollback()
+    db.flush()
+    return processed
+
+
+def _process_one_balance(
+    db: Session,
+    booking: PartyBooking,
+    *,
+    gateway: PaymentGateway,
+    email_gateway: EmailGateway,
+    moment: datetime,
+    offset_days: int,
+    cutoff_hours: int,
+    interval_hours: int,
+    max_attempts: int,
+) -> bool:
+    slot = db.get(PartySlot, booking.slot_id)
+    if slot is None:
+        return False
+    party_start = slot.starts_at
+    if moment < party_start - timedelta(days=offset_days):
+        return False  # too early — balance window not open
+    if moment >= party_start - timedelta(hours=cutoff_hours) or (
+        booking.balance_attempts >= max_attempts
+    ):
+        _auto_cancel_unpaid(db, booking, gateway=gateway, email_gateway=email_gateway)
+        return True
+    last = booking.last_balance_attempt_at
+    if last is not None and (moment - last) < timedelta(hours=interval_hours):
+        return False  # respect the retry interval
+    _attempt_balance(db, booking, gateway=gateway, email_gateway=email_gateway, now=moment)
+    return True

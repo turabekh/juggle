@@ -24,6 +24,8 @@ KIND_PROVIDER_BROADCAST = "provider_broadcast"
 KIND_SESSION_REMINDER = "session_reminder"
 KIND_WHAT_TO_BRING = "what_to_bring"
 KIND_SEAT_UNAVAILABLE_REFUND = "seat_unavailable_refund"
+KIND_PARTY_PAYMENT_ACTION = "party_payment_action"
+KIND_PARTY_CANCELLED = "party_cancelled"
 
 
 def _money(cents: int) -> str:
@@ -146,6 +148,50 @@ def notify_seat_unavailable_refund(
         kind=KIND_SEAT_UNAVAILABLE_REFUND,
         subject=subject,
         detail={"refunded_cents": total_cents},
+    )
+
+
+def notify_party_payment_action_needed(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    to_email: str,
+    party_title: str,
+    balance_cents: int,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """A party balance charge failed — ask the host to update their card (ADR-0008 §2)."""
+    subject = f"Action needed: payment for {party_title}"
+    body = (
+        f"We couldn't charge the remaining balance ({_money(balance_cents)}) for your booking of "
+        f"{party_title}. Please update your card details so we can complete the payment — "
+        "otherwise the booking will be cancelled and your deposit refunded."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(
+        db, user_id=user_id, to_email=to_email, kind=KIND_PARTY_PAYMENT_ACTION,
+        subject=subject, detail={"balance_cents": balance_cents},
+    )
+
+
+def notify_party_cancelled(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    to_email: str,
+    party_title: str,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """A party auto-cancelled for an uncollected balance; deposit refunded (ADR-0008/0010)."""
+    subject = f"Cancelled: {party_title}"
+    body = (
+        f"Your booking of {party_title} has been cancelled because the balance couldn't be "
+        "collected in time. Your deposit has been refunded in full. You're welcome to book again."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(
+        db, user_id=user_id, to_email=to_email, kind=KIND_PARTY_CANCELLED,
+        subject=subject, detail={},
     )
 
 

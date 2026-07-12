@@ -32,6 +32,10 @@ KEY_IMPERSONATION_TTL_MINUTES = "impersonation_ttl_minutes"
 KEY_WAITLIST_CLAIM_WINDOW_MINUTES = "waitlist_claim_window_minutes"
 KEY_MAX_ACTIVE_HOLDS_PER_GUARDIAN = "max_active_holds_per_guardian"
 KEY_PARTY_DEPOSIT_PCT = "party_deposit_pct"
+KEY_PARTY_BALANCE_OFFSET_DAYS = "party_balance_offset_days"
+KEY_PARTY_BALANCE_CUTOFF_HOURS = "party_balance_cutoff_hours"
+KEY_PARTY_BALANCE_RETRY_INTERVAL_HOURS = "party_balance_retry_interval_hours"
+KEY_PARTY_BALANCE_MAX_ATTEMPTS = "party_balance_max_attempts"
 
 
 @dataclass(frozen=True)
@@ -81,6 +85,22 @@ REGISTRY: dict[str, SettingSpec] = {
     KEY_PARTY_DEPOSIT_PCT: SettingSpec(
         KEY_PARTY_DEPOSIT_PCT, 30, int, 10, 100,
         "Party booking deposit percentage of the total (ADR-0007)",
+    ),
+    KEY_PARTY_BALANCE_OFFSET_DAYS: SettingSpec(
+        KEY_PARTY_BALANCE_OFFSET_DAYS, 7, int, 0, 30,
+        "Days before a party to start charging the balance (ADR-0008)",
+    ),
+    KEY_PARTY_BALANCE_CUTOFF_HOURS: SettingSpec(
+        KEY_PARTY_BALANCE_CUTOFF_HOURS, 72, int, 0, 336,
+        "Hours before a party after which an unpaid balance auto-cancels (ADR-0008)",
+    ),
+    KEY_PARTY_BALANCE_RETRY_INTERVAL_HOURS: SettingSpec(
+        KEY_PARTY_BALANCE_RETRY_INTERVAL_HOURS, 48, int, 1, 336,
+        "Minimum hours between party balance-charge attempts (ADR-0008)",
+    ),
+    KEY_PARTY_BALANCE_MAX_ATTEMPTS: SettingSpec(
+        KEY_PARTY_BALANCE_MAX_ATTEMPTS, 3, int, 1, 10,
+        "Max party balance-charge attempts before auto-cancel (ADR-0008)",
     ),
 }
 
@@ -228,3 +248,19 @@ def max_active_holds_per_guardian(db: Session) -> int:
 
 def party_deposit_pct(db: Session) -> int:
     return int(get_value(db, KEY_PARTY_DEPOSIT_PCT))
+
+
+def party_balance_offset_days(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_BALANCE_OFFSET_DAYS))
+
+
+def party_balance_cutoff_hours(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_BALANCE_CUTOFF_HOURS))
+
+
+def party_balance_retry_interval_hours(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_BALANCE_RETRY_INTERVAL_HOURS))
+
+
+def party_balance_max_attempts(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_BALANCE_MAX_ATTEMPTS))

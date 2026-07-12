@@ -143,6 +143,17 @@ class PartyBooking(UUIDPkMixin, TimestampMixin, Base):
     balance_payment_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("payment.id", ondelete="SET NULL"), nullable=True
     )
+    # Balance auto-charge tracking (B3, ADR-0008).
+    balance_captured: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    balance_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_balance_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # The provider payout this party fed (accrued when the balance captures), so a refund
+    # claws back exactly that (ADR-0010 / F-PAY-5).
+    payout_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("payout.id", ondelete="SET NULL"), nullable=True
+    )
     status: Mapped[PartyBookingStatus] = mapped_column(
         Enum(PartyBookingStatus, name="party_booking_status"),
         default=PartyBookingStatus.pending_deposit,

@@ -171,6 +171,7 @@ def test_run_endpoint_requires_admin(client: TestClient, make_admin) -> None:
         "holds_reclaimed",
         "abandoned_checkouts_swept",
         "party_deposits_swept",
+        "party_balances_processed",
         "waitlist_sessions_processed",
         "waitlist_offers_made",
         "waitlist_offers_expired",

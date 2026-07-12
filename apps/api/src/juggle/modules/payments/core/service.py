@@ -109,6 +109,35 @@ def create_payment(
     return payment, intent
 
 
+def record_payment(
+    db: Session,
+    *,
+    guardian_id: uuid.UUID,
+    amount_cents: int,
+    stripe_payment_intent_id: str,
+    purpose: PaymentPurpose,
+    status: PaymentStatus,
+    idempotency_key: str | None = None,
+    currency: str = "aud",
+) -> Payment:
+    """Record a Payment whose PaymentIntent was already created by the caller (e.g. an
+    off-session party balance charge), so no gateway call happens here."""
+    payment = Payment(
+        guardian_id=guardian_id,
+        stripe_payment_intent_id=stripe_payment_intent_id,
+        idempotency_key=idempotency_key,
+        amount_cents=amount_cents,
+        application_fee_cents=0,
+        fee_gst_cents=0,
+        currency=currency,
+        status=status,
+        purpose=purpose,
+    )
+    db.add(payment)
+    db.flush()
+    return payment
+
+
 def find_by_idempotency_key(
     db: Session, *, guardian_id: uuid.UUID, idempotency_key: str
 ) -> Payment | None:
@@ -398,6 +427,23 @@ def adjust_payout_for_refund(
         payout.status = PayoutStatus.reversed
     db.flush()
     return reverse
+
+
+def accrue_party_payout(
+    db: Session, *, organisation_id: uuid.UUID, net_cents: int, scheduled_for: datetime
+) -> Payout:
+    """A standalone provider payout for one party (session_id is None — parties aren't
+    sessions, so these must NOT merge like per-session accruals do)."""
+    payout = Payout(
+        organisation_id=organisation_id,
+        session_id=None,
+        amount_cents=net_cents,
+        status=PayoutStatus.scheduled,
+        scheduled_for=scheduled_for,
+    )
+    db.add(payout)
+    db.flush()
+    return payout
 
 
 def list_org_payouts(
