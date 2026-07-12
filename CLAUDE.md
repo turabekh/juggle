@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Context for Claude Code working in this repository. Read it before making changes, and keep it up to date as the project evolves.
+The single authoritative instructions file for Claude Code in this repository (it supersedes the former `CLAUDE2.md`). Read it before making changes, then **read the latest file in `docs/HANDOFF/`** before starting work. Keep this file up to date as the project evolves — don't add a second instructions file.
 
 ## Project overview
 
@@ -71,6 +71,36 @@ jungler/
 - **Inventory correctness is the product (PRD §12).** Seat holds use row locks / advisory locks with a TTL; booking creation is idempotent; **oversell is impossible by DB constraint** (`bookings_count <= capacity` enforced transactionally), not just by application checks.
 - **Child data is sensitive (PRD §11).** Collect the minimum (first name, DOB, medical/emergency contact); no child surname or photos at MVP; never put child PII in analytics events; guardian-only access.
 - **Types & style:** mypy strict, no `any`/untyped defs; ruff (`E,F,I,UP,B`); named exports; snake_case Python. Keep dependencies minimal.
+
+## Domain invariants (non-negotiable)
+
+State which of these a plan/change touches, and how it's respected. Several are enforced at the DB/query layer, not by trust — keep them that way.
+
+- **INV-1 No oversell / no stranded paid seat.** `catalog.Session.seats_taken` is the only occupancy counter; `confirmed + active/reserved holds ≤ capacity` is enforced transactionally under the session row lock, with the `ck_session_no_oversell` CHECK as the DB backstop. Browsing holds carry a TTL; a checked-out seat is a **firm reservation** (not TTL-reclaimed) resolved only by confirm/cancel/abandoned-sweep (ADR-0005).
+- **INV-2 Money moves only through `payments`** (the gateway Protocol). All Stripe webhooks verify the raw-body signature before parsing and are idempotent via the `stripe_event` UNIQUE(event_id) ledger.
+- **INV-3 Child-data minimisation.** First name, DOB, medical/allergy, emergency contact only — no child surname or photos, ever. Child PII never appears in logs, analytics events, error reports, or LLM prompts.
+- **INV-4 WWCC gating.** A staff member without a current, verified WA Working with Children Check is not assignable to a session roster — enforced by query/expiry, not trust.
+- **INV-5 Refund floor.** A provider-cancelled session ⇒ automatic 100% refund to every booking, and the provider's payout for it is clawed back (decrement if scheduled, Stripe Transfer Reversal if paid).
+- **INV-6 Price display is GST-inclusive** (ACCC component pricing); the platform fee is calculated fee-exclusive and invoiced +GST; provider net = line − fee − gst, per-session rounding (ADR-0002).
+- **INV-7 Time is UTC in storage, `Australia/Perth` at the edge.** WA has no daylight saving — don't import DST assumptions.
+- **INV-8 Availability shown = availability true.** Any surface showing seats-remaining reads the live inventory projection, never a stale cached count.
+- **INV-9 Repo hygiene.** No secrets in the repo; `.env.example` is the contract. Synthetic data only in fixtures/seeds — no real parent/child data.
+- **INV-10 Impersonation is never invisible or anonymous.** Every impersonation token carries the true actor; every action under it is audit-logged; sensitive actions are hard-blocked; the impersonated UI always shows the banner (M7b).
+- **INV-11 Runtime config is governed.** Every `platform_setting` is typed, bounded, versioned, and audit-logged; code reads it only through `config.service` — no hardcoded values for anything §10.1 makes configurable.
+- **INV-12 Scarcity is never fabricated.** Every urgency signal derives from the live inventory projection — no synthetic countdowns/viewer counts/early thresholds.
+- **INV-13 Growth surfaces leak no child PII** — no child names in share links, invites, alerts, digests, or their analytics.
+
+## Process
+
+- **Architectural decisions → `docs/ADR/NNNN-title.md`** (PROPOSED until accepted). Completed milestones/sessions → a handoff in **`docs/HANDOFF/YYYY-MM-DD-<slug>.md`**; **read the latest handoff at the start of a session.** Plans for anything touching money/inventory/child-data → `docs/PLANS/`.
+- **Adversarially review money/inventory/child-data changes before merging** — pressure-test the diff for the invariant it touches (a fresh skeptical pass, e.g. a review subagent), not just green tests. Trust the reviewer over optimism; fix or justify every load-bearing finding.
+- **Verify behaviour, not just `make check`** — exercise the changed flow (the payments track was smoke-tested end-to-end through the API). Don't run data-committing scripts against the shared dev/test DB — use the rolled-back test fixture.
+
+## Git discipline
+
+- **Never push, force-push, tag-push, or merge without explicit approval in the current session.** Commit locally freely on feature branches.
+- **Conventional commits scoped to feature IDs** (`feat(F-PAY-3): …`), branch per feature (`feat/…`), commit at each green step.
+- End commit messages with the `Co-Authored-By: Claude …` trailer; end PR bodies with the Claude Code generated-by line.
 
 ## Commands
 
