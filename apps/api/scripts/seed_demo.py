@@ -254,7 +254,6 @@ def _seed_reviews(
             db,
             payment_id=order.payment_id,
             guardian_id=guardian.id,
-            gateway=payment_gateway,
             email_gateway=email_gateway,
         )
         review = reviews_service.submit_review(
@@ -348,7 +347,6 @@ def _seed_waitlist(
         db,
         payment_id=order.payment_id,
         guardian_id=holder.id,
-        gateway=payment_gateway,
         email_gateway=email_gateway,
     )
     # Settle the accrued payout so this demo row stays out of the global
