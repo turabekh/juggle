@@ -64,6 +64,18 @@ class WebhookAck(BaseModel):
     status: str
 
 
+class ProviderOrderSummary(BaseModel):
+    """One invoiceable order for a provider — the entry point to its tax invoice."""
+
+    payment_id: uuid.UUID
+    ordered_at: datetime
+    session_count: int
+    gross_cents: int
+    commission_cents: int
+    commission_gst_cents: int
+    net_cents: int
+
+
 class TaxInvoiceLine(BaseModel):
     session_id: uuid.UUID
     session_title: str

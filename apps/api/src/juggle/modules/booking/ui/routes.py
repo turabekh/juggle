@@ -135,6 +135,23 @@ def list_my_bookings(
     return service.list_bookings(session, principal.user_id)
 
 
+@router.get("/orders", response_model=list[schemas.ProviderOrderSummary])
+def provider_orders(
+    organisation_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+) -> list[schemas.ProviderOrderSummary]:
+    """A provider's invoiceable orders (member-gated)."""
+    try:
+        return service.provider_orders(
+            session, organisation_id=organisation_id, actor_id=principal.user_id
+        )
+    except service.NotOrgMember as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Not a member of this organisation"
+        ) from exc
+
+
 @router.get("/orders/{payment_id}/tax-invoice", response_model=schemas.TaxInvoiceOut)
 def provider_tax_invoice(
     payment_id: uuid.UUID,

@@ -164,6 +164,32 @@
         </div>
       </section>
 
+      <!-- Tax invoices (PRD §8.4 · F-PAY-6) -->
+      <section v-if="orders.length" class="q-mt-xl">
+        <h2 class="text-h6 q-mb-sm">Tax invoices</h2>
+        <div class="jg-list">
+          <button
+            v-for="o in orders"
+            :key="o.payment_id"
+            type="button"
+            class="jg-card jg-card--hover jg-listrow jg-invrow"
+            @click="openInvoice(o.payment_id)"
+          >
+            <div>
+              <div class="text-weight-600">
+                {{ money(o.commission_cents + o.commission_gst_cents) }} commission + GST
+              </div>
+              <div class="jg-faint text-caption">
+                {{ dayLabel(o.ordered_at) }} ·
+                {{ o.session_count }} {{ o.session_count === 1 ? 'session' : 'sessions' }} ·
+                {{ money(o.gross_cents) }} gross
+              </div>
+            </div>
+            <q-icon name="receipt_long" color="grey-6" />
+          </button>
+        </div>
+      </section>
+
       <!-- Insights (PRD §8.6) -->
       <section v-if="analytics" class="q-mt-xl">
         <h2 class="text-h6 q-mb-sm">Insights</h2>
@@ -263,6 +289,74 @@
         </div>
       </section>
     </template>
+
+    <!-- Tax invoice detail -->
+    <q-dialog v-model="showInvoice">
+      <q-card style="min-width: 480px; max-width: 680px; border-radius: 18px">
+        <q-card-section>
+          <div class="text-h6">Tax invoice</div>
+          <div v-if="invoice" class="jg-faint text-caption">
+            {{ invoice.invoice_number }} · issued {{ dayLabel(invoice.issued_at) }}
+          </div>
+        </q-card-section>
+        <q-card-section v-if="invoice" class="q-pt-none">
+          <div class="row justify-between q-mb-md">
+            <div>
+              <div class="jg-faint text-caption">From (supplier)</div>
+              <div class="text-weight-600">{{ invoice.supplier.name }}</div>
+              <div class="jg-faint text-caption">ABN {{ invoice.supplier.abn || '—' }}</div>
+            </div>
+            <div class="text-right">
+              <div class="jg-faint text-caption">To</div>
+              <div class="text-weight-600">{{ invoice.recipient.name }}</div>
+              <div class="jg-faint text-caption">ABN {{ invoice.recipient.abn || '—' }}</div>
+            </div>
+          </div>
+          <q-markup-table flat dense class="jg-inv">
+            <thead>
+              <tr>
+                <th class="text-left">Session</th>
+                <th class="text-right">Gross</th>
+                <th class="text-right">Commission</th>
+                <th class="text-right">GST</th>
+                <th class="text-right">Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="l in invoice.lines" :key="l.session_id">
+                <td class="text-left">
+                  {{ l.session_title }}
+                  <div class="jg-faint text-caption">{{ dayLabel(l.starts_at) }}</div>
+                </td>
+                <td class="text-right">{{ money(l.gross_cents) }}</td>
+                <td class="text-right">{{ money(l.commission_cents) }}</td>
+                <td class="text-right">{{ money(l.commission_gst_cents) }}</td>
+                <td class="text-right">{{ money(l.net_cents) }}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr class="text-weight-700">
+                <td class="text-left">Total</td>
+                <td class="text-right">{{ money(invoice.totals.gross_cents) }}</td>
+                <td class="text-right">{{ money(invoice.totals.commission_cents) }}</td>
+                <td class="text-right">{{ money(invoice.totals.commission_gst_cents) }}</td>
+                <td class="text-right">{{ money(invoice.totals.net_cents) }}</td>
+              </tr>
+            </tfoot>
+          </q-markup-table>
+          <p class="jg-faint text-caption q-mt-md q-mb-none">
+            Issued by {{ invoice.supplier.name }} for the marketplace commission (a taxable
+            supply). GST shown is on the commission only.
+          </p>
+        </q-card-section>
+        <q-card-section v-else class="row justify-center q-py-lg">
+          <q-spinner color="primary" size="24px" />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Close" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
 
     <!-- Answer a question dialog -->
     <q-dialog v-model="showAnswer">
@@ -388,6 +482,8 @@ import { CATEGORIES, categoryMeta, dayLabel, money, payoutSetupDisplay } from '@
 import type {
   ConnectStatus,
   InsuranceDoc,
+  ProviderOrderSummary,
+  TaxInvoice,
   ListingQuestion,
   Org,
   OrgAnalytics,
@@ -411,6 +507,9 @@ const programs = ref<Program[]>([])
 const wwcc = ref<WwccRecord[]>([])
 const insurance = ref<InsuranceDoc[]>([])
 const payouts = ref<Payout[]>([])
+const orders = ref<ProviderOrderSummary[]>([])
+const showInvoice = ref(false)
+const invoice = ref<TaxInvoice | null>(null)
 const reviews = ref<Review[]>([])
 const analytics = ref<OrgAnalytics | null>(null)
 const questions = ref<ListingQuestion[]>([])
@@ -492,7 +591,23 @@ async function load(): Promise<void> {
     } catch {
       questions.value = []
     }
+    try {
+      orders.value = await api.booking.providerOrders(props.id)
+    } catch {
+      orders.value = [] // non-fatal
+    }
   } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  }
+}
+
+async function openInvoice(paymentId: string): Promise<void> {
+  showInvoice.value = true
+  invoice.value = null
+  try {
+    invoice.value = await api.booking.taxInvoice(paymentId, props.id)
+  } catch (err) {
+    showInvoice.value = false
     $q.notify({ type: 'negative', message: apiError(err) })
   }
 }
@@ -665,6 +780,8 @@ onMounted(async () => {
   color: inherit;
 }
 .jg-comp-abn { display: flex; align-items: center; gap: 10px; }
+.jg-invrow { cursor: pointer; font: inherit; text-align: left; width: 100%; }
+.jg-inv td, .jg-inv th { padding: 6px 8px; }
 .jg-vlist { display: flex; flex-direction: column; gap: 8px; }
 .jg-vrow {
   display: flex;

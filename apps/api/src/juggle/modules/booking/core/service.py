@@ -30,6 +30,7 @@ from juggle.modules.booking.core.schemas import (
     CheckoutChild,
     CheckoutItem,
     OrderOut,
+    ProviderOrderSummary,
     SessionCancelResult,
     TaxInvoiceLine,
     TaxInvoiceOut,
@@ -605,6 +606,48 @@ def _clawback_booking(db: Session, booking: Booking, *, gateway: PaymentGateway)
         gateway=gateway,
         idempotency_key=f"rev-{booking.id}",
     )
+
+
+def provider_orders(
+    db: Session, *, organisation_id: uuid.UUID, actor_id: uuid.UUID
+) -> list[ProviderOrderSummary]:
+    """The org's invoiceable orders (each with a confirmed booking), newest first — the
+    list a provider picks from to open a tax invoice. Member-gated."""
+    if org_service.get_member(db, organisation_id, actor_id) is None:
+        raise NotOrgMember(str(organisation_id))
+    bookings = db.scalars(
+        select(Booking).where(
+            Booking.organisation_id == organisation_id,
+            Booking.status == BookingStatus.confirmed,
+            Booking.payment_id.is_not(None),
+        )
+    ).all()
+    by_payment: dict[uuid.UUID, list[Booking]] = {}
+    for booking in bookings:
+        assert booking.payment_id is not None
+        by_payment.setdefault(booking.payment_id, []).append(booking)
+
+    summaries: list[ProviderOrderSummary] = []
+    for payment_id, order_bookings in by_payment.items():
+        payment = payments_service.get_payment(db, payment_id)
+        if payment is None:
+            continue
+        summaries.append(
+            ProviderOrderSummary(
+                payment_id=payment_id,
+                ordered_at=payment.created_at,
+                session_count=len(order_bookings),
+                gross_cents=sum(
+                    b.commission_cents + b.commission_gst_cents + b.accrued_net_cents
+                    for b in order_bookings
+                ),
+                commission_cents=sum(b.commission_cents for b in order_bookings),
+                commission_gst_cents=sum(b.commission_gst_cents for b in order_bookings),
+                net_cents=sum(b.accrued_net_cents for b in order_bookings),
+            )
+        )
+    summaries.sort(key=lambda s: s.ordered_at, reverse=True)
+    return summaries
 
 
 def provider_tax_invoice(

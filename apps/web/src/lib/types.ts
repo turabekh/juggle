@@ -150,6 +150,48 @@ export interface PaymentConfig {
   publishable_key: string | null
 }
 
+export interface ProviderOrderSummary {
+  payment_id: string
+  ordered_at: string
+  session_count: number
+  gross_cents: number
+  commission_cents: number
+  commission_gst_cents: number
+  net_cents: number
+}
+
+export interface TaxInvoiceLine {
+  session_id: string
+  session_title: string
+  starts_at: string
+  status: string
+  gross_cents: number
+  commission_cents: number
+  commission_gst_cents: number
+  net_cents: number
+}
+
+export interface TaxInvoiceParty {
+  name: string
+  abn: string | null
+}
+
+export interface TaxInvoice {
+  invoice_number: string
+  issued_at: string
+  payment_id: string
+  currency: string
+  supplier: TaxInvoiceParty
+  recipient: TaxInvoiceParty
+  lines: TaxInvoiceLine[]
+  totals: {
+    gross_cents: number
+    commission_cents: number
+    commission_gst_cents: number
+    net_cents: number
+  }
+}
+
 export interface PaymentStatus {
   id: string
   amount_cents: number

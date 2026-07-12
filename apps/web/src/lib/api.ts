@@ -27,6 +27,8 @@ import type {
   Order,
   PaymentConfig,
   PaymentStatus,
+  ProviderOrderSummary,
+  TaxInvoice,
   Org,
   OrgAdmin,
   OrgAnalytics,
@@ -334,6 +336,18 @@ export const api = {
     async calendarIcs(paymentId: string): Promise<string> {
       const { data } = await http.get<string>(`/booking/payments/${paymentId}/calendar.ics`, {
         responseType: 'text',
+      })
+      return data
+    },
+    async providerOrders(organisationId: string): Promise<ProviderOrderSummary[]> {
+      const { data } = await http.get<ProviderOrderSummary[]>('/booking/orders', {
+        params: { organisation_id: organisationId },
+      })
+      return data
+    },
+    async taxInvoice(paymentId: string, organisationId: string): Promise<TaxInvoice> {
+      const { data } = await http.get<TaxInvoice>(`/booking/orders/${paymentId}/tax-invoice`, {
+        params: { organisation_id: organisationId },
       })
       return data
     },

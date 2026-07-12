@@ -65,6 +65,31 @@ def _book_confirm(client: TestClient, guardian: str, session_id: str) -> str:
     return payment_id
 
 
+def test_provider_orders_lists_invoiceable_orders(client: TestClient) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    org_id, session_id = _org_with_session(client, owner)
+    _book_confirm(client, guardian, session_id)
+
+    orders = client.get(
+        "/api/v1/booking/orders", headers=_auth(owner), params={"organisation_id": org_id}
+    ).json()
+    assert len(orders) == 1
+    o = orders[0]
+    assert o["session_count"] == 1
+    assert (o["gross_cents"], o["commission_cents"], o["commission_gst_cents"], o["net_cents"]) == (
+        10000, 1000, 100, 8900,
+    )
+
+
+def test_provider_orders_requires_membership(client: TestClient) -> None:
+    owner, outsider = _signup(client), _signup(client)
+    org_id, _session_id = _org_with_session(client, owner)
+    resp = client.get(
+        "/api/v1/booking/orders", headers=_auth(outsider), params={"organisation_id": org_id}
+    )
+    assert resp.status_code == 403
+
+
 def test_tax_invoice_itemises_commission_and_gst(client: TestClient) -> None:
     owner, guardian = _signup(client), _signup(client)
     org_id, session_id = _org_with_session(client, owner)
