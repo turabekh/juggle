@@ -140,6 +140,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useQuasar } from 'quasar'
+import { useRoute } from 'vue-router'
 
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
@@ -151,6 +152,7 @@ import type { InviteSelfView, PlanOptionView, PublicPlanView } from '@/lib/types
 
 const props = defineProps<{ token: string }>()
 const $q = useQuasar()
+const route = useRoute()
 
 // Private invite page — keep it out of search indexes (INV-13).
 useHead(() => ({ title: "You're invited! · Juggle party vote", noindex: true }))
@@ -288,7 +290,10 @@ async function react(optionId: string, emoji: string): Promise<void> {
 }
 
 onMounted(async () => {
-  inviteToken.value = localStorage.getItem(INVITE_KEY.value)
+  // An emailed invite link carries ?invite=<token> so the guest lands pre-recognised.
+  const fromLink = typeof route.query.invite === 'string' ? route.query.invite : null
+  if (fromLink) localStorage.setItem(INVITE_KEY.value, fromLink)
+  inviteToken.value = fromLink ?? localStorage.getItem(INVITE_KEY.value)
   myVote.value = localStorage.getItem(VOTE_KEY.value)
   try {
     myReactions.value = new Set(JSON.parse(localStorage.getItem(REACT_KEY.value) ?? '[]'))

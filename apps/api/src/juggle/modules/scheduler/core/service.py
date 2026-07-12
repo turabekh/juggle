@@ -191,9 +191,12 @@ def run_due_jobs(
     reminders_sent = _send_reminders(db, now=now, gateway=gateway)
     what_to_bring_sent = _send_what_to_bring(db, now=now, gateway=gateway)
     compliance_expired = org_service.expire_due_compliance(db, today=now.date())
-    # Party Planner (ADR-0011): resolve plans past their deadline, then sweep stale/orphaned ones.
-    plans_resolved = party_planner_service.resolve_due_plans(db, now=now)
+    # Party Planner (ADR-0011): resolve plans past their deadline (announcing the reveal), fire the
+    # low-RSVP / re-vote nudges, sweep stale/orphaned ones, and purge expired guest PII.
+    plans_resolved = party_planner_service.resolve_due_plans(db, now=now, email_gateway=gateway)
+    party_planner_service.send_planner_nudges(db, now=now, email_gateway=gateway)
     plans_swept = party_planner_service.sweep_stale_resolved(db, now=now)
+    plans_purged = party_planner_service.purge_expired_plan_pii(db, now=now)
 
     return JobSummary(
         holds_reclaimed=holds_reclaimed,
@@ -208,4 +211,5 @@ def run_due_jobs(
         compliance_expired=compliance_expired,
         plans_resolved=plans_resolved,
         plans_swept=plans_swept,
+        plans_purged=plans_purged,
     )

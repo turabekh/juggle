@@ -22,6 +22,9 @@ from sqlalchemy.orm import Session
 
 from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.config.core import service as config_service
+from juggle.modules.identity.core import service as identity_service
+from juggle.modules.notifications.core import service as notifications_service
+from juggle.modules.notifications.core.gateway import EmailGateway
 from juggle.modules.parties.core import service as parties_service
 from juggle.modules.parties.core.models import (
     PartyBooking,
@@ -46,6 +49,7 @@ from juggle.modules.party_planner.core.models import (
     PlanVote,
 )
 from juggle.modules.payments.core.gateway import PaymentGateway, PaymentIntentResult
+from juggle.settings import get_settings
 
 # --- Errors ----------------------------------------------------------------
 
@@ -175,6 +179,48 @@ def _lock_plan(db: Session, plan_id: uuid.UUID) -> PartyPlan | None:
 def _require_host(plan: PartyPlan, actor_id: uuid.UUID) -> None:
     if plan.host_user_id != actor_id:
         raise NotPlanHost(str(plan.id))
+
+
+def _share_link(plan: PartyPlan, invite_token: str | None = None) -> str:
+    base = get_settings().public_base_url.rstrip("/")
+    url = f"{base}/parties/plan/{plan.token}"
+    return f"{url}?invite={invite_token}" if invite_token else url
+
+
+def _option_label(db: Session, option: PlanOption | None) -> str:
+    if option is None:
+        return "the top pick"
+    if option.kind is PlanOptionKind.custom:
+        return option.custom_text or "a custom party"
+    package = db.get(PartyPackage, option.package_id) if option.package_id else None
+    return package.name if package is not None else "the party"
+
+
+def _responded_count(db: Session, plan_id: uuid.UUID) -> int:
+    """Approved invites that actually RSVP'd — the real participation metric for the nudge (edge 3),
+    so pre-approved email invites don't mask a silent room."""
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(PlanRsvp)
+            .join(PlanInvite, PlanRsvp.plan_invite_id == PlanInvite.id)
+            .where(
+                PlanInvite.plan_id == plan_id,
+                PlanInvite.status == PlanInviteStatus.approved,
+            )
+        ) or 0
+    )
+
+
+def _approved_invites(db: Session, plan_id: uuid.UUID) -> list[PlanInvite]:
+    return list(
+        db.scalars(
+            select(PlanInvite).where(
+                PlanInvite.plan_id == plan_id,
+                PlanInvite.status == PlanInviteStatus.approved,
+            )
+        )
+    )
 
 
 def _options(db: Session, plan_id: uuid.UUID, *, include_voided: bool = False) -> list[PlanOption]:
@@ -423,9 +469,10 @@ def extend_deadline(
 
 def add_email_invites(
     db: Session, *, plan_id: uuid.UUID, actor_id: uuid.UUID,
-    recipients: list[tuple[str, str]],
+    recipients: list[tuple[str, str]], email_gateway: EmailGateway | None = None,
 ) -> list[PlanInvite]:
-    """Host-entered per-guest invites are trusted → approved immediately (no queue)."""
+    """Host-entered per-guest invites are trusted → approved immediately (no queue). Each guest is
+    emailed a link with their invite token so they land pre-recognised (transactional, INV-13)."""
     plan = _lock_plan(db, plan_id)
     if plan is None:
         raise PlanNotFound(str(plan_id))
@@ -440,6 +487,12 @@ def add_email_invites(
         db.add(invite)
         invites.append(invite)
     db.flush()
+    if email_gateway is not None and plan.token:
+        for invite in invites:
+            notifications_service.notify_planner_invite(
+                db, to_email=invite.email, link=_share_link(plan, invite.token),
+                gateway=email_gateway,
+            )
     return invites
 
 
@@ -511,6 +564,7 @@ def open_rsvp(
     db: Session, *, plan: PartyPlan, parent_name: str, email: str, attending: bool,
     kid_count: int, nickname: str | None, avatar_key: str | None,
     marketing_opt_in: bool, now: datetime | None = None,
+    email_gateway: EmailGateway | None = None,
 ) -> PlanInvite:
     """Open-link self-RSVP. Creates an invite (pending if approval_required) + its RSVP, and
     records marketing consent to the detached, purge-exempt store (edge 7)."""
@@ -530,6 +584,13 @@ def open_rsvp(
     if marketing_opt_in:
         db.add(PlanMarketingConsent(email=email.strip().lower(), source="party_planner_rsvp"))
         db.flush()
+    # Only confirm to already-approved invites (approval_required=False plans). When approval is on
+    # (default), a pending open-link RSVP gets no email — closing an email-bombing vector on this
+    # unauthenticated endpoint (an attacker can't spray confirmations to arbitrary addresses).
+    if email_gateway is not None and invite.status is PlanInviteStatus.approved:
+        notifications_service.notify_planner_rsvp(
+            db, to_email=invite.email, link=_share_link(plan, invite.token), gateway=email_gateway,
+        )
     return invite
 
 
@@ -665,9 +726,12 @@ def _pick_winner(db: Session, plan: PartyPlan) -> uuid.UUID | None:
     return None  # genuine tie — reveal says "host is choosing"
 
 
-def resolve_due_plans(db: Session, *, now: datetime | None = None) -> int:
+def resolve_due_plans(
+    db: Session, *, now: datetime | None = None, email_gateway: EmailGateway | None = None
+) -> int:
     """Flip open plans whose deadline has passed to resolved and compute the winner. Idempotent
-    (only open→resolved); clock-controlled via ``now`` for tests."""
+    (only open→resolved); clock-controlled via ``now`` for tests. Announces the reveal to every
+    approved invitee once (``announced_at`` marker)."""
     now = now or _now()
     due = db.scalars(
         select(PartyPlan.id).where(
@@ -683,8 +747,138 @@ def resolve_due_plans(db: Session, *, now: datetime | None = None) -> int:
         plan.status = PlanStatus.resolved
         plan.resolved_at = now
         db.flush()
+        if email_gateway is not None and plan.announced_at is None:
+            winner = db.get(PlanOption, plan.winning_option_id) if plan.winning_option_id else None
+            label = (
+                _option_label(db, winner) if winner is not None
+                else "a tie — the host will decide"
+            )
+            for invite in _approved_invites(db, plan.id):
+                notifications_service.notify_planner_reveal(
+                    db, to_email=invite.email, winner_label=label,
+                    link=_share_link(plan, invite.token), gateway=email_gateway,
+                )
+            plan.announced_at = now
+            db.flush()
         resolved += 1
     return resolved
+
+
+def send_planner_nudges(
+    db: Session, *, now: datetime | None = None, email_gateway: EmailGateway
+) -> tuple[int, int]:
+    """Two once-only scheduler nudges (ADR-0011 edges 3 & 6): a T-24h low-participation nudge to the
+    host, and a re-vote nudge to anyone who voted for an option the host later voided. Returns
+    (low_rsvp_sent, revote_sent). The re-vote path is the one place vote→invite is dereferenced —
+    an internal use only; it never surfaces on any host/admin view."""
+    now = now or _now()
+    threshold = config_service.party_planner_low_rsvp_threshold(db)
+    low_sent = 0
+    revote_sent = 0
+
+    # Low-RSVP nudge: open plans inside the last 24h with too few RSVPs, not yet nudged.
+    open_plans = db.scalars(
+        select(PartyPlan.id).where(PartyPlan.status == PlanStatus.open)
+    ).all()
+    for plan_id in open_plans:
+        plan = _lock_plan(db, plan_id)
+        if plan is None or plan.status is not PlanStatus.open or plan.deadline_at is None:
+            continue
+        if plan.low_rsvp_nudge_sent_at is not None or now < plan.deadline_at - timedelta(hours=24):
+            continue
+        if now >= plan.deadline_at:
+            continue
+        responded = _responded_count(db, plan_id)
+        if responded < threshold:
+            host = identity_service.get_user(db, plan.host_user_id)
+            if host is not None:
+                notifications_service.notify_planner_low_rsvp(
+                    db, user_id=host.id, to_email=host.email, rsvp_count=responded,
+                    link=_share_link(plan), gateway=email_gateway,
+                )
+                low_sent += 1
+        plan.low_rsvp_nudge_sent_at = now
+        db.flush()
+
+    # Re-vote nudge: voided options with votes from approved invites, not yet nudged.
+    stale_options = db.scalars(
+        select(PlanOption).where(
+            PlanOption.voided.is_(True), PlanOption.revote_nudge_sent_at.is_(None)
+        )
+    ).all()
+    for option in stale_options:
+        plan = db.get(PartyPlan, option.plan_id)
+        if plan is None or plan.status is not PlanStatus.open:
+            continue
+        voters = db.scalars(
+            select(PlanInvite)
+            .join(PlanVote, PlanVote.plan_invite_id == PlanInvite.id)
+            .where(
+                PlanVote.plan_option_id == option.id,
+                PlanInvite.status == PlanInviteStatus.approved,
+            )
+        ).all()
+        for invite in voters:
+            notifications_service.notify_planner_revote(
+                db, to_email=invite.email, link=_share_link(plan, invite.token),
+                gateway=email_gateway,
+            )
+            revote_sent += 1
+        option.revote_nudge_sent_at = now
+        db.flush()
+
+    return low_sent, revote_sent
+
+
+def _event_reference_date(db: Session, plan: PartyPlan) -> datetime | None:
+    """The date the party effectively happened (or would have) — the purge clock (edge 7)."""
+    if plan.winning_option_id is not None:
+        option = db.get(PlanOption, plan.winning_option_id)
+        if option is not None and option.slot_id is not None:
+            slot = db.get(PartySlot, option.slot_id)
+            if slot is not None:
+                return slot.starts_at
+    latest: datetime | None = None
+    for opt in _options(db, plan.id, include_voided=True):
+        if opt.slot_id and (slot := db.get(PartySlot, opt.slot_id)) is not None:
+            latest = slot.starts_at if latest is None else max(latest, slot.starts_at)
+    # Floor on created_at so a slot-less/abandoned draft still purges (never retained forever).
+    return latest or plan.resolved_at or plan.created_at
+
+
+def purge_expired_plan_pii(db: Session, *, now: datetime | None = None) -> int:
+    """Anonymise guest PII N days after the event (edge 7). Anonymises **in place** (rather than
+    deleting) so aggregate vote/reaction counts survive PII-free; the detached marketing consent is
+    never touched. Idempotent via ``purged_at``. Clock-controlled via ``now`` for tests."""
+    now = now or _now()
+    horizon = timedelta(days=config_service.party_planner_purge_days(db))
+    candidates = db.scalars(
+        select(PartyPlan.id).where(PartyPlan.purged_at.is_(None))
+    ).all()
+    purged = 0
+    for plan_id in candidates:
+        plan = _lock_plan(db, plan_id)
+        if plan is None or plan.purged_at is not None:
+            continue
+        event_date = _event_reference_date(db, plan)
+        if event_date is None or now < event_date + horizon:
+            continue
+        emails: list[str] = []
+        for invite in db.scalars(select(PlanInvite).where(PlanInvite.plan_id == plan_id)):
+            if invite.email:
+                emails.append(invite.email)
+            invite.email = ""
+            invite.parent_name = "(removed)"
+            rsvp = db.scalar(select(PlanRsvp).where(PlanRsvp.plan_invite_id == invite.id))
+            if rsvp is not None:
+                rsvp.nickname = None
+                rsvp.avatar_key = None
+        # Also scrub the guest address from the transactional planner delivery logs (edge 7).
+        notifications_service.purge_planner_recipients(db, emails=emails)
+        plan.purged_at = now
+        db.flush()
+        purged += 1
+    return purged
 
 
 def sweep_stale_resolved(db: Session, *, now: datetime | None = None) -> int:
@@ -742,7 +936,7 @@ def _resolution_passed(db: Session, plan: PartyPlan, now: datetime) -> bool:
 def confirm_booking(
     db: Session, *, plan_id: uuid.UUID, actor_id: uuid.UUID, gateway: PaymentGateway,
     option_id: uuid.UUID | None = None, headcount: int | None = None,
-    now: datetime | None = None,
+    now: datetime | None = None, email_gateway: EmailGateway | None = None,
 ) -> tuple[PartyPlan, PartyBooking, PaymentIntentResult]:
     """Book the winning (or host-overridden) PACKAGE option through parties.book_slot. Serialised
     on the plan row so a double-submit can't create two bookings/deposits (critic #1). Returns the
@@ -754,6 +948,7 @@ def confirm_booking(
     _require_host(plan, actor_id)
     if plan.status is not PlanStatus.resolved:
         raise PlanNotResolved(str(plan_id))
+    announced_winner = plan.winning_option_id  # what the invitees were told (None = tie)
     chosen_id = option_id or plan.winning_option_id
     if chosen_id is None:
         raise OptionNotEligible("no winner selected (tie) — choose an option")
@@ -774,6 +969,17 @@ def confirm_booking(
     plan.booking_id = booking.id
     plan.status = PlanStatus.booked
     db.flush()
+    # If the host overrode a real announced winner, tell the guests it changed (edge 4).
+    if (
+        email_gateway is not None and announced_winner is not None
+        and option.id != announced_winner
+    ):
+        label = _option_label(db, option)
+        for invite in _approved_invites(db, plan.id):
+            notifications_service.notify_planner_change(
+                db, to_email=invite.email, new_label=label,
+                link=_share_link(plan, invite.token), gateway=email_gateway,
+            )
     return plan, booking, intent
 
 

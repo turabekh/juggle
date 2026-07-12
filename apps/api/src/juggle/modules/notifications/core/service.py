@@ -26,6 +26,12 @@ KIND_WHAT_TO_BRING = "what_to_bring"
 KIND_SEAT_UNAVAILABLE_REFUND = "seat_unavailable_refund"
 KIND_PARTY_PAYMENT_ACTION = "party_payment_action"
 KIND_PARTY_CANCELLED = "party_cancelled"
+KIND_PLANNER_INVITE = "planner_invite"
+KIND_PLANNER_RSVP = "planner_rsvp_confirmation"
+KIND_PLANNER_REVEAL = "planner_reveal"
+KIND_PLANNER_CHANGE = "planner_change_of_plans"
+KIND_PLANNER_LOW_RSVP = "planner_low_rsvp"
+KIND_PLANNER_REVOTE = "planner_revote"
 
 
 def _money(cents: int) -> str:
@@ -303,6 +309,114 @@ def notify_session_reminder(
         subject=subject,
         detail={"window": window},
     )
+
+
+# --- Party Planner (ADR-0011) — all transactional; no child PII in any of these (INV-13) ----
+
+def notify_planner_invite(
+    db: Session, *, to_email: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "You're invited to help pick a party! 🎉"
+    body = (
+        "You've been invited to vote on a kids' birthday party.\n\n"
+        f"RSVP and cast your vote here: {link}\n\n"
+        "Powered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_INVITE,
+                   subject=subject, detail={})
+
+
+def notify_planner_rsvp(
+    db: Session, *, to_email: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "Thanks for your RSVP 🎈"
+    body = (
+        "Thanks for RSVPing! You can change your vote any time before voting closes:\n\n"
+        f"{link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_RSVP,
+                   subject=subject, detail={})
+
+
+def notify_planner_reveal(
+    db: Session, *, to_email: str, winner_label: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "🎊 The party's decided!"
+    body = (
+        f"The votes are in — the party is: {winner_label}.\n\n"
+        f"See the details: {link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_REVEAL,
+                   subject=subject, detail={})
+
+
+def notify_planner_change(
+    db: Session, *, to_email: str, new_label: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "Change of plans for the party"
+    body = (
+        f"The host has updated the party — it's now: {new_label}.\n\n"
+        f"See the details: {link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_CHANGE,
+                   subject=subject, detail={})
+
+
+def notify_planner_low_rsvp(
+    db: Session, *, user_id: uuid.UUID, to_email: str, rsvp_count: int, link: str,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "Your party vote could use a few more RSVPs"
+    body = (
+        f"So far {rsvp_count} guest(s) have RSVP'd to your party vote. Voting closes soon — "
+        "share the link again, or extend the deadline from your dashboard:\n\n"
+        f"{link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=user_id, to_email=to_email, kind=KIND_PLANNER_LOW_RSVP,
+                   subject=subject, detail={"rsvp_count": rsvp_count})
+
+
+def notify_planner_revote(
+    db: Session, *, to_email: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "One of the party options changed — re-vote?"
+    body = (
+        "An option you voted for was removed from the party vote. Pop back and pick another:\n\n"
+        f"{link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_REVOTE,
+                   subject=subject, detail={})
+
+
+_PLANNER_GUEST_KINDS = (
+    KIND_PLANNER_INVITE, KIND_PLANNER_RSVP, KIND_PLANNER_REVEAL,
+    KIND_PLANNER_CHANGE, KIND_PLANNER_REVOTE,
+)
+
+
+def purge_planner_recipients(db: Session, *, emails: list[str]) -> int:
+    """Scrub guest addresses from the transactional planner delivery logs at purge time (edge 7).
+    Only guest-facing kinds are touched — the host's own low-RSVP nudge log is left intact."""
+    if not emails:
+        return 0
+    rows = list(
+        db.scalars(
+            select(NotificationLog).where(
+                NotificationLog.kind.in_(_PLANNER_GUEST_KINDS),
+                NotificationLog.to_email.in_(emails),
+            )
+        )
+    )
+    for row in rows:
+        row.to_email = ""
+    db.flush()
+    return len(rows)
 
 
 def list_for_user(db: Session, user_id: uuid.UUID) -> list[NotificationLog]:

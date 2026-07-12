@@ -18,3 +18,4 @@ class JobSummary(BaseModel):
     compliance_expired: int
     plans_resolved: int = 0
     plans_swept: int = 0
+    plans_purged: int = 0

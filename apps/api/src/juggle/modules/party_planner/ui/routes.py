@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from juggle.db import get_session
 from juggle.deps import CurrentPrincipal
 from juggle.modules.flags.core import service as flags_service
+from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
 from juggle.modules.parties.core import service as parties_service
 from juggle.modules.party_planner.core import schemas, service
 from juggle.modules.party_planner.core.models import PlanInviteStatus
@@ -22,6 +23,7 @@ from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gat
 
 SessionDep = Annotated[Session, Depends(get_session)]
 GatewayDep = Annotated[PaymentGateway, Depends(get_payment_gateway)]
+EmailGatewayDep = Annotated[EmailGateway, Depends(get_email_gateway)]
 
 _GENERIC_404 = HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
 
@@ -207,12 +209,12 @@ def extend_deadline(
 @router.post("/plans/{plan_id}/invites", response_model=schemas.PlanView)
 def add_invites(
     plan_id: uuid.UUID, body: schemas.EmailInvitesIn,
-    principal: CurrentPrincipal, session: SessionDep,
+    principal: CurrentPrincipal, session: SessionDep, email_gateway: EmailGatewayDep,
 ) -> schemas.PlanView:
     try:
         service.add_email_invites(
             session, plan_id=plan_id, actor_id=principal.user_id,
-            recipients=[(i.email, i.name) for i in body.invites],
+            recipients=[(i.email, i.name) for i in body.invites], email_gateway=email_gateway,
         )
     except Exception as exc:
         raise _map_host_error(exc) from exc
@@ -263,11 +265,12 @@ def block_invite(
 def confirm_booking(
     plan_id: uuid.UUID, body: schemas.ConfirmIn,
     principal: CurrentPrincipal, session: SessionDep, gateway: GatewayDep,
+    email_gateway: EmailGatewayDep,
 ) -> schemas.PlanView:
     try:
         _plan, booking, intent = service.confirm_booking(
             session, plan_id=plan_id, actor_id=principal.user_id, gateway=gateway,
-            option_id=body.option_id, headcount=body.headcount,
+            option_id=body.option_id, headcount=body.headcount, email_gateway=email_gateway,
         )
     except Exception as exc:
         raise _map_host_error(exc) from exc
@@ -294,7 +297,8 @@ def public_plan(plan_token: str, session: SessionDep) -> schemas.PublicPlanView:
     status_code=status.HTTP_201_CREATED, response_model=schemas.InviteCreatedOut,
 )
 def open_rsvp(
-    plan_token: str, body: schemas.OpenRsvpIn, request: Request, session: SessionDep
+    plan_token: str, body: schemas.OpenRsvpIn, request: Request, session: SessionDep,
+    email_gateway: EmailGatewayDep,
 ) -> schemas.InviteCreatedOut:
     # Honeypot: silently accept-and-drop bot submissions with a plausible (unpersisted) receipt.
     if body.website:
@@ -309,6 +313,7 @@ def open_rsvp(
             session, plan=plan, parent_name=body.parent_name, email=body.email,
             attending=body.attending, kid_count=body.kid_count, nickname=body.nickname,
             avatar_key=body.avatar_key, marketing_opt_in=body.marketing_opt_in,
+            email_gateway=email_gateway,
         )
     except service.RateLimited as exc:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many requests") from exc

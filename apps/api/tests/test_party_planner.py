@@ -16,8 +16,16 @@ from sqlalchemy.orm import Session
 
 from juggle.modules.config.core import service as config_service
 from juggle.modules.flags.core import service as flags_service
+from juggle.modules.notifications.core.gateway import FakeEmailGateway
+from juggle.modules.notifications.core.models import NotificationLog
 from juggle.modules.party_planner.core import service as planner_service
-from juggle.modules.party_planner.core.models import PlanMarketingConsent, PlanVote
+from juggle.modules.party_planner.core.models import (
+    PartyPlan,
+    PlanInvite,
+    PlanMarketingConsent,
+    PlanVote,
+)
+from juggle.modules.payments.core.gateway import FakeGateway
 
 PREFIX = "/api/v1/party-planner"
 
@@ -537,6 +545,158 @@ def test_reaction_rejects_unknown_emoji(
     opt = next(o["id"] for o in view["options"] if o["kind"] == "package")
     resp = client.put(f"{PREFIX}/invite/{inv}/react", json={"option_id": opt, "emoji": "💣"})
     assert resp.status_code == 400
+
+
+# --- Milestone D: lifecycle notifications + purge --------------------------
+
+
+def _approve_and_vote(client: TestClient, pid: str, token: str, host: str, *,
+                      email: str) -> tuple[str, str]:
+    """RSVP a guest, approve them, vote the first package option. Returns (invite_token, opt)."""
+    inv = _rsvp(client, token, email=email)
+    view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
+    client.post(f"{PREFIX}/plans/{pid}/invites/{view['invites'][0]['id']}/approve",
+                headers=_auth(host))
+    opt = next(o["id"] for o in view["options"] if o["kind"] == "package")
+    client.put(f"{PREFIX}/invite/{inv}/vote", json={"option_id": opt})
+    return inv, opt
+
+
+def test_reveal_emailed_to_approved_invitees(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots)
+    pid, token = opened["id"], opened["share_token"]
+    _approve_and_vote(client, pid, token, host, email="reveal-guest@example.com")
+
+    later = datetime.now(UTC) + timedelta(days=3)
+    gw = FakeEmailGateway()
+    planner_service.resolve_due_plans(db, now=later, email_gateway=gw)
+    assert any(m["to"] == "reveal-guest@example.com" and "decided" in (m["subject"] or "").lower()
+               for m in gw.outbox)
+    # Idempotent — a second resolve pass doesn't re-announce.
+    gw2 = FakeEmailGateway()
+    planner_service.resolve_due_plans(db, now=later, email_gateway=gw2)
+    assert gw2.outbox == []
+
+
+def test_override_emails_change_of_plans(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots)
+    pid, token = opened["id"], opened["share_token"]
+    _inv, winner_opt = _approve_and_vote(client, pid, token, host, email="chg@example.com")
+    planner_service.resolve_due_plans(db, now=datetime.now(UTC) + timedelta(days=3))
+
+    view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
+    other_opt = next(o["id"] for o in view["options"]
+                     if o["kind"] == "package" and o["id"] != winner_opt)
+    host_id = db.get(PartyPlan, uuid.UUID(pid)).host_user_id  # type: ignore[union-attr]
+    gw = FakeEmailGateway()
+    planner_service.confirm_booking(
+        db, plan_id=uuid.UUID(pid), actor_id=host_id, gateway=FakeGateway(),
+        option_id=uuid.UUID(other_opt), headcount=10, email_gateway=gw,
+    )
+    assert any(m["to"] == "chg@example.com" and "change of plans" in (m["subject"] or "").lower()
+               for m in gw.outbox)
+
+
+def test_low_rsvp_nudge_fires_once(client: TestClient, db: Session, flag_on: None) -> None:
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots)  # deadline +2 days, 0 RSVPs
+    _ = opened
+    within_24h = datetime.now(UTC) + timedelta(days=2) - timedelta(hours=12)
+    gw = FakeEmailGateway()
+    low, _rev = planner_service.send_planner_nudges(db, now=within_24h, email_gateway=gw)
+    assert low == 1 and any("RSVP" in (m["subject"] or "") for m in gw.outbox)
+    # Marker set → no repeat.
+    gw2 = FakeEmailGateway()
+    low2, _ = planner_service.send_planner_nudges(db, now=within_24h, email_gateway=gw2)
+    assert low2 == 0
+
+
+def test_revote_nudge_emails_voters_of_removed_option(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots)
+    pid, token = opened["id"], opened["share_token"]
+    _inv, opt = _approve_and_vote(client, pid, token, host, email="voter@example.com")
+    client.request("DELETE", f"{PREFIX}/plans/{pid}/options/{opt}", headers=_auth(host))
+
+    gw = FakeEmailGateway()
+    _low, revote = planner_service.send_planner_nudges(db, now=datetime.now(UTC), email_gateway=gw)
+    assert revote == 1
+    assert any(m["to"] == "voter@example.com" and "re-vote" in (m["subject"] or "").lower()
+               for m in gw.outbox)
+
+
+def test_purge_anonymises_pii_but_keeps_vote_counts(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)  # slot ~12 days out
+    opened = _build_open_plan(client, host, package_id, slots)
+    pid, token = opened["id"], opened["share_token"]
+    inv, _opt = _approve_and_vote(client, pid, token, host, email="purge-me@example.com")
+    _ = inv
+    planner_service.resolve_due_plans(db, now=datetime.now(UTC) + timedelta(days=3))
+    client.post(f"{PREFIX}/plans/{pid}/confirm", headers=_auth(host), json={"headcount": 10})
+
+    votes_before = db.scalar(select(func.count()).select_from(PlanVote))
+    # Well past the event date + purge horizon (30 days).
+    purged = planner_service.purge_expired_plan_pii(db, now=datetime.now(UTC) + timedelta(days=60))
+    assert purged >= 1
+    invite = db.scalar(select(PlanInvite).where(PlanInvite.plan_id == uuid.UUID(pid)))
+    assert invite is not None and invite.email == "" and invite.parent_name == "(removed)"
+    plan = db.get(PartyPlan, uuid.UUID(pid))
+    assert plan is not None and plan.purged_at is not None
+    # Aggregate vote counts survive the PII purge (anonymise-in-place).
+    assert db.scalar(select(func.count()).select_from(PlanVote)) == votes_before
+
+
+def test_abandoned_draft_with_invites_still_purges(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    # A slot-less draft (host emailed invites then abandoned it) must not retain PII forever (B1).
+    host = _signup(client)
+    plan = client.post(f"{PREFIX}/plans", headers=_auth(host), json={}).json()
+    pid = plan["id"]
+    client.post(f"{PREFIX}/plans/{pid}/invites", headers=_auth(host),
+                json={"invites": [{"email": "abandoned@example.com", "name": "Sam"}]})
+    purged = planner_service.purge_expired_plan_pii(db, now=datetime.now(UTC) + timedelta(days=60))
+    assert purged >= 1
+    invite = db.scalar(select(PlanInvite).where(PlanInvite.plan_id == uuid.UUID(pid)))
+    assert invite is not None and invite.email == ""
+    # The guest address is also scrubbed from the transactional planner delivery log (S1).
+    remaining = db.scalar(
+        select(func.count()).select_from(NotificationLog)
+        .where(NotificationLog.to_email == "abandoned@example.com")
+    )
+    assert remaining == 0
+
+
+def test_low_rsvp_nudge_counts_actual_responders_not_email_invites(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    # Pre-approved email invites must not mask a silent room (S2).
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots)
+    pid = opened["id"]
+    client.post(f"{PREFIX}/plans/{pid}/invites", headers=_auth(host), json={"invites": [
+        {"email": f"g{i}@example.com", "name": "G"} for i in range(6)
+    ]})  # 6 approved invites, but zero RSVPs
+    within_24h = datetime.now(UTC) + timedelta(days=2) - timedelta(hours=12)
+    gw = FakeEmailGateway()
+    low, _rev = planner_service.send_planner_nudges(db, now=within_24h, email_gateway=gw)
+    assert low == 1  # fires despite 6 approved email invites, because nobody RSVP'd
 
 
 def test_non_host_cannot_view_plan(client: TestClient, db: Session, flag_on: None) -> None:
