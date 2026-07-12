@@ -51,7 +51,3 @@ class ConnectStatusOut(BaseModel):
 
 class RefreshIn(BaseModel):
     organisation_id: uuid.UUID
-
-
-class WebhookAck(BaseModel):
-    status: str

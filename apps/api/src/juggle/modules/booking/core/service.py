@@ -307,26 +307,11 @@ def checkout(
     return _order_view(db, payment, client_secret=intent.client_secret)
 
 
-def confirm(
-    db: Session,
-    *,
-    payment_id: uuid.UUID,
-    guardian_id: uuid.UUID,
-    gateway: PaymentGateway,
-    email_gateway: EmailGateway,
-) -> OrderOut:
-    # Row-lock the payment so a concurrent abandoned-sweep can't flip it to failed on a
-    # stale read after we've decided to confirm (ADR-0005 §3). Under the lock the status
-    # is authoritative: if the sweep already failed it, the pending guard below rejects.
-    payment = payments_service.get_payment_for_update(db, payment_id)
-    if payment is None or payment.guardian_id != guardian_id:
-        raise PaymentNotFound(str(payment_id))
-    if payment.status is PaymentStatus.succeeded:
-        return _order_view(db, payment)
-    if payment.status is not PaymentStatus.pending:
-        raise PaymentNotPending(str(payment_id))
-
-    payments_service.mark_succeeded(db, payment, gateway=gateway)
+def _settle_confirmed(db: Session, payment: Payment, *, email_gateway: EmailGateway) -> None:
+    """Record an already-succeeded payment as a confirmed order: consume the reserved
+    seats, email the confirmation, and accrue each provider's payout. Shared by the
+    synchronous confirm endpoint and the payment_intent.succeeded webhook (ADR-0005)."""
+    payments_service.mark_succeeded(db, payment)
     events_service.record(
         db, event_type="checkout_completed", props={"payment_id": str(payment.id)}
     )
@@ -372,7 +357,144 @@ def confirm(
             net_cents=payments_service.provider_net_cents(gross, fee_rate, gst_rate),
             scheduled_for=session_obj.ends_at + timedelta(days=delay_days),
         )
+
+
+def confirm(
+    db: Session,
+    *,
+    payment_id: uuid.UUID,
+    guardian_id: uuid.UUID,
+    email_gateway: EmailGateway,
+) -> OrderOut:
+    """Synchronous confirm — FakeGateway/test path only (ADR-0005 §5). Real Stripe
+    confirmation is webhook-driven via ``settle_payment_succeeded``.
+
+    Row-lock the payment so a concurrent abandoned-sweep can't flip it to failed on a
+    stale read after we've decided to confirm (ADR-0005 §3). Under the lock the status
+    is authoritative: if the sweep already failed it, the pending guard below rejects."""
+    payment = payments_service.get_payment_for_update(db, payment_id)
+    if payment is None or payment.guardian_id != guardian_id:
+        raise PaymentNotFound(str(payment_id))
+    if payment.status is PaymentStatus.succeeded:
+        return _order_view(db, payment)
+    if payment.status is not PaymentStatus.pending:
+        raise PaymentNotPending(str(payment_id))
+
+    _settle_confirmed(db, payment, email_gateway=email_gateway)
     return _order_view(db, payment)
+
+
+def _reservation_is_firm(db: Session, payment: Payment) -> bool:
+    """Is every seat for this order still firmly reserved? False if any booking was
+    cancelled/refunded, its session cancelled, or its hold released (the seat is gone)."""
+    for booking in _bookings_for_payment(db, payment.id):
+        if booking.status not in (BookingStatus.pending, BookingStatus.confirmed):
+            return False
+        session_obj = db.get(CatalogSession, booking.session_id)
+        if session_obj is None or session_obj.status is SessionStatus.cancelled:
+            return False
+        if booking.seat_hold_id is not None:
+            hold = db.get(SeatHold, booking.seat_hold_id)
+            if hold is None or hold.status not in (
+                SeatHoldStatus.active,
+                SeatHoldStatus.reserved,
+                SeatHoldStatus.consumed,
+            ):
+                return False
+    return True
+
+
+def _auto_refund_lost_seat(
+    db: Session, payment: Payment, *, gateway: PaymentGateway, email_gateway: EmailGateway
+) -> None:
+    """The charge succeeded but the seat is gone (session cancelled / order already
+    settled elsewhere) — refund in full, release any residual seats, notify (ADR-0005 §3)."""
+    payments_service.refund(db, payment, gateway=gateway)
+    for booking in _bookings_for_payment(db, payment.id):
+        if booking.seat_hold_id is not None:
+            inventory_service.force_release(db, hold_id=booking.seat_hold_id)
+        booking.status = BookingStatus.refunded
+    db.flush()
+    guardian = identity_service.get_user(db, payment.guardian_id)
+    if guardian is not None:
+        notifications_service.notify_seat_unavailable_refund(
+            db,
+            user_id=guardian.id,
+            to_email=guardian.email,
+            total_cents=payment.amount_cents,
+            gateway=email_gateway,
+        )
+    events_service.record(
+        db, event_type="checkout_seat_lost_refunded", props={"payment_id": str(payment.id)}
+    )
+
+
+def settle_payment_succeeded(
+    db: Session, *, intent_id: str, gateway: PaymentGateway, email_gateway: EmailGateway
+) -> None:
+    """payment_intent.succeeded: the source of truth for confirmation (ADR-0005 §3).
+    Row-locks the payment, then confirms if the reservation is still firm, else
+    auto-refunds the lost seat. Idempotent on redelivery."""
+    payment = payments_service.get_payment_by_intent(db, intent_id, for_update=True)
+    if payment is None or payment.status in (
+        PaymentStatus.succeeded,
+        PaymentStatus.refunded,
+    ):
+        return  # unknown PI, or already settled/refunded — nothing to do
+    if payment.status is PaymentStatus.pending and _reservation_is_firm(db, payment):
+        _settle_confirmed(db, payment, email_gateway=email_gateway)
+    else:
+        _auto_refund_lost_seat(db, payment, gateway=gateway, email_gateway=email_gateway)
+
+
+def settle_payment_canceled(db: Session, *, intent_id: str) -> None:
+    """payment_intent.canceled: a terminal outcome — release the seats and fail the
+    order (ADR-0005 §4). Idempotent; a non-pending payment is left untouched."""
+    payment = payments_service.get_payment_by_intent(db, intent_id, for_update=True)
+    if payment is None or payment.status is not PaymentStatus.pending:
+        return
+    for booking in _bookings_for_payment(db, payment.id):
+        booking.status = BookingStatus.cancelled
+        if booking.seat_hold_id is not None:
+            inventory_service.force_release(db, hold_id=booking.seat_hold_id)
+    payments_service.mark_failed(db, payment)
+    db.flush()
+    events_service.record(
+        db, event_type="checkout_canceled", props={"payment_id": str(payment.id)}
+    )
+
+
+def handle_stripe_webhook(
+    db: Session,
+    *,
+    payload: bytes,
+    sig_header: str,
+    secret: str,
+    gateway: PaymentGateway,
+    email_gateway: EmailGateway,
+) -> str:
+    """The single Stripe webhook sink. Verifies the raw-body signature and dedupes via
+    the stripe_event ledger (both payments primitives), then dispatches: account.updated
+    → payments (Connect flags); payment_intent.* → order settlement. One transaction per
+    event (INV-2); payment_failed is non-terminal (ADR-0005 §4)."""
+    event = payments_service.verify_event(payload, sig_header, secret)
+    if not payments_service.record_event(db, event.id, event.type):
+        return "duplicate"
+    obj = event.data_object
+    if event.type == "account.updated":
+        payments_service.apply_account_updated(
+            db,
+            account_id=str(obj["id"]),
+            charges_enabled=bool(obj["charges_enabled"]),
+            payouts_enabled=bool(obj["payouts_enabled"]),
+        )
+    elif event.type == "payment_intent.succeeded":
+        settle_payment_succeeded(
+            db, intent_id=str(obj["id"]), gateway=gateway, email_gateway=email_gateway
+        )
+    elif event.type == "payment_intent.canceled":
+        settle_payment_canceled(db, intent_id=str(obj["id"]))
+    return "ok"
 
 
 def cancel(db: Session, *, payment_id: uuid.UUID, guardian_id: uuid.UUID) -> OrderOut:
@@ -458,7 +580,7 @@ def refund_order(
 ) -> OrderOut:
     """Refund a whole order (admin bookings-console action): refund the payment,
     release every seat, and mark the bookings refunded. Idempotent."""
-    payment = payments_service.get_payment(db, payment_id)
+    payment = payments_service.get_payment_for_update(db, payment_id)
     if payment is None:
         raise PaymentNotFound(str(payment_id))
     if payment.status is PaymentStatus.refunded:
@@ -521,7 +643,7 @@ def cancel_session(
     # Refund each distinct paid payment once; fail still-pending ones.
     refunded = 0
     for payment_id in {b.payment_id for b in bookings if b.payment_id is not None}:
-        payment = payments_service.get_payment(db, payment_id)
+        payment = payments_service.get_payment_for_update(db, payment_id)
         if payment is None:
             continue
         if payment.status is PaymentStatus.succeeded:

@@ -111,7 +111,7 @@ def test_account_updated_webhook_sets_flags(
                                 "payouts_enabled": True}},
         }
     )
-    resp = client.post("/api/v1/payments/webhook", content=body, headers=headers)
+    resp = client.post("/api/v1/booking/stripe/webhook", content=body, headers=headers)
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
@@ -140,8 +140,8 @@ def test_webhook_is_idempotent(
                                 "payouts_enabled": True}},
         }
     )
-    first = client.post("/api/v1/payments/webhook", content=body, headers=headers)
-    second = client.post("/api/v1/payments/webhook", content=body, headers=headers)
+    first = client.post("/api/v1/booking/stripe/webhook", content=body, headers=headers)
+    second = client.post("/api/v1/booking/stripe/webhook", content=body, headers=headers)
     assert first.json()["status"] == "ok"
     assert second.json()["status"] == "duplicate"
     # Flags remain correctly set after the redelivery (no double-apply, no rollback).
@@ -155,7 +155,7 @@ def test_webhook_is_idempotent(
 def test_webhook_rejects_bad_signature(client: TestClient, webhook_secret: None) -> None:
     body = json.dumps({"id": "evt_x", "type": "account.updated", "data": {"object": {}}}).encode()
     resp = client.post(
-        "/api/v1/payments/webhook", content=body,
+        "/api/v1/booking/stripe/webhook", content=body,
         headers={"Stripe-Signature": "t=1,v1=deadbeef"},
     )
     assert resp.status_code == 400

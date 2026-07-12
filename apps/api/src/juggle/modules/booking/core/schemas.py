@@ -57,3 +57,7 @@ class SessionCancelResult(BaseModel):
     cancelled_bookings: int
     refunded_payments: int
     reliability_score: float
+
+
+class WebhookAck(BaseModel):
+    status: str

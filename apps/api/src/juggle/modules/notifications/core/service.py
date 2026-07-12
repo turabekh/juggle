@@ -23,6 +23,7 @@ KIND_WAITLIST_OFFER = "waitlist_offer"
 KIND_PROVIDER_BROADCAST = "provider_broadcast"
 KIND_SESSION_REMINDER = "session_reminder"
 KIND_WHAT_TO_BRING = "what_to_bring"
+KIND_SEAT_UNAVAILABLE_REFUND = "seat_unavailable_refund"
 
 
 def _money(cents: int) -> str:
@@ -118,6 +119,33 @@ def notify_session_cancellation(
         kind=KIND_SESSION_CANCELLATION,
         subject=subject,
         detail={"refunded": refunded},
+    )
+
+
+def notify_seat_unavailable_refund(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    to_email: str,
+    total_cents: int,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """The payment succeeded but the seat could not be secured — the charge has been
+    refunded in full (ADR-0005 §3 auto-refund on a lost seat)."""
+    subject = "Refunded: we couldn't secure your booking"
+    body = (
+        "Your payment went through, but the seat was no longer available by the time we "
+        f"confirmed it. We've refunded {_money(total_cents)} in full — you have not been "
+        "charged. Sorry for the inconvenience; please try booking again."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(
+        db,
+        user_id=user_id,
+        to_email=to_email,
+        kind=KIND_SEAT_UNAVAILABLE_REFUND,
+        subject=subject,
+        detail={"refunded_cents": total_cents},
     )
 
 

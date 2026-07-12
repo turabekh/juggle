@@ -1,10 +1,11 @@
-"""HTTP routes for the payments module: Connect onboarding, status, the Stripe
-webhook, and reading a payment's status."""
+"""HTTP routes for the payments module: Connect onboarding, status, payouts, and
+reading a payment's status. The Stripe webhook sink lives in the booking module
+(it must orchestrate settlement, which is above payments in the layering)."""
 
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from juggle.db import get_session
@@ -85,22 +86,6 @@ def refresh_status(
             status.HTTP_403_FORBIDDEN, "Not a member of this organisation"
         ) from exc
     return schemas.ConnectStatusOut(**state)
-
-
-@router.post("/webhook", response_model=schemas.WebhookAck)
-async def stripe_webhook(request: Request, session: SessionDep) -> schemas.WebhookAck:
-    """Stripe webhook sink. The signature is verified against the RAW body before any
-    parsing (INV-2); handlers are idempotent via the stripe_event ledger."""
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature", "")
-    secret = get_settings().stripe_webhook_secret
-    try:
-        result = service.handle_webhook(
-            session, payload=payload, sig_header=sig_header, secret=secret
-        )
-    except service.WebhookVerificationError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid signature") from exc
-    return schemas.WebhookAck(status=result)
 
 
 @router.get("/payouts", response_model=list[schemas.PayoutOut])

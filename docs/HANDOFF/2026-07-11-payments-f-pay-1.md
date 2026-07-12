@@ -70,6 +70,8 @@ is set, else the fake — so local/CI need no Stripe account (INV-2 seam intact)
   `stripe_webhook_secret` (JUGGLE_-prefixed; blank ⇒ FakeGateway).
 - `.env.example` — `JUGGLE_STRIPE_*` placeholders + note that the Stripe CLI reads its own
   `STRIPE_API_KEY`; webhook path `POST /api/v1/payments/webhook`.
+  > **Superseded in F-PAY-3:** the single Stripe webhook endpoint moved to
+  > `POST /api/v1/booking/stripe/webhook` (settlement orchestrates booking). Use that URL.
 - `apps/api/src/juggle/modules/org/core/models.py` — `charges_enabled`, `payouts_enabled` cols.
 - `apps/api/src/juggle/modules/org/core/service.py` — `get_org_by_stripe_account`,
   `set_stripe_account`, `set_connect_flags`.

@@ -7,8 +7,11 @@ The application-fee rate is a runtime-config lever (PRD §10.1); until the confi
 module is wired (M7) it is a module constant.
 """
 
+import json
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 import stripe
 from sqlalchemy import select
@@ -122,11 +125,11 @@ def get_payment_for_update(db: Session, payment_id: uuid.UUID) -> Payment | None
     return db.scalar(select(Payment).where(Payment.id == payment_id).with_for_update())
 
 
-def mark_succeeded(db: Session, payment: Payment, *, gateway: PaymentGateway) -> Payment:
+def mark_succeeded(db: Session, payment: Payment) -> Payment:
+    """Record an already-succeeded charge. The gateway is NOT called here — the client
+    confirms the PaymentIntent and the webhook is the source of truth (ADR-0005 §5)."""
     if payment.status is PaymentStatus.succeeded:
         return payment
-    if payment.stripe_payment_intent_id is not None:
-        gateway.confirm(payment.stripe_payment_intent_id)
     payment.status = PaymentStatus.succeeded
     db.flush()
     return payment
@@ -228,7 +231,36 @@ def refresh_account_status(
     }
 
 
-def _record_event(db: Session, event_id: str, event_type: str) -> bool:
+@dataclass(frozen=True)
+class WebhookEvent:
+    """A verified Stripe event, reduced to a Stripe-free shape so higher modules can
+    dispatch on it without importing ``stripe`` (keeps all Stripe types inside payments)."""
+
+    id: str
+    type: str
+    data_object: dict[str, Any]
+
+
+def verify_event(payload: bytes, sig_header: str, secret: str) -> WebhookEvent:
+    """Verify a Stripe webhook signature on the RAW body (never trust an unverified
+    payload) and return the event as a Stripe-free ``WebhookEvent`` (INV-2). The
+    signature is checked via Stripe; fields are then read from the raw JSON (plain dicts,
+    avoiding StripeObject's attribute quirks)."""
+    try:
+        stripe.Webhook.construct_event(  # type: ignore[no-untyped-call]
+            payload, sig_header, secret
+        )
+    except (ValueError, stripe.SignatureVerificationError) as exc:
+        raise WebhookVerificationError(str(exc)) from exc
+    data = json.loads(payload)
+    return WebhookEvent(
+        id=str(data["id"]),
+        type=str(data["type"]),
+        data_object=dict(data["data"]["object"]),
+    )
+
+
+def record_event(db: Session, event_id: str, event_type: str) -> bool:
     """Insert the event id into the idempotency ledger. Returns False if it was
     already recorded (a Stripe redelivery — at-least-once), so the caller no-ops.
 
@@ -244,9 +276,11 @@ def _record_event(db: Session, event_id: str, event_type: str) -> bool:
     return True
 
 
-def _handle_account_updated(
+def apply_account_updated(
     db: Session, *, account_id: str, charges_enabled: bool, payouts_enabled: bool
 ) -> None:
+    """Mirror a Connect account's capability flags locally (from the account.updated
+    webhook, dispatched by the booking-hosted Stripe sink)."""
     org = org_service.get_org_by_stripe_account(db, account_id)
     if org is None:
         return
@@ -255,31 +289,13 @@ def _handle_account_updated(
     )
 
 
-def handle_webhook(db: Session, *, payload: bytes, sig_header: str, secret: str) -> str:
-    """Verify a Stripe webhook, dedupe it, and dispatch. The dedupe insert and the
-    handler side effects share one transaction (committed by the request), so a
-    redelivery cannot double-apply (INV-2). Signature is verified on the raw body
-    before any parsing — never trust an unverified payload.
-
-    F-PAY-1 handles ``account.updated``; the payment/charge handlers land in F-PAY-3.
-    """
-    try:
-        event = stripe.Webhook.construct_event(  # type: ignore[no-untyped-call]
-            payload, sig_header, secret
-        )
-    except (ValueError, stripe.SignatureVerificationError) as exc:
-        raise WebhookVerificationError(str(exc)) from exc
-    if not _record_event(db, event["id"], event["type"]):
-        return "duplicate"
-    if event["type"] == "account.updated":
-        obj = event["data"]["object"]
-        _handle_account_updated(
-            db,
-            account_id=str(obj["id"]),
-            charges_enabled=bool(obj["charges_enabled"]),
-            payouts_enabled=bool(obj["payouts_enabled"]),
-        )
-    return "ok"
+def get_payment_by_intent(
+    db: Session, intent_id: str, *, for_update: bool = False
+) -> Payment | None:
+    stmt = select(Payment).where(Payment.stripe_payment_intent_id == intent_id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    return db.scalar(stmt)
 
 
 # --- Payouts (PRD §8.4) -----------------------------------------------------
