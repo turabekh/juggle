@@ -9,13 +9,16 @@ from sqlalchemy.orm import Session
 
 from juggle.db import get_session
 from juggle.deps import CurrentPrincipal
+from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
 from juggle.modules.parties.core import schemas, service
+from juggle.modules.parties.core.models import PartyBooking
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
 
 router = APIRouter(prefix="/parties", tags=["parties"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 GatewayDep = Annotated[PaymentGateway, Depends(get_payment_gateway)]
+EmailGatewayDep = Annotated[EmailGateway, Depends(get_email_gateway)]
 
 
 @router.post(
@@ -153,6 +156,12 @@ def book_slot(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Headcount is outside the package's min/max"
         ) from exc
+    return _booking_out(booking, client_secret=intent.client_secret)
+
+
+def _booking_out(
+    booking: PartyBooking, *, client_secret: str | None = None
+) -> schemas.PartyBookingOut:
     return schemas.PartyBookingOut(
         id=booking.id,
         slot_id=booking.slot_id,
@@ -162,5 +171,59 @@ def book_slot(
         deposit_cents=booking.deposit_cents,
         balance_cents=booking.balance_cents,
         status=booking.status.value,
-        client_secret=intent.client_secret,
+        client_secret=client_secret,
     )
+
+
+@router.post("/bookings/{booking_id}/adjust", response_model=schemas.PartyBookingOut)
+def adjust_headcount(
+    booking_id: uuid.UUID,
+    body: schemas.AdjustHeadcountIn,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+    gateway: GatewayDep,
+) -> schemas.PartyBookingOut:
+    """Change the guest count until T-72h (ADR-0008); refunds any now-excess deposit."""
+    try:
+        booking = service.adjust_headcount(
+            session, booking_id=booking_id, actor_id=principal.user_id,
+            new_headcount=body.headcount, gateway=gateway,
+        )
+    except service.PartyBookingNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Booking not found") from exc
+    except service.NotBookingParty as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your booking") from exc
+    except service.HeadcountOutOfBand as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Headcount outside the package band"
+        ) from exc
+    except (
+        service.BookingNotConfirmed, service.BalanceAlreadyCharged, service.AdjustmentClosed
+    ) as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This booking can no longer be adjusted"
+        ) from exc
+    return _booking_out(booking)
+
+
+@router.post("/bookings/{booking_id}/cancel", response_model=schemas.PartyBookingOut)
+def cancel_booking(
+    booking_id: uuid.UUID,
+    principal: CurrentPrincipal,
+    session: SessionDep,
+    gateway: GatewayDep,
+    email_gateway: EmailGatewayDep,
+) -> schemas.PartyBookingOut:
+    """Cancel a party — provider or the booking's parent (ADR-0010 refund floor + clawback)."""
+    try:
+        booking = service.cancel_booking(
+            session, booking_id=booking_id, actor_id=principal.user_id,
+            gateway=gateway, email_gateway=email_gateway,
+        )
+    except service.PartyBookingNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Booking not found") from exc
+    except service.NotAuthorisedToCancel as exc:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Not allowed to cancel this booking"
+        ) from exc
+    return _booking_out(booking)

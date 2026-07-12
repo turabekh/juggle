@@ -182,11 +182,11 @@ def notify_party_cancelled(
     party_title: str,
     gateway: EmailGateway,
 ) -> NotificationLog:
-    """A party auto-cancelled for an uncollected balance; deposit refunded (ADR-0008/0010)."""
+    """A party booking was cancelled; any refund due is processed (ADR-0008/0010)."""
     subject = f"Cancelled: {party_title}"
     body = (
-        f"Your booking of {party_title} has been cancelled because the balance couldn't be "
-        "collected in time. Your deposit has been refunded in full. You're welcome to book again."
+        f"Your booking of {party_title} has been cancelled. Any refund due has been processed "
+        "to your original payment method. You're welcome to book again."
     )
     gateway.send(to=to_email, subject=subject, body=body)
     return _record(

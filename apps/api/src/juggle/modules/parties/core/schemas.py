@@ -62,6 +62,10 @@ class BookSlotIn(BaseModel):
     headcount: int = Field(ge=1)
 
 
+class AdjustHeadcountIn(BaseModel):
+    headcount: int = Field(ge=1)
+
+
 class PartyBookingOut(BaseModel):
     id: uuid.UUID
     slot_id: uuid.UUID

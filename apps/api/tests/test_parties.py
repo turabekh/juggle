@@ -190,11 +190,15 @@ def test_archive_removes_from_public_listing(client: TestClient) -> None:
 
 # --- B2: book a slot with a deposit -----------------------------------------
 
-def _package_with_slot(client: TestClient, owner: str) -> tuple[str, str, str]:
+def _package_with_slot(
+    client: TestClient, owner: str, *, deposit_pct: int | None = None
+) -> tuple[str, str, str]:
     org_id, venue_id = _org_with_venue(client, owner)
+    body = _package_body(venue_id)  # per_head 3500, band 8-20
+    if deposit_pct is not None:
+        body["deposit_pct"] = deposit_pct
     pkg = client.post(
-        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
-        json=_package_body(venue_id),  # per_head 3500, band 8-20
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner), json=body,
     ).json()
     slot = client.post(
         f"/api/v1/parties/packages/{pkg['id']}/slots", headers=_auth(owner),
@@ -330,8 +334,10 @@ def _run_balances(db: Session, gw: FakeGateway, now: datetime) -> int:
     )
 
 
-def _book_and_confirm(client: TestClient, db: Session, owner: str, guardian: str) -> str:
-    _org, _pkg, slot_id = _package_with_slot(client, owner)
+def _book_and_confirm(
+    client: TestClient, db: Session, owner: str, guardian: str, *, deposit_pct: int | None = None
+) -> str:
+    _org, _pkg, slot_id = _package_with_slot(client, owner, deposit_pct=deposit_pct)
     booking_id = client.post(
         f"/api/v1/parties/slots/{slot_id}/book", headers=_auth(guardian), json={"headcount": 10}
     ).json()["id"]
@@ -428,3 +434,177 @@ def test_charge_exception_is_isolated_not_wedged(
     booking = db.get(PartyBooking, uuid.UUID(booking_id))
     assert booking is not None
     assert not booking.balance_captured and booking.status is PartyBookingStatus.confirmed
+
+
+# --- B4: guest-count adjustment + cancellation ------------------------------
+
+def test_adjust_headcount_recomputes_total(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    booking_id = _book_and_confirm(client, db, owner, guardian)  # 10 heads
+    resp = client.post(
+        f"/api/v1/parties/bookings/{booking_id}/adjust", headers=_auth(guardian),
+        json={"headcount": 12},
+    )
+    assert resp.status_code == 200, resp.text
+    b = resp.json()
+    # 12 × $35 = $420 total; deposit ($105) unchanged; balance $315.
+    assert (b["headcount"], b["total_cents"], b["deposit_cents"], b["balance_cents"]) == (
+        12, 42000, 10500, 31500,
+    )
+
+
+def test_adjust_down_below_deposit_refunds_excess(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    # 100% deposit: 10 heads → $350 all paid up front. Reduce to 8 → refund the $70 excess.
+    booking_id = _book_and_confirm(client, db, owner, guardian, deposit_pct=100)
+    resp = client.post(
+        f"/api/v1/parties/bookings/{booking_id}/adjust", headers=_auth(guardian),
+        json={"headcount": 8},
+    )
+    assert resp.status_code == 200
+    b = resp.json()
+    assert (b["total_cents"], b["deposit_cents"], b["balance_cents"]) == (28000, 28000, 0)
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None
+    deposit = db.get(Payment, booking.deposit_payment_id)
+    assert deposit is not None and deposit.refunded_cents == 7000
+
+
+def test_adjust_blocked_after_balance_captured(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    booking_id = _book_and_confirm(client, db, owner, guardian)
+    _run_balances(db, FakeGateway(), IN_WINDOW)  # capture the balance
+    resp = client.post(
+        f"/api/v1/parties/bookings/{booking_id}/adjust", headers=_auth(guardian),
+        json={"headcount": 12},
+    )
+    assert resp.status_code == 409
+
+
+def test_adjust_by_non_owner_forbidden(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian, other = _signup(client), _signup(client), _signup(client)
+    booking_id = _book_and_confirm(client, db, owner, guardian)
+    resp = client.post(
+        f"/api/v1/parties/bookings/{booking_id}/adjust", headers=_auth(other),
+        json={"headcount": 12},
+    )
+    assert resp.status_code == 403
+
+
+def test_provider_cancel_refunds_deposit_and_releases_slot(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    _org, pkg_id, slot_id = _package_with_slot(client, owner)
+    booking_id = client.post(
+        f"/api/v1/parties/slots/{slot_id}/book", headers=_auth(guardian), json={"headcount": 10}
+    ).json()["id"]
+    _post_pi_event(
+        client, event_id="evt_pc", event_type="payment_intent.succeeded",
+        intent_id=_deposit_pi(db, booking_id),
+    )
+    resp = client.post(
+        f"/api/v1/parties/bookings/{booking_id}/cancel", headers=_auth(owner)  # provider
+    )
+    assert resp.status_code == 200 and resp.json()["status"] == "cancelled"
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None
+    deposit = db.get(Payment, booking.deposit_payment_id)
+    assert deposit is not None and deposit.status.value == "refunded"  # 100% incl. deposit
+    assert len(client.get(f"/api/v1/parties/packages/{pkg_id}/slots").json()) == 1  # slot freed
+
+
+def test_parent_cancel_before_capture_keeps_deposit(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    booking_id = _book_and_confirm(client, db, owner, guardian)
+    client.post(f"/api/v1/parties/bookings/{booking_id}/cancel", headers=_auth(guardian))
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None and booking.status is PartyBookingStatus.cancelled
+    deposit = db.get(Payment, booking.deposit_payment_id)
+    assert deposit is not None and deposit.status.value == "succeeded"  # deposit kept
+
+
+def test_parent_cancel_after_capture_refunds_balance_and_claws_back_payout(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    owner, guardian = _signup(client), _signup(client)
+    booking_id = _book_and_confirm(client, db, owner, guardian)
+    org_id = str(db.get(PartyBooking, uuid.UUID(booking_id)).organisation_id)  # type: ignore[union-attr]
+    _run_balances(db, FakeGateway(), IN_WINDOW)  # capture balance → payout net 31150
+
+    client.post(f"/api/v1/parties/bookings/{booking_id}/cancel", headers=_auth(guardian))
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None and booking.status is PartyBookingStatus.cancelled
+    # Balance ($245) refunded, deposit ($105) kept.
+    balance = db.get(Payment, booking.balance_payment_id)
+    assert balance is not None and balance.status.value == "refunded"
+    deposit = db.get(Payment, booking.deposit_payment_id)
+    assert deposit is not None and deposit.status.value == "succeeded"
+    # Payout clawed back to the deposit's net (net 24500 reversed from 31150 → 9345).
+    payouts = client.get(
+        "/api/v1/payments/payouts", headers=_auth(owner), params={"organisation_id": org_id}
+    ).json()
+    assert any(p["amount_cents"] == 9345 for p in payouts)
+
+
+def test_parent_cancel_clawback_is_exact_under_rounding(
+    client: TestClient, db: Session, webhook_secret: None
+) -> None:
+    """A rounding-edge split (net is non-additive): the payout must end at net(deposit) exactly,
+    not net(total)−net(balance) which would be a cent off."""
+    owner, guardian = _signup(client), _signup(client)
+    org_id, venue_id = _org_with_venue(client, owner)
+    # per_head 501 × 10 = $50.10 total; 50% deposit = 2505; balance 2505.
+    pkg = client.post(
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
+        json={"venue_id": venue_id, "name": "Edge", "per_head_price_cents": 501,
+              "min_headcount": 8, "max_headcount": 20, "deposit_pct": 50},
+    ).json()
+    slot = client.post(
+        f"/api/v1/parties/packages/{pkg['id']}/slots", headers=_auth(owner),
+        json={"slots": [{"starts_at": "2026-11-07T04:00:00Z", "ends_at": "2026-11-07T06:00:00Z"}]},
+    ).json()[0]
+    booking_id = client.post(
+        f"/api/v1/parties/slots/{slot['id']}/book", headers=_auth(guardian), json={"headcount": 10}
+    ).json()["id"]
+    _post_pi_event(
+        client, event_id="evt_edge", event_type="payment_intent.succeeded",
+        intent_id=_deposit_pi(db, booking_id),
+    )
+    _run_balances(db, FakeGateway(), IN_WINDOW)  # capture → payout net(5010)=4459
+
+    client.post(f"/api/v1/parties/bookings/{booking_id}/cancel", headers=_auth(guardian))
+    payouts = client.get(
+        "/api/v1/payments/payouts", headers=_auth(owner), params={"organisation_id": org_id}
+    ).json()
+    # net(deposit 2505) = 2505 − 250 − 25 = 2230  (the naive net(balance) path would leave 2229).
+    assert any(p["amount_cents"] == 2230 for p in payouts)
+
+
+def test_provider_cancel_pending_deposit_does_not_refund_uncaptured(
+    client: TestClient, db: Session
+) -> None:
+    """Provider-cancelling before the deposit is captured must NOT refund the uncaptured PI."""
+    owner, guardian = _signup(client), _signup(client)
+    _org, pkg_id, slot_id = _package_with_slot(client, owner)
+    booking_id = client.post(
+        f"/api/v1/parties/slots/{slot_id}/book", headers=_auth(guardian), json={"headcount": 10}
+    ).json()["id"]  # pending_deposit — no webhook yet
+
+    resp = client.post(f"/api/v1/parties/bookings/{booking_id}/cancel", headers=_auth(owner))
+    assert resp.status_code == 200 and resp.json()["status"] == "cancelled"
+    booking = db.get(PartyBooking, uuid.UUID(booking_id))
+    assert booking is not None
+    deposit = db.get(Payment, booking.deposit_payment_id)
+    assert deposit is not None and deposit.status.value == "pending"  # NOT refunded
+    assert len(client.get(f"/api/v1/parties/packages/{pkg_id}/slots").json()) == 1  # slot freed

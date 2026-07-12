@@ -66,6 +66,26 @@ class PartyBookingNotFound(Exception):
     """No such party booking."""
 
 
+class NotBookingParty(Exception):
+    """Actor is not the guardian who booked this party."""
+
+
+class NotAuthorisedToCancel(Exception):
+    """Actor is neither the booking's guardian nor a member of its provider org."""
+
+
+class BookingNotConfirmed(Exception):
+    """The booking is not in a confirmed state."""
+
+
+class BalanceAlreadyCharged(Exception):
+    """The balance has been captured — adjust via support, not self-serve (B4 scope)."""
+
+
+class AdjustmentClosed(Exception):
+    """Past the T-72h guest-count adjustment cutoff."""
+
+
 def _require_member(db: Session, org_id: uuid.UUID, actor_id: uuid.UUID) -> None:
     if org_service.get_member(db, org_id, actor_id) is None:
         raise NotOrgMember(str(org_id))
@@ -518,3 +538,133 @@ def _process_one_balance(
         return False  # respect the retry interval
     _attempt_balance(db, booking, gateway=gateway, email_gateway=email_gateway, now=moment)
     return True
+
+
+# --- Adjustment + cancellation (Milestone B4, ADR-0008 cutoff / ADR-0010) ----
+
+def _lock_booking(db: Session, booking_id: uuid.UUID) -> PartyBooking | None:
+    return db.execute(
+        select(PartyBooking).where(PartyBooking.id == booking_id).with_for_update()
+    ).scalar_one_or_none()
+
+
+def adjust_headcount(
+    db: Session,
+    *,
+    booking_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    new_headcount: int,
+    gateway: PaymentGateway,
+    now: datetime | None = None,
+) -> PartyBooking:
+    """Change the guest count until the T-72h cutoff (ADR-0008), before the balance is
+    captured. Recomputes the total; refunds any now-excess deposit; the later balance charge
+    collects the rest. (After-capture adjustments are support-only in B4.)"""
+    moment = now or datetime.now(UTC)
+    booking = _lock_booking(db, booking_id)
+    if booking is None:
+        raise PartyBookingNotFound(str(booking_id))
+    if booking.guardian_id != actor_id:
+        raise NotBookingParty(str(booking_id))
+    if booking.status is not PartyBookingStatus.confirmed:
+        raise BookingNotConfirmed(str(booking_id))
+    if booking.balance_captured:
+        raise BalanceAlreadyCharged(str(booking_id))
+    package = db.get(PartyPackage, booking.package_id)
+    if package is None:
+        raise PackageNotFound(str(booking.package_id))
+    if not (package.min_headcount <= new_headcount <= package.max_headcount):
+        raise HeadcountOutOfBand(str(new_headcount))
+    slot = db.get(PartySlot, booking.slot_id)
+    cutoff_hours = config_service.party_balance_cutoff_hours(db)
+    # Fail closed: a confirmed booking must have a slot, and it must be before the cutoff.
+    if slot is None or moment >= slot.starts_at - timedelta(hours=cutoff_hours):
+        raise AdjustmentClosed(str(booking_id))
+
+    new_total = package.per_head_price_cents * new_headcount
+    if new_total < booking.deposit_cents:
+        if booking.deposit_payment_id is not None:
+            deposit = db.get(Payment, booking.deposit_payment_id)
+            if deposit is not None:
+                payments_service.refund(
+                    db, deposit, gateway=gateway, amount_cents=booking.deposit_cents - new_total
+                )
+        booking.deposit_cents = new_total  # clamp regardless of payment existence
+    booking.headcount = new_headcount
+    booking.total_cents = new_total
+    booking.balance_cents = new_total - booking.deposit_cents
+    db.flush()
+    return booking
+
+
+def cancel_booking(
+    db: Session,
+    *,
+    booking_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    gateway: PaymentGateway,
+    email_gateway: EmailGateway,
+    now: datetime | None = None,
+) -> PartyBooking:
+    """Cancel a party (ADR-0010). Provider ⇒ 100% refund incl. deposit + full payout clawback.
+    Parent ⇒ keeps at most the deposit (refund the balance if captured) + partial clawback.
+    Releases the slot; idempotent; clawback targets booking.payout_id."""
+    booking = _lock_booking(db, booking_id)
+    if booking is None:
+        raise PartyBookingNotFound(str(booking_id))
+    if booking.status is PartyBookingStatus.cancelled:
+        return booking
+    # The booking's own guardian cancels as the PARENT (deposit-forfeit floor), even if they
+    # happen to be a member of the provider org; only a non-guardian member cancels as provider.
+    is_parent = booking.guardian_id == actor_id
+    provider_cancel = (not is_parent) and (
+        org_service.get_member(db, booking.organisation_id, actor_id) is not None
+    )
+    if not (is_parent or provider_cancel):
+        raise NotAuthorisedToCancel(str(booking_id))
+
+    deposit = (
+        db.get(Payment, booking.deposit_payment_id)
+        if booking.deposit_payment_id is not None else None
+    )
+    balance = (
+        db.get(Payment, booking.balance_payment_id)
+        if booking.balance_payment_id is not None else None
+    )
+    # Provider refunds the deposit (only if it was actually captured); the parent keeps it.
+    if provider_cancel and deposit is not None and deposit.status is PaymentStatus.succeeded:
+        payments_service.refund(db, deposit, gateway=gateway)
+    # Both refund the balance if it was captured.
+    if booking.balance_captured and balance is not None and (
+        balance.status is PaymentStatus.succeeded
+    ):
+        payments_service.refund(db, balance, gateway=gateway)
+
+    # Reduce the provider payout to their net on the RETAINED amount (0 for a provider cancel,
+    # the kept deposit for a parent cancel). Computed by subtraction so it reconciles exactly
+    # to the accrued net(total) with no rounding leak (ADR-0002 net is non-additive).
+    if booking.payout_id is not None:
+        fee_rate = config_service.platform_fee_rate(db)
+        gst_rate = config_service.gst_rate(db)
+        retained_cents = 0 if provider_cancel else booking.deposit_cents
+        clawback = payments_service.provider_net_cents(
+            booking.total_cents, fee_rate, gst_rate
+        ) - payments_service.provider_net_cents(retained_cents, fee_rate, gst_rate)
+        if clawback > 0:
+            payments_service.adjust_payout_for_refund(
+                db,
+                payout_id=booking.payout_id,
+                net_cents=clawback,
+                gateway=gateway,
+                idempotency_key=f"party-cancel-{booking.id}",
+            )
+    _notify_host(db, booking, email_gateway=email_gateway, cancelled=True)
+    _release(db, booking)
+    events_service.record(
+        db, event_type="party_cancelled",
+        props={
+            "party_booking_id": str(booking.id),
+            "by": "provider" if provider_cancel else "parent",
+        },
+    )
+    return booking
