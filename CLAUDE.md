@@ -4,7 +4,7 @@ The single authoritative instructions file for Claude Code in this repository (i
 
 ## Project overview
 
-**Juggle** (working title) is a two-sided **booking marketplace for kids' school-holiday activities and birthday parties**, launching in Perth, Australia. It has:
+**Juggle** (working title) is a two-sided, **year-round booking marketplace for kids' activities** — school-holiday programs, weekend & after-school one-offs, and birthday parties — launching in Perth, Australia. School holidays are the *peak demand moment, not the scope* (ADR-0006). It has:
 
 - a **parent-facing marketplace** — search by suburb/date/child-age, live seat availability, one-cart multi-provider checkout, manage bookings;
 - **free SaaS-lite tools for providers** — self-serve listings, session/capacity management, live roster, Stripe payouts (this is both the supply hook and the source of live availability);
@@ -132,11 +132,20 @@ Run `make check` before considering a change finished.
 - [ ] No child PII added to logs/analytics events
 - [ ] Module boundaries respected (no cross-module `core` imports; new modules added to contracts)
 
+## Phase gates
+
+Scope tags come from `docs/juggle-prd.md` and `docs/juggle-prd-ext-1.md`. Only build what's in the active gate; anything else, raise it, don't build it.
+
+- **MVP + Phase-1 core** — done/underway (see Status above): search/listing/checkout, provider tools, admin console, reviews/waitlist/comms/analytics/scheduler/qanda, and the **payments track (F-PAY-0…6)**.
+- **Active gate (ADR-0006 — always-on repositioning):** **E2** any-day one-off/drop-in sessions, the **parties vertical** (PRD §9, instant-book + request-to-quote), and **G2 party invites+RSVP** — pulled up from P2, built A→B→C→D per `docs/PLANS/always-on-marketplace.md`. **SSR** promoted to launch-blocking.
+- **Still P1/P2/P3 (locked until raised):** the rest of PRD-EXT-1 (G1/G3-full/G4/G5, E1/E3, G6, B-series, E4), SMS, SSO, KidSport.
+
 ## What NOT to do
 
 - Don't import one module's `core` from another module — use a service interface.
 - Don't add FastAPI/Starlette imports inside any `core/` package.
 - Don't hard-code runtime/product config (fees, TTLs, taxonomy) — it belongs in DB/admin config.
 - Don't enforce capacity only in application code — the DB constraint is the guarantee.
-- Don't build out-of-scope surfaces (CCS reporting, term classes, chat/DMs, native apps) — see PRD §17.
-- Don't put child surnames/photos in the data model or child PII in analytics.
+- **Never build recurring billing or term-enrolment management, ever, under any feature flag** (EXT-1 §10, reaffirmed by ADR-0006). One-off/drop-in sessions are in scope; the *ongoing* relationship (enrolment, term schedules, make-up classes, recurring billing) belongs entirely to the provider. Recurring-enrolment listings disguised as one-offs are **rejected at moderation** (§10.2). The only ever-permitted touch of term classes is the E4 trial-pass *switch moment* (P3), never the relationship.
+- Don't build other out-of-scope surfaces (CCS reporting, chat/DMs, native apps, purchased contact lists, fabricated urgency) — see PRD §17 and EXT-1 §10.
+- Don't put child surnames/photos in the data model or child PII in analytics/share-links/invites (INV-3/INV-13).

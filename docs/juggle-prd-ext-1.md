@@ -104,9 +104,14 @@ North-star addition: **% of new guardians arriving via another guardian's loop**
 
 ## 9. Sequencing (relative, not calendar-bound)
 
+> **Revised by ADR-0006 (always-on repositioning, 2026-07-12):** **E2**, the **parties vertical**
+> (base PRD §9), and **G2** are pulled up from the P2 window into the **active build gate**, built
+> A→B→C→D (see `docs/PLANS/always-on-marketplace.md`). SSR is promoted to launch-blocking. The order
+> below is otherwise unchanged; the moved items are struck from step 3.
+
 1. **Pre-launch (now):** G3-lite email capture only. Nothing else starts.
 2. **Post-spring / P1 build window:** G1, G3 full, G4, G5, E1+E3 — alongside base-PRD P1 items (reviews, SMS, refund automation). These are the anti-seasonality bridge to summer.
-3. **With parties vertical / P2:** G2 (same release as parties — the invite loop is half the reason to build parties), E2, G6, B1, B2.
+3. **Active gate (ADR-0006):** **E2**, the **parties vertical**, and **G2** (same release as parties — the invite loop is half the reason to build parties). Still P2 here: G6, B1, B2.
 4. **P3, after multi-cycle proof:** E4, B3.
 
 ## 10. Non-goals (restated, because temptation is structural)

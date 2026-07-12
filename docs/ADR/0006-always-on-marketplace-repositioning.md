@@ -1,6 +1,6 @@
 # ADR 0006 — Always-on marketplace repositioning
 
-- Status: **PROPOSED** (awaiting Turaboy acceptance — this ADR gates Milestones A–D below)
+- Status: **ACCEPTED** (Turaboy, 2026-07-12) — Milestone A in progress; B–D follow in sequence
 - Date: 2026-07-12
 - Invariants touched: INV-1, INV-2, INV-5, INV-6, INV-11, INV-12, INV-13
 - Related: PRD §9 (parties), §14 (launch), §15 Risk #3 (seasonality); PRD-EXT-1 E2/G2/§9/§10; ADR 0001–0005

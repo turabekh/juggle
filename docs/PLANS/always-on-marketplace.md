@@ -1,6 +1,6 @@
 # Plan — "Always-on marketplace" release (ADR-0006)
 
-Status: **PROPOSED — awaiting approval of ADR-0006 before any feature code.**
+Status: **ACTIVE — ADR-0006 accepted 2026-07-12. Milestone A in progress.**
 Sequence: Step 0 (re-gate docs) → A → B → C → D, separate branch + PR per milestone.
 Governance: `plan-critic`-style adversarial review before B and C (money paths); security review on
 invite/RSVP surfaces + the balance-charge job; migration review per migration; integration tests
