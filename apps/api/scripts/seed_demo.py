@@ -17,6 +17,7 @@ from juggle.modules.booking.core import service as booking_service
 from juggle.modules.booking.core.schemas import CheckoutChild, CheckoutItem
 from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.catalog.core.schemas import SessionCreate
+from juggle.modules.flags.core import service as flags_service
 from juggle.modules.identity.core import service as identity_service
 from juggle.modules.identity.core.schemas import ChildCreate
 from juggle.modules.inventory.core import service as inventory_service
@@ -87,6 +88,13 @@ def _seed() -> None:
             db, email="admin@example.com", password="supersecret", full_name="Ops Admin"
         )
         admin.is_admin = True
+
+        # Party Planner (ADR-0011) is flag-gated OFF in prod until real email lands; turn it on
+        # for local dev/e2e so the vote-to-book flow is exercisable.
+        flags_service.upsert_flag(
+            db, key="party_planner", enabled=True, rollout_percentage=100,
+            description="Party Planner vote-to-book (ADR-0011)", changed_by_id=admin.id,
+        )
 
         provider = identity_service.create_guardian(
             db, email=PROVIDER_EMAIL, password="supersecret", full_name="Demo Provider"

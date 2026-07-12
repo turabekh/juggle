@@ -9,6 +9,11 @@
           Party packages from local providers — pick a date, set your guest count, and
           reserve instantly with a deposit.
         </p>
+        <q-btn
+          unelevated color="white" text-color="deep-purple-9" no-caps class="q-mt-sm"
+          icon="how_to_vote" label="Can't decide? Start a vote"
+          :to="{ name: 'party-plans' }"
+        />
       </div>
     </section>
 

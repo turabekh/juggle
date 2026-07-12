@@ -251,13 +251,17 @@ def confirm_booking(
     principal: CurrentPrincipal, session: SessionDep, gateway: GatewayDep,
 ) -> schemas.PlanView:
     try:
-        service.confirm_booking(
+        _plan, booking, intent = service.confirm_booking(
             session, plan_id=plan_id, actor_id=principal.user_id, gateway=gateway,
             option_id=body.option_id, headcount=body.headcount,
         )
     except Exception as exc:
         raise _map_host_error(exc) from exc
-    return _host_plan(session, plan_id, principal.user_id)
+    view = _host_plan(session, plan_id, principal.user_id)
+    view.deposit_client_secret = intent.client_secret
+    view.deposit_payment_id = booking.deposit_payment_id
+    view.deposit_cents = booking.deposit_cents
+    return view
 
 
 # --- Public (tokenized, no auth) -------------------------------------------

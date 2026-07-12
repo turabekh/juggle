@@ -14,6 +14,8 @@ export interface HeadConfig {
   canonical?: string
   image?: string
   jsonLd?: Record<string, unknown>
+  /** Emit `<meta name="robots" content="noindex">` — for private tokenized pages (INV-13). */
+  noindex?: boolean
 }
 
 export function useHead(getter: () => HeadConfig | null): void {
@@ -63,6 +65,7 @@ export function useHead(getter: () => HeadConfig | null): void {
       upsertCanonical(c.canonical)
     }
     if (c.image) upsertMeta('property', 'og:image', c.image)
+    if (c.noindex) upsertMeta('name', 'robots', 'noindex, nofollow')
     if (c.jsonLd) {
       if (!jsonLdEl) {
         jsonLdEl = document.createElement('script')

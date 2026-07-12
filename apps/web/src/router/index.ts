@@ -30,6 +30,25 @@ export function createAppRouter(history: RouterHistory) {
           props: true,
         },
         {
+          path: 'parties/plans',
+          name: 'party-plans',
+          component: () => import('@/pages/PartyPlansPage.vue'),
+          meta: { requiresAuth: true },
+        },
+        {
+          path: 'parties/plans/:id',
+          name: 'party-plan-manage',
+          component: () => import('@/pages/PartyPlanManagePage.vue'),
+          props: true,
+          meta: { requiresAuth: true },
+        },
+        {
+          path: 'parties/plan/:token',
+          name: 'party-plan-rsvp',
+          component: () => import('@/pages/PartyPlanRsvpPage.vue'),
+          props: true,
+        },
+        {
           path: 'checkout',
           name: 'checkout',
           component: () => import('@/pages/CheckoutPage.vue'),

@@ -44,7 +44,7 @@ from juggle.modules.party_planner.core.models import (
     PlanThrottle,
     PlanVote,
 )
-from juggle.modules.payments.core.gateway import PaymentGateway
+from juggle.modules.payments.core.gateway import PaymentGateway, PaymentIntentResult
 
 # --- Errors ----------------------------------------------------------------
 
@@ -665,9 +665,10 @@ def confirm_booking(
     db: Session, *, plan_id: uuid.UUID, actor_id: uuid.UUID, gateway: PaymentGateway,
     option_id: uuid.UUID | None = None, headcount: int | None = None,
     now: datetime | None = None,
-) -> tuple[PartyPlan, PartyBooking]:
+) -> tuple[PartyPlan, PartyBooking, PaymentIntentResult]:
     """Book the winning (or host-overridden) PACKAGE option through parties.book_slot. Serialised
-    on the plan row so a double-submit can't create two bookings/deposits (critic #1)."""
+    on the plan row so a double-submit can't create two bookings/deposits (critic #1). Returns the
+    deposit PaymentIntent so the host can settle it (live) or dev-confirm it."""
     now = now or _now()
     plan = _lock_plan(db, plan_id)
     if plan is None:
@@ -688,14 +689,14 @@ def confirm_booking(
     if slot is None or slot.status is not PartySlotStatus.available or slot.starts_at <= now:
         raise SlotUnavailable(str(option.slot_id))  # sold out mid-plan, or slot already passed
     count = headcount if headcount is not None else _approved_yes_headcount(db, plan_id)
-    booking, _intent = parties_service.book_slot(
+    booking, intent = parties_service.book_slot(
         db, slot_id=slot.id, guardian_id=actor_id, headcount=count, gateway=gateway
     )
     plan.winning_option_id = option.id
     plan.booking_id = booking.id
     plan.status = PlanStatus.booked
     db.flush()
-    return plan, booking
+    return plan, booking, intent
 
 
 # --- View builders (Pydantic) ----------------------------------------------

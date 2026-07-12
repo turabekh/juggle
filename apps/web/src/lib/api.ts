@@ -25,11 +25,15 @@ import type {
   JobSummary,
   Notification,
   Order,
+  InviteSelfView,
   PartyBooking,
   PartyPackage,
   PartyPackageCreate,
   PartyPackageDetail,
   PartySlot,
+  PlanInviteCreated,
+  PlanView,
+  PublicPlanView,
   PaymentConfig,
   PaymentStatus,
   ProviderOrderSummary,
@@ -461,6 +465,130 @@ export const api = {
     },
     async cancel(bookingId: string): Promise<PartyBooking> {
       const { data } = await http.post<PartyBooking>(`/parties/bookings/${bookingId}/cancel`)
+      return data
+    },
+  },
+  partyPlanner: {
+    // --- Host (authenticated) ---
+    async createPlan(theme = 'default'): Promise<PlanView> {
+      const { data } = await http.post<PlanView>('/party-planner/plans', { theme })
+      return data
+    },
+    async listPlans(): Promise<PlanView[]> {
+      const { data } = await http.get<PlanView[]>('/party-planner/plans')
+      return data
+    },
+    async getPlan(id: string): Promise<PlanView> {
+      const { data } = await http.get<PlanView>(`/party-planner/plans/${id}`)
+      return data
+    },
+    async addPackageOption(id: string, packageId: string, slotId: string): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/options/package`, {
+        package_id: packageId,
+        slot_id: slotId,
+      })
+      return data
+    },
+    async addCustomOption(id: string, text: string): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/options/custom`, {
+        text,
+      })
+      return data
+    },
+    async removeOption(id: string, optionId: string): Promise<PlanView> {
+      const { data } = await http.delete<PlanView>(
+        `/party-planner/plans/${id}/options/${optionId}`,
+      )
+      return data
+    },
+    async setRanking(id: string, optionIds: string[]): Promise<PlanView> {
+      const { data } = await http.put<PlanView>(`/party-planner/plans/${id}/ranking`, {
+        option_ids: optionIds,
+      })
+      return data
+    },
+    async setDeadline(id: string, deadlineAt: string): Promise<PlanView> {
+      const { data } = await http.put<PlanView>(`/party-planner/plans/${id}/deadline`, {
+        deadline_at: deadlineAt,
+      })
+      return data
+    },
+    async openPlan(id: string): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/open`)
+      return data
+    },
+    async extend(id: string): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/extend`)
+      return data
+    },
+    async addInvites(id: string, invites: { email: string; name: string }[]): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/invites`, { invites })
+      return data
+    },
+    async setInvite(
+      id: string,
+      inviteId: string,
+      action: 'approve' | 'remove' | 'block',
+    ): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(
+        `/party-planner/plans/${id}/invites/${inviteId}/${action}`,
+      )
+      return data
+    },
+    async confirm(
+      id: string,
+      payload: { option_id?: string; headcount?: number } = {},
+    ): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/confirm`, payload)
+      return data
+    },
+    // --- Public (tokenized, no auth) ---
+    async publicPlan(token: string): Promise<PublicPlanView> {
+      const { data } = await http.get<PublicPlanView>(`/party-planner/public/${token}`)
+      return data
+    },
+    async openRsvp(
+      token: string,
+      body: {
+        parent_name: string
+        email: string
+        attending: boolean
+        kid_count: number
+        nickname?: string | null
+        avatar_key?: string | null
+        marketing_opt_in?: boolean
+      },
+    ): Promise<PlanInviteCreated> {
+      const { data } = await http.post<PlanInviteCreated>(
+        `/party-planner/public/${token}/rsvp`,
+        body,
+      )
+      return data
+    },
+    async inviteSelf(inviteToken: string): Promise<InviteSelfView> {
+      const { data } = await http.get<InviteSelfView>(`/party-planner/invite/${inviteToken}`)
+      return data
+    },
+    async editRsvp(
+      inviteToken: string,
+      body: {
+        attending: boolean
+        kid_count: number
+        nickname?: string | null
+        avatar_key?: string | null
+      },
+    ): Promise<InviteSelfView> {
+      const { data } = await http.put<InviteSelfView>(
+        `/party-planner/invite/${inviteToken}/rsvp`,
+        body,
+      )
+      return data
+    },
+    async vote(inviteToken: string, optionId: string): Promise<InviteSelfView> {
+      const { data } = await http.put<InviteSelfView>(
+        `/party-planner/invite/${inviteToken}/vote`,
+        { option_id: optionId },
+      )
       return data
     },
   },

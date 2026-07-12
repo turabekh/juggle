@@ -202,6 +202,94 @@ export interface PartyBooking {
   client_secret: string | null
 }
 
+// --- Party Planner (ADR-0011) ------------------------------------------------
+
+export interface PlanOptionView {
+  id: string
+  kind: 'package' | 'custom'
+  position: number
+  voided: boolean
+  custom_text: string | null
+  package_id: string | null
+  package_name: string | null
+  venue_name: string | null
+  starts_at: string | null
+  ends_at: string | null
+  per_head_price_cents: number | null
+  available: boolean | null
+  votes: number
+  is_favourite: boolean
+}
+
+export interface PlanBoardEntry {
+  nickname: string | null
+  avatar_key: string | null
+}
+
+export interface PlanHostInvite {
+  id: string
+  mode: 'open' | 'email'
+  parent_name: string
+  email: string
+  status: 'pending' | 'approved' | 'removed' | 'blocked'
+  attending: boolean | null
+  kid_count: number | null
+  nickname: string | null
+  avatar_key: string | null
+}
+
+export interface PlanView {
+  id: string
+  status: 'draft' | 'open' | 'resolved' | 'booked' | 'expired_unbooked'
+  deadline_at: string | null
+  theme: string
+  approval_required: boolean
+  share_token: string | null
+  share_path: string | null
+  winning_option_id: string | null
+  booking_id: string | null
+  ranking: string[]
+  options: PlanOptionView[]
+  invites: PlanHostInvite[]
+  rsvp_yes_headcount: number
+  deadline_warnings: string[]
+  deposit_client_secret: string | null
+  deposit_payment_id: string | null
+  deposit_cents: number | null
+}
+
+export interface PublicPlanView {
+  status: 'draft' | 'open' | 'resolved' | 'booked' | 'expired_unbooked'
+  is_open: boolean
+  deadline_at: string | null
+  theme: string
+  options: PlanOptionView[]
+  board: PlanBoardEntry[]
+  rsvp_count: number
+  winner_option_id: string | null
+  is_tie: boolean
+}
+
+export interface PlanInviteCreated {
+  invite_token: string
+  status: string
+}
+
+export interface PlanRsvpView {
+  attending: boolean
+  kid_count: number
+  nickname: string | null
+  avatar_key: string | null
+}
+
+export interface InviteSelfView {
+  invite_token: string
+  status: 'pending' | 'approved' | 'removed' | 'blocked'
+  has_voted: boolean
+  rsvp: PlanRsvpView | null
+  plan: PublicPlanView
+}
+
 export interface ProviderOrderSummary {
   payment_id: string
   ordered_at: string

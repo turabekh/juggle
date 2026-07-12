@@ -125,6 +125,11 @@ class PlanView(BaseModel):
     invites: list[HostInviteView]
     rsvp_yes_headcount: int
     deadline_warnings: list[str] = []
+    # Transient — populated only by the confirm response so the host can settle the deposit
+    # (live: mount the Payment Element; dev: dev-confirm the booking).
+    deposit_client_secret: str | None = None
+    deposit_payment_id: uuid.UUID | None = None
+    deposit_cents: int | None = None
 
 
 class PublicPlanView(BaseModel):
