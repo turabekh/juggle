@@ -214,6 +214,7 @@ export interface SearchFilters {
   category: Category | null
   price_max_cents: number | null
   session_type: 'half_day' | 'full_day' | null
+  when: 'weekend' | 'weekday' | 'after_school' | null
   available_only: boolean
 }
 

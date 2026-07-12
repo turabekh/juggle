@@ -121,6 +121,21 @@
             @update:model-value="runSearch"
           />
         </div>
+        <div class="jg-filters__item">
+          <span class="jg-filters__label">When</span>
+          <div class="row items-center q-gutter-xs">
+            <q-chip
+              v-for="opt in whenOptions"
+              :key="opt.value ?? 'any'"
+              clickable
+              dense
+              :color="filters.when === opt.value ? 'primary' : 'grey-3'"
+              :text-color="filters.when === opt.value ? 'white' : 'dark'"
+              :label="opt.label"
+              @click="setWhen(opt.value)"
+            />
+          </div>
+        </div>
         <q-space />
         <q-toggle
           v-model="filters.available_only"
@@ -201,9 +216,17 @@ function blankFilters(): SearchFilters {
     category: null,
     price_max_cents: null,
     session_type: null,
+    when: null,
     available_only: true,
   }
 }
+
+const whenOptions: { label: string; value: SearchFilters['when'] }[] = [
+  { label: 'Any day', value: null },
+  { label: 'Weekend', value: 'weekend' },
+  { label: 'After school', value: 'after_school' },
+  { label: 'Weekday', value: 'weekday' },
+]
 
 const filters = reactive<SearchFilters>(blankFilters())
 const results = ref<SearchCard[]>([])
@@ -215,6 +238,11 @@ const ageModel = ref<number | null>(null)
 const priceDollars = ref<number | null>(null)
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
+
+function setWhen(value: SearchFilters['when']): void {
+  filters.when = value
+  void runSearch()
+}
 
 async function runSearch(): Promise<void> {
   filters.child_age = ageModel.value === null || Number.isNaN(ageModel.value) ? null : ageModel.value
