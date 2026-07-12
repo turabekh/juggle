@@ -67,7 +67,8 @@ class SlotCreate(BaseModel):
 
 
 class SlotsCreate(BaseModel):
-    slots: list[SlotCreate] = Field(min_length=1, max_length=200)
+    # Generous cap so a date-range generator (weekdays × time windows) fits in one batch.
+    slots: list[SlotCreate] = Field(min_length=1, max_length=500)
 
 
 class SlotOut(BaseModel):

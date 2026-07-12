@@ -215,12 +215,23 @@ def unarchive_package(
 def add_slots(
     db: Session, *, package_id: uuid.UUID, actor_id: uuid.UUID, slots: list[SlotCreate]
 ) -> list[PartySlot]:
+    """Add one or many slots (the client may expand a date-range pattern into a batch). Idempotent:
+    a requested start that already exists for the package is skipped, so re-generating a range is
+    safe and never duplicates a time."""
     package = db.get(PartyPackage, package_id)
     if package is None:
         raise PackageNotFound(str(package_id))
     _require_member(db, package.organisation_id, actor_id)
+    existing = set(
+        db.scalars(
+            select(PartySlot.starts_at).where(PartySlot.package_id == package_id)
+        )
+    )
     created: list[PartySlot] = []
     for spec in slots:
+        if spec.starts_at in existing:
+            continue  # skip a time that already exists (idempotent re-generation)
+        existing.add(spec.starts_at)  # also dedupe within this batch
         slot = PartySlot(
             package_id=package_id, starts_at=spec.starts_at, ends_at=spec.ends_at
         )

@@ -513,20 +513,53 @@
 
     <!-- Add party slots dialog -->
     <q-dialog v-model="showSlots">
-      <q-card style="min-width: 400px; border-radius: 18px">
+      <q-card style="min-width: 440px; border-radius: 18px">
         <q-card-section>
-          <div class="text-h6">Add slots</div>
-          <div class="jg-faint text-caption">{{ slotsFor?.name }} — each slot is one bookable party.</div>
+          <div class="text-h6">Add party dates</div>
+          <div class="jg-faint text-caption">
+            {{ slotsFor?.name }} — pick a date range, the days you host, and the time(s). Each
+            generated date is one bookable party.
+          </div>
         </q-card-section>
         <q-card-section class="q-gutter-md">
-          <q-input v-model="slotForm.starts_at" outlined dense type="datetime-local" label="Starts" stack-label />
-          <q-input v-model="slotForm.ends_at" outlined dense type="datetime-local" label="Ends" stack-label />
+          <div class="row q-col-gutter-md">
+            <q-input v-model="slotForm.from" outlined dense type="date" label="From" stack-label class="col" />
+            <q-input v-model="slotForm.to" outlined dense type="date" label="To" stack-label class="col" />
+          </div>
+          <div>
+            <div class="jg-faint text-caption q-mb-xs">Days you host parties</div>
+            <div class="row q-gutter-xs">
+              <q-chip v-for="d in WEEKDAYS" :key="d.value" clickable dense
+                      :color="slotForm.weekdays.includes(d.value) ? 'primary' : 'grey-3'"
+                      :text-color="slotForm.weekdays.includes(d.value) ? 'white' : 'dark'"
+                      :label="d.label" @click="toggleWeekday(d.value)" />
+            </div>
+          </div>
+          <div>
+            <div class="row items-center justify-between q-mb-xs">
+              <span class="jg-faint text-caption">Party times</span>
+              <q-btn flat dense no-caps size="sm" icon="add" label="Add time"
+                     @click="slotForm.windows.push({ start: '10:00', end: '12:00' })" />
+            </div>
+            <div v-for="(w, i) in slotForm.windows" :key="i" class="row items-center q-col-gutter-sm q-mb-xs">
+              <q-input v-model="w.start" outlined dense type="time" class="col" />
+              <span class="jg-muted">to</span>
+              <q-input v-model="w.end" outlined dense type="time" class="col" />
+              <q-btn v-if="slotForm.windows.length > 1" flat dense round size="sm" icon="close"
+                     color="grey-7" @click="slotForm.windows.splice(i, 1)" />
+            </div>
+          </div>
+          <q-banner dense :class="slotPreviewCount > 0 ? 'bg-blue-1 text-blue-9' : 'bg-grey-2 jg-muted'">
+            {{ slotPreviewCount > 0
+              ? `This will create ${slotPreviewCount} party date${slotPreviewCount === 1 ? '' : 's'} (existing times are skipped).`
+              : 'Choose a date range, at least one day, and a valid time to preview.' }}
+          </q-banner>
         </q-card-section>
         <q-card-actions align="right" class="q-pb-md q-pr-md">
           <q-btn flat no-caps label="Cancel" v-close-popup />
           <q-btn
-            unelevated no-caps color="primary" label="Add slot" :loading="saving"
-            :disable="!slotForm.starts_at || !slotForm.ends_at" @click="addSlot"
+            unelevated no-caps color="primary" label="Add dates" :loading="saving"
+            :disable="slotPreviewCount === 0" @click="addSlot"
           />
         </q-card-actions>
       </q-card>
@@ -635,7 +668,18 @@ const partyForm = reactive({
   deposit_pct: null as number | null,
   outdoor: false,
 })
-const slotForm = reactive({ starts_at: '', ends_at: '' })
+// Weekday chips in Mon–Sun order; value is JS Date.getDay() (0=Sun … 6=Sat).
+const WEEKDAYS = [
+  { label: 'Mon', value: 1 }, { label: 'Tue', value: 2 }, { label: 'Wed', value: 3 },
+  { label: 'Thu', value: 4 }, { label: 'Fri', value: 5 }, { label: 'Sat', value: 6 },
+  { label: 'Sun', value: 0 },
+]
+const slotForm = reactive({
+  from: '',
+  to: '',
+  weekdays: [6, 0] as number[], // Sat + Sun by default
+  windows: [{ start: '10:00', end: '12:00' }] as { start: string; end: string }[],
+})
 
 const categoryOptions = CATEGORIES.map((c) => ({ label: c.label, value: c.value }))
 const venueForm = reactive({ name: '', suburb: '', postcode: '', latitude: null as number | null, longitude: null as number | null })
@@ -959,22 +1003,74 @@ async function unarchiveParty(packageId: string): Promise<void> {
   }
 }
 
+function _ymd(d: Date): string {
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
 function openSlots(p: PartyPackage): void {
   slotsFor.value = p
-  slotForm.starts_at = ''
-  slotForm.ends_at = ''
+  const today = new Date()
+  const inTwoMonths = new Date(today)
+  inTwoMonths.setDate(inTwoMonths.getDate() + 60)
+  Object.assign(slotForm, {
+    from: _ymd(today),
+    to: _ymd(inTwoMonths),
+    weekdays: [6, 0],
+    windows: [{ start: '10:00', end: '12:00' }],
+  })
   showSlots.value = true
 }
 
+function toggleWeekday(value: number): void {
+  const i = slotForm.weekdays.indexOf(value)
+  if (i === -1) slotForm.weekdays.push(value)
+  else slotForm.weekdays.splice(i, 1)
+}
+
+// Expand the (date range × weekdays × time windows) pattern into concrete slots (browser-local
+// time → ISO; a Perth provider's local time is correct, matching how sessions are entered).
+function generatedSlots(): { starts_at: string; ends_at: string }[] {
+  const out: { starts_at: string; ends_at: string }[] = []
+  if (!slotForm.from || !slotForm.to) return out
+  const start = new Date(`${slotForm.from}T00:00`)
+  const end = new Date(`${slotForm.to}T00:00`)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return out
+  const cursor = new Date(start)
+  let guard = 0
+  while (cursor <= end && guard < 400) {
+    guard += 1
+    if (slotForm.weekdays.includes(cursor.getDay())) {
+      const dstr = _ymd(cursor)
+      for (const w of slotForm.windows) {
+        if (!w.start || !w.end) continue
+        const s = new Date(`${dstr}T${w.start}`)
+        const e = new Date(`${dstr}T${w.end}`)
+        if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e <= s) continue
+        out.push({ starts_at: s.toISOString(), ends_at: e.toISOString() })
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return out
+}
+
+const slotPreviewCount = computed(() => generatedSlots().length)
+
 async function addSlot(): Promise<void> {
-  if (!slotsFor.value || !slotForm.starts_at || !slotForm.ends_at) return
+  if (!slotsFor.value) return
+  const slots = generatedSlots().slice(0, 500)
+  if (!slots.length) return
   saving.value = true
   try {
-    await api.parties.addSlots(slotsFor.value.id, [
-      { starts_at: new Date(slotForm.starts_at).toISOString(), ends_at: new Date(slotForm.ends_at).toISOString() },
-    ])
+    const created = await api.parties.addSlots(slotsFor.value.id, slots)
     showSlots.value = false
-    $q.notify({ type: 'positive', message: 'Slot added' })
+    $q.notify({
+      type: 'positive',
+      message: created.length
+        ? `Added ${created.length} party date${created.length === 1 ? '' : 's'}`
+        : 'Those dates already exist',
+    })
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
   } finally {

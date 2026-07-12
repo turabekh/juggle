@@ -156,6 +156,34 @@ def test_slots_created_and_publicly_listed(client: TestClient) -> None:
     assert all(s["status"] == "available" for s in public)
 
 
+def test_add_slots_dedupes_existing_times(client: TestClient) -> None:
+    owner = _signup(client)
+    org_id, venue_id = _org_with_venue(client, owner)
+    pkg = client.post(
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
+        json=_package_body(venue_id),
+    ).json()
+    batch = {"slots": [
+        {"starts_at": "2026-11-07T04:00:00Z", "ends_at": "2026-11-07T06:00:00Z"},
+        {"starts_at": "2026-11-08T04:00:00Z", "ends_at": "2026-11-08T06:00:00Z"},
+    ]}
+    first = client.post(
+        f"/api/v1/parties/packages/{pkg['id']}/slots", headers=_auth(owner), json=batch
+    )
+    assert len(first.json()) == 2
+    # Re-generate an overlapping batch (one duplicate, one new) → only the new one is created.
+    second = client.post(
+        f"/api/v1/parties/packages/{pkg['id']}/slots", headers=_auth(owner),
+        json={"slots": [
+            {"starts_at": "2026-11-08T04:00:00Z", "ends_at": "2026-11-08T06:00:00Z"},  # dup
+            {"starts_at": "2026-11-09T04:00:00Z", "ends_at": "2026-11-09T06:00:00Z"},  # new
+        ]},
+    )
+    assert len(second.json()) == 1
+    public = client.get(f"/api/v1/parties/packages/{pkg['id']}/slots").json()
+    assert len(public) == 3  # no duplicate time created
+
+
 def test_slot_end_before_start_rejected(client: TestClient) -> None:
     owner = _signup(client)
     org_id, venue_id = _org_with_venue(client, owner)
