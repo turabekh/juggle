@@ -208,9 +208,22 @@
         <q-card-section><div class="text-h6">Add a party option</div></q-card-section>
         <q-card-section class="q-gutter-md">
           <q-select v-model="pkgSel" :options="packageChoices" emit-value map-options outlined dense
-                    label="Party package" @update:model-value="loadSlots" />
+                    label="Party package" :loading="!packages.length"
+                    @update:model-value="loadSlots">
+            <template #no-option>
+              <q-item><q-item-section class="jg-muted">
+                No party packages available yet.
+              </q-item-section></q-item>
+            </template>
+          </q-select>
           <q-select v-model="slotSel" :options="slotChoices" emit-value map-options outlined dense
-                    label="Date &amp; time" :disable="!pkgSel" />
+                    label="Date &amp; time" :disable="!pkgSel || noSlotsForPackage"
+                    :loading="slotsLoading" />
+          <q-banner v-if="noSlotsForPackage" dense class="bg-orange-1 text-orange-9">
+            This package has no upcoming dates. Add dates to it from
+            <b>For providers → your org → Party packages → Add slots</b>, then come back — or pick a
+            different package.
+          </q-banner>
         </q-card-section>
         <q-card-actions align="right" class="q-pb-md q-pr-md">
           <q-btn flat no-caps label="Cancel" v-close-popup />
@@ -264,6 +277,10 @@ const packages = ref<PartyPackageDetail[]>([])
 const pkgSel = ref<string | null>(null)
 const slotSel = ref<string | null>(null)
 const slotChoices = ref<{ label: string; value: string }[]>([])
+const slotsLoading = ref(false)
+const noSlotsForPackage = computed(
+  () => !!pkgSel.value && !slotsLoading.value && slotChoices.value.length === 0,
+)
 const deadlineInput = ref('')
 const favouriteId = ref<string | null>(null)
 const depositPending = ref(false)
@@ -358,6 +375,8 @@ function openAddPackage(): void {
 
 async function loadSlots(packageId: string): Promise<void> {
   slotSel.value = null
+  slotChoices.value = []
+  slotsLoading.value = true
   try {
     const slots = await api.parties.slots(packageId)
     slotChoices.value = slots.map((s) => ({
@@ -366,6 +385,8 @@ async function loadSlots(packageId: string): Promise<void> {
     }))
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    slotsLoading.value = false
   }
 }
 
