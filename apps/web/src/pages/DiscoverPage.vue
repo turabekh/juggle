@@ -56,6 +56,18 @@
     </section>
 
     <div class="jg-page">
+      <!-- Birthday parties entry point -->
+      <router-link :to="{ name: 'parties' }" class="jg-party-banner">
+        <div class="jg-party-banner__emoji">🎉</div>
+        <div class="jg-party-banner__text">
+          <div class="jg-party-banner__title">Planning a birthday party?</div>
+          <div class="jg-party-banner__sub">
+            Browse party packages from local providers — instant-book with a deposit.
+          </div>
+        </div>
+        <q-icon name="chevron_right" size="24px" class="jg-party-banner__chev" />
+      </router-link>
+
       <!-- Category chips -->
       <div class="jg-cats">
         <button
@@ -390,4 +402,27 @@ onMounted(runSearch)
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 18px;
 }
+
+.jg-party-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  text-decoration: none;
+  color: var(--jg-ink);
+  background: linear-gradient(100% 100% at 0% 0%, #fff4e6 0%, #ffe9f2 100%);
+  border: 1px solid #ffd9c2;
+  border-radius: 16px;
+  padding: 16px 20px;
+  margin: 18px 0 6px;
+  transition: box-shadow 140ms ease, transform 140ms ease;
+}
+.jg-party-banner:hover {
+  box-shadow: var(--jg-shadow-lg);
+  transform: translateY(-1px);
+}
+.jg-party-banner__emoji { font-size: 30px; line-height: 1; }
+.jg-party-banner__text { flex: 1 1 auto; }
+.jg-party-banner__title { font-weight: 700; font-size: 16px; }
+.jg-party-banner__sub { color: var(--jg-ink-soft); font-size: 14px; }
+.jg-party-banner__chev { color: var(--jg-ink-soft); }
 </style>

@@ -32,11 +32,29 @@ surface in the B4 handoff. On a new branch **`feat/parties-frontend`**, stacked 
 - **Post-booking management** (ADR-0008/0010 surfaced): change guest count until T-72h (`adjust`),
   and **Cancel booking** with a confirm dialog warning the deposit may be retained.
 
+### Discoverability + seed (follow-up in same session)
+- **Public marketplace list** `GET /api/v1/parties/packages` — every active package from an
+  **approved** org, name-enriched (`service.list_all_active_packages` + approval filter/enrichment
+  in ui via `org_service`, so no cross-module model import; config default read once).
+- **`PartiesPage.vue`** at `/parties` — a "Birthday parties" browse grid of package cards → each
+  links to the booking page. Added to the **top nav** ("Birthday parties") and a **promo banner on
+  the Discover page**.
+- **Seed** (`scripts/seed_demo.py`): 3 demo party packages (Superhero Art / Backyard Games
+  (outdoor, 40% deposit) / Junior Science Lab) each with 3 upcoming weekend slots. Verified by
+  running `_seed_parties` against the seeded org in a rolled-back txn (3 packages / 9 slots).
+- **Fixed a latent seed bug**: `scripts/seed_demo.py` still passed `gateway=` to
+  `booking_service.confirm()` (removed by F-PAY-3) — the seed would have crashed at
+  `_seed_waitlist`. mypy didn't catch it because `make typecheck` only scopes the `juggle` package,
+  not `scripts/`. Removed both stale kwargs.
+
 ## Verification
-- Backend `make check`: **229 passed** (30 parties tests), mypy strict clean, import-linter **2
+- Backend `make check`: **229 passed** (+2 more parties tests locally = **31**: added public
+  detail, marketplace-list approval/enrich, archived-hidden), mypy strict clean, import-linter **2
   contracts KEPT**.
 - Frontend: `vue-tsc --noEmit` clean, `vitest` **20 passed**, `vite build` OK (emits
-  `PartyPackagePage` chunk + recompiled `ProviderOrgPage`).
+  `PartyPackagePage` + `PartiesPage` chunks + recompiled `ProviderOrgPage`/`DiscoverPage`).
+- Seed party helper exercised against the live seeded org in a **rolled-back** transaction (no
+  pollution): 3 packages, 9 slots, correct pricing/bands/outdoor/deposit.
 
 ## Known gaps / next
 - **No party-booking list surface** for parents: adjust/cancel are reachable only on the page right

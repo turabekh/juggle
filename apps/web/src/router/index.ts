@@ -19,6 +19,11 @@ export function createAppRouter(history: RouterHistory) {
         },
         { path: 'cart', name: 'cart', component: () => import('@/pages/CartPage.vue') },
         {
+          path: 'parties',
+          name: 'parties',
+          component: () => import('@/pages/PartiesPage.vue'),
+        },
+        {
           path: 'parties/packages/:id',
           name: 'party-package',
           component: () => import('@/pages/PartyPackagePage.vue'),

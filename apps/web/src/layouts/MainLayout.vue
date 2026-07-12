@@ -19,6 +19,7 @@
 
         <nav class="jg-nav gt-xs">
           <q-btn flat no-caps :to="{ name: 'discover' }" label="Discover" class="jg-nav__link" />
+          <q-btn flat no-caps :to="{ name: 'parties' }" label="Birthday parties" class="jg-nav__link" />
           <q-btn
             v-if="auth.isAuthed"
             flat

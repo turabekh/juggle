@@ -148,6 +148,20 @@ def list_active_packages(db: Session, organisation_id: uuid.UUID) -> list[PartyP
     )
 
 
+def list_all_active_packages(db: Session) -> list[PartyPackage]:
+    """Public marketplace: every bookable party package (newest first).
+
+    Org-approval filtering + name enrichment happen in the ui layer via org_service,
+    so this stays a plain model query (no cross-module model imports)."""
+    return list(
+        db.scalars(
+            select(PartyPackage)
+            .where(PartyPackage.status == PartyPackageStatus.active)
+            .order_by(PartyPackage.created_at.desc())
+        )
+    )
+
+
 def archive_package(
     db: Session, *, package_id: uuid.UUID, actor_id: uuid.UUID
 ) -> PartyPackage:

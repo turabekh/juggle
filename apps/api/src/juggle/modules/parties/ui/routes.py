@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from juggle.db import get_session
 from juggle.deps import CurrentPrincipal
 from juggle.modules.catalog.core import service as catalog_service
+from juggle.modules.config.core import service as config_service
 from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
 from juggle.modules.org.core import service as org_service
 from juggle.modules.parties.core import schemas, service
@@ -84,6 +85,38 @@ def list_active_packages(
         schemas.PackageOut.model_validate(p)
         for p in service.list_active_packages(session, organisation_id)
     ]
+
+
+@router.get("/packages", response_model=list[schemas.PackageDetailOut])
+def list_all_packages(session: SessionDep) -> list[schemas.PackageDetailOut]:
+    """Public marketplace: every bookable party package from an approved provider."""
+    default_deposit_pct = config_service.party_deposit_pct(session)
+    cards: list[schemas.PackageDetailOut] = []
+    for package in service.list_all_active_packages(session):
+        org = org_service.get_organisation(session, package.organisation_id)
+        if org is None or org.status.value != "approved":
+            continue
+        venue = catalog_service.get_venue(session, package.venue_id)
+        cards.append(
+            schemas.PackageDetailOut(
+                id=package.id,
+                organisation_id=package.organisation_id,
+                venue_id=package.venue_id,
+                name=package.name,
+                description=package.description,
+                per_head_price_cents=package.per_head_price_cents,
+                min_headcount=package.min_headcount,
+                max_headcount=package.max_headcount,
+                deposit_pct=package.deposit_pct,
+                outdoor=package.outdoor,
+                status=package.status.value,
+                organisation_name=org.name,
+                venue_name=venue.name if venue else "",
+                venue_suburb=venue.suburb if venue else None,
+                deposit_pct_effective=package.deposit_pct or default_deposit_pct,
+            )
+        )
+    return cards
 
 
 @router.get("/packages/{package_id}", response_model=schemas.PackageDetailOut)

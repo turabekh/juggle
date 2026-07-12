@@ -205,6 +205,36 @@ def test_public_package_detail_enriched(client: TestClient) -> None:
     assert detail["deposit_pct_effective"] == 30  # config default (ADR-0007)
 
 
+def test_marketplace_lists_only_approved_active_packages(
+    client: TestClient, db: Session
+) -> None:
+    from juggle.modules.org.core import service as org_service
+    from juggle.modules.org.core.models import OrgStatus
+
+    owner = _signup(client)
+    org_id, venue_id = _org_with_venue(client, owner)
+    pkg = client.post(
+        f"/api/v1/parties/orgs/{org_id}/packages", headers=_auth(owner),
+        json=_package_body(venue_id),
+    ).json()
+
+    # Pending org ⇒ not in the public marketplace list.
+    assert all(p["id"] != pkg["id"] for p in client.get("/api/v1/parties/packages").json())
+
+    # Approve ⇒ it appears, enriched with the provider/venue names.
+    org_service.set_status(db, uuid.UUID(org_id), OrgStatus.approved)
+    db.flush()
+    listed = client.get("/api/v1/parties/packages").json()
+    card = next((p for p in listed if p["id"] == pkg["id"]), None)
+    assert card is not None
+    assert card["organisation_name"] and card["venue_name"]
+    assert card["deposit_pct_effective"] == 30
+
+    # Archived ⇒ drops back out.
+    client.post(f"/api/v1/parties/packages/{pkg['id']}/archive", headers=_auth(owner))
+    assert all(p["id"] != pkg["id"] for p in client.get("/api/v1/parties/packages").json())
+
+
 def test_public_package_detail_hidden_when_archived(client: TestClient) -> None:
     owner = _signup(client)
     org_id, venue_id = _org_with_venue(client, owner)

@@ -23,6 +23,8 @@ from juggle.modules.inventory.core import service as inventory_service
 from juggle.modules.notifications.core.gateway import get_email_gateway
 from juggle.modules.org.core import service as org_service
 from juggle.modules.org.core.models import OrgStatus, VerificationStatus
+from juggle.modules.parties.core import service as parties_service
+from juggle.modules.parties.core.schemas import PackageCreate, SlotCreate
 from juggle.modules.payments.core import service as payments_service
 from juggle.modules.payments.core.gateway import get_payment_gateway
 from juggle.modules.payments.core.models import PayoutStatus
@@ -30,6 +32,22 @@ from juggle.modules.reviews.core import service as reviews_service
 from juggle.modules.waitlist.core import service as waitlist_service
 
 PROVIDER_EMAIL = "demo-provider@juggle.test"
+
+# (name, description, per_head_price_cents, min, max, venue_index, outdoor, deposit_pct|None)
+PARTIES = [
+    ("Superhero Art Party",
+     "Two hours of superhero mask-making, cape decorating and a group mural. "
+     "All materials, aprons and clean-up included.",
+     3500, 8, 20, 0, False, None),
+    ("Backyard Games Party",
+     "Sack races, parachute games and a mini soccer tournament run by our coaches. "
+     "High-energy fun for active kids.",
+     3000, 10, 24, 1, True, 40),
+    ("Junior Science Lab Party",
+     "Slime, volcanoes and safe hands-on experiments with a real lab coat for every "
+     "guest to take home.",
+     4200, 8, 16, 2, False, None),
+]
 
 # (name, suburb, postcode, lat, lng)
 VENUES = [
@@ -153,12 +171,15 @@ def _seed() -> None:
             db, org_id=org.id, provider_id=provider.id, admin_id=admin.id, venue_id=venues[0].id
         )
         _seed_waitlist(db, org_id=org.id, provider_id=provider.id, venue_id=venues[1].id)
+        party_count = _seed_parties(
+            db, org_id=org.id, provider_id=provider.id, venue_ids=[v.id for v in venues]
+        )
 
         db.commit()
         print(
             f"Seeded {len(PROGRAMS)} programs / {session_count} sessions "
             f"+ {review_count} published reviews + a sold-out session with a waitlist "
-            f"for '{org.name}'."
+            f"+ {party_count} birthday-party packages for '{org.name}'."
         )
     finally:
         db.close()
@@ -254,7 +275,6 @@ def _seed_reviews(
             db,
             payment_id=order.payment_id,
             guardian_id=guardian.id,
-            gateway=payment_gateway,
             email_gateway=email_gateway,
         )
         review = reviews_service.submit_review(
@@ -348,7 +368,6 @@ def _seed_waitlist(
         db,
         payment_id=order.payment_id,
         guardian_id=holder.id,
-        gateway=payment_gateway,
         email_gateway=email_gateway,
     )
     # Settle the accrued payout so this demo row stays out of the global
@@ -369,6 +388,45 @@ def _seed_waitlist(
         data=ChildCreate(first_name="Charlie", date_of_birth=date(2017, 3, 1)),
     )
     waitlist_service.join_waitlist(db, session_id=session.id, guardian_id=waiter.id)
+
+
+def _seed_parties(
+    db: Session, *, org_id: uuid.UUID, provider_id: uuid.UUID, venue_ids: list[uuid.UUID]
+) -> int:
+    """A few bookable birthday-party packages (PRD §9), each with upcoming weekend
+    slots, so the parties browse + booking UI has real data on first run."""
+    # 10:00am Perth (AWST, UTC+8) == 02:00 UTC. Parties run on upcoming weekends.
+    base = datetime.now(UTC).replace(hour=2, minute=0, second=0, microsecond=0) + timedelta(days=9)
+    for name, desc, price, cmin, cmax, vidx, outdoor, deposit in PARTIES:
+        package = parties_service.create_package(
+            db,
+            organisation_id=org_id,
+            actor_id=provider_id,
+            data=PackageCreate(
+                venue_id=venue_ids[vidx],
+                name=name,
+                description=desc,
+                per_head_price_cents=price,
+                min_headcount=cmin,
+                max_headcount=cmax,
+                deposit_pct=deposit,
+                outdoor=outdoor,
+            ),
+        )
+        # Three weekend afternoons to choose from (each slot = one bookable party).
+        parties_service.add_slots(
+            db,
+            package_id=package.id,
+            actor_id=provider_id,
+            slots=[
+                SlotCreate(
+                    starts_at=base + timedelta(days=7 * w),
+                    ends_at=base + timedelta(days=7 * w, hours=2),
+                )
+                for w in range(3)
+            ],
+        )
+    return len(PARTIES)
 
 
 def _already_seeded(db: object) -> bool:

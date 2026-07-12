@@ -431,6 +431,10 @@ export const api = {
       const { data } = await http.get<PartyPackage[]>(`/parties/orgs/${orgId}/packages`)
       return data
     },
+    async allPackages(): Promise<PartyPackageDetail[]> {
+      const { data } = await http.get<PartyPackageDetail[]>('/parties/packages')
+      return data
+    },
     async package(packageId: string): Promise<PartyPackageDetail> {
       const { data } = await http.get<PartyPackageDetail>(`/parties/packages/${packageId}`)
       return data
