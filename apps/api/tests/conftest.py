@@ -36,18 +36,23 @@ def db(engine: Engine) -> Iterator[Session]:
 
     Any committed platform settings / feature flags (from seeds or manual use)
     are cleared *within* this transaction so every test sees the built-in config
-    defaults; the deletes roll back, leaving persisted data untouched.
+    defaults; likewise any committed party plans (leaked drafts / a developer's own
+    demo plan on the shared dev DB) are cleared so the planner's cross-plan queries
+    (e.g. ``resolve_due_plans`` / nudge counts) stay deterministic. The deletes roll
+    back, leaving persisted data untouched.
     """
     from sqlalchemy import delete
 
     from juggle.modules.config.core.models import PlatformSetting
     from juggle.modules.flags.core.models import FeatureFlag
+    from juggle.modules.party_planner.core.models import PartyPlan
 
     connection = engine.connect()
     transaction = connection.begin()
     session = Session(bind=connection)
     session.execute(delete(PlatformSetting))
     session.execute(delete(FeatureFlag))
+    session.execute(delete(PartyPlan))  # cascades to plan_option/invite/rsvp/vote/reaction
     session.flush()
     try:
         yield session

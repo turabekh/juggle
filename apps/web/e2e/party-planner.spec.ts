@@ -2,8 +2,9 @@
 //
 // Host orchestration (create plan + options + open) runs via the API for speed and because the
 // package-browse dropdown only lists approved orgs; the novel surface — the public invitee page
-// (RSVP → pending → vote → live tally) plus host approval — is exercised through the UI.
-// Resolution/confirm is clock-driven (scheduler tick) and is covered by backend integration tests.
+// (enter details → tap a party → one-step RSVP-and-vote → live tally) is exercised through the UI.
+// Anyone with the share link is auto-approved (no host approval step). Resolution/confirm is
+// clock-driven (scheduler tick) and is covered by backend integration tests.
 //
 // Requires the stack up (make up + make seed, which enables the party_planner flag) and the web
 // dev server. Run: make web-e2e.
@@ -35,7 +36,7 @@ async function partyPackage(ownerToken: string): Promise<{ packageId: string; sl
   return { packageId: pkg.id, slotIds: slots.map((s) => s.id) }
 }
 
-test('invitees RSVP and vote via the public link; host approves; tally updates', async ({
+test('invitees enter details and vote in one step via the public link; tally updates', async ({
   page,
 }) => {
   const host = await signup(uniqueEmail('host'))
@@ -56,26 +57,14 @@ test('invitees RSVP and vote via the public link; host approves; tally updates',
     `/party-planner/plans/${pid}/open`, {}, host.token,
   )).share_token
 
-  // --- Invitee 1: RSVP via the public link (no account) ---
+  // --- Invitee: enter details via the public link (no account), then tap a party to vote ---
   await page.goto(`/parties/plan/${shareToken}`, { waitUntil: 'networkidle' })
   await expect(page.getByText("You're invited!")).toBeVisible()
-  await page.locator('[data-testid="rsvp-name"] input').fill('Alex Guest')
-  await page.locator('[data-testid="rsvp-email"] input').fill(uniqueEmail('guest'))
-  await page.locator('[data-testid="rsvp-kids"] input').fill('2')
-  await page.locator('[data-testid="rsvp-submit"]').click()
+  await page.getByLabel('Your name').fill('Alex Guest')
+  await page.getByLabel('Email', { exact: true }).fill(uniqueEmail('guest'))
+  await page.getByLabel('How many kids are you bringing?').fill('2')
 
-  // Pending approval → cannot vote yet.
-  await expect(page.getByText(/approve you shortly/i)).toBeVisible({ timeout: 10000 })
-
-  // Host approves the pending invite via the API.
-  const view = await api.get<{ invites: { id: string; status: string }[] }>(
-    `/party-planner/plans/${pid}`, host.token,
-  )
-  const pending = view.invites.find((i) => i.status === 'pending')!
-  await api.post(`/party-planner/plans/${pid}/invites/${pending.id}/approve`, {}, host.token)
-
-  // Reload → now approved → cast a vote for the first option.
-  await page.reload({ waitUntil: 'networkidle' })
+  // Tapping the first option auto-approves + RSVPs + votes in one step — no host approval.
   const firstOption = page.locator('[data-testid="vote-option"]').first()
   await expect(firstOption).toBeVisible({ timeout: 10000 })
   await firstOption.click()

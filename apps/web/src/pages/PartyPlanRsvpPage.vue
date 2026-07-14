@@ -40,41 +40,48 @@
                label="Plan your own party 🎈" :to="{ name: 'parties', query: { from: 'party-vote' } }" />
       </section>
 
-      <!-- RSVP gate: no identity yet -->
-      <section v-else-if="!inviteToken" class="jg-card q-pa-lg q-mb-md">
-        <div class="text-weight-600 q-mb-md">RSVP to vote</div>
-        <q-input v-model="form.parent_name" outlined dense label="Your name" class="q-mb-sm"
-                 data-testid="rsvp-name" />
-        <q-input v-model="form.email" outlined dense type="email" label="Email" class="q-mb-sm"
-                 data-testid="rsvp-email" />
-        <q-input v-model.number="form.kid_count" outlined dense type="number" min="0" max="50"
-                 label="How many kids are you bringing?" class="q-mb-sm" style="max-width: 260px"
-                 data-testid="rsvp-kids" />
-        <q-input v-model="form.nickname" outlined dense label="Display name (optional)"
-                 hint="Shown on the guest board — no kids' names please" class="q-mb-sm" maxlength="80" />
-        <div class="q-mb-sm">
-          <div class="jg-faint text-caption q-mb-xs">Pick an avatar</div>
-          <div class="row q-gutter-xs">
-            <q-btn v-for="a in AVATARS" :key="a.key" round dense
-                   :color="form.avatar_key === a.key ? 'primary' : 'grey-3'"
-                   :text-color="form.avatar_key === a.key ? 'white' : 'dark'"
-                   :label="a.emoji" @click="form.avatar_key = a.key" />
-          </div>
-        </div>
-        <q-input v-model="form.website" class="jg-hp" tabindex="-1" autocomplete="off"
-                 aria-hidden="true" label="Leave blank" />
-        <q-toggle v-model="form.marketing_opt_in" color="primary" class="q-mt-sm"
-                  label="Email me great kids' activities (optional)" />
-        <q-btn class="full-width q-mt-md" unelevated color="primary" no-caps size="lg"
-               :loading="saving" :disable="!form.parent_name || !form.email"
-               label="RSVP &amp; vote" data-testid="rsvp-submit" @click="submitRsvp" />
-      </section>
-
-      <!-- Voting -->
+      <!-- One page: enter your details, then tap a party to vote (no approval, no second step) -->
       <template v-else>
-        <q-banner v-if="mine?.status === 'pending'" dense class="bg-amber-1 text-amber-9 q-mb-md">
-          Thanks for your RSVP! The host will approve you shortly — then you can vote.
-        </q-banner>
+        <!-- Identity: collected once; a first vote tap submits it. After that, a compact summary. -->
+        <section class="jg-card q-pa-lg q-mb-md">
+          <template v-if="!inviteToken">
+            <div class="text-weight-600 q-mb-xs">Your details</div>
+            <div class="jg-faint text-caption q-mb-md">
+              No account needed — add your name and email, then tap your favourite party below to vote.
+            </div>
+            <q-input v-model="form.parent_name" outlined dense label="Your name" class="q-mb-sm"
+                     data-testid="rsvp-name" />
+            <q-input v-model="form.email" outlined dense type="email" label="Email" class="q-mb-sm"
+                     data-testid="rsvp-email" />
+            <q-input v-model.number="form.kid_count" outlined dense type="number" min="0" max="50"
+                     label="How many kids are you bringing?" class="q-mb-sm" style="max-width: 260px"
+                     data-testid="rsvp-kids" />
+            <q-input v-model="form.nickname" outlined dense label="Display name (optional)"
+                     hint="Shown on the guest board — no kids' names please" class="q-mb-sm" maxlength="80" />
+            <div class="q-mb-sm">
+              <div class="jg-faint text-caption q-mb-xs">Pick an avatar</div>
+              <div class="row q-gutter-xs">
+                <q-btn v-for="a in AVATARS" :key="a.key" round dense
+                       :color="form.avatar_key === a.key ? 'primary' : 'grey-3'"
+                       :text-color="form.avatar_key === a.key ? 'white' : 'dark'"
+                       :label="a.emoji" @click="form.avatar_key = a.key" />
+              </div>
+            </div>
+            <q-input v-model="form.website" class="jg-hp" tabindex="-1" autocomplete="off"
+                     aria-hidden="true" label="Leave blank" />
+            <q-toggle v-model="form.marketing_opt_in" color="primary" class="q-mt-sm"
+                      label="Email me great kids' activities (optional)" />
+          </template>
+          <div v-else class="row items-center q-gutter-md">
+            <q-avatar color="grey-2" size="44px" style="font-size: 24px">
+              {{ avatarEmoji(form.avatar_key) }}
+            </q-avatar>
+            <div class="col">
+              <div class="text-weight-600">You're in{{ form.nickname ? `, ${form.nickname}` : '' }}! 🎉</div>
+              <div class="jg-faint text-caption">Tap a party below to cast or change your vote.</div>
+            </div>
+          </div>
+        </section>
 
         <section class="jg-card q-pa-lg q-mb-md">
           <div class="row items-center justify-between q-mb-sm">
@@ -84,7 +91,7 @@
           <div v-for="o in liveOptions" :key="o.id"
                class="jg-vote" :class="{ 'jg-vote--mine': o.id === myVote }"
                data-testid="vote-option">
-            <div class="jg-vote__main" @click="vote(o.id, $event)">
+            <div class="jg-vote__main" @click="voteOrRsvp(o.id, $event)">
               <div class="col">
                 <div class="text-weight-500">
                   {{ optionTitle(o) }}
@@ -109,9 +116,8 @@
               </button>
             </div>
           </div>
-          <div v-if="!canVote" class="jg-faint text-caption q-mt-sm">
-            {{ mine?.status === 'pending' ? 'Voting unlocks once the host approves you.'
-               : 'Voting is closed.' }}
+          <div v-if="!inviteToken" class="jg-faint text-caption q-mt-sm">
+            Add your name and email above, then tap a party to vote.
           </div>
         </section>
 
@@ -236,7 +242,11 @@ async function refresh(): Promise<void> {
   view.value = await api.partyPlanner.publicPlan(props.token)
 }
 
-async function submitRsvp(): Promise<void> {
+async function submitRsvp(): Promise<boolean> {
+  if (!form.value.parent_name || !form.value.email) {
+    $q.notify({ type: 'warning', message: 'Add your name and email to vote' })
+    return false
+  }
   saving.value = true
   try {
     const res = await api.partyPlanner.openRsvp(props.token, {
@@ -251,12 +261,21 @@ async function submitRsvp(): Promise<void> {
     inviteToken.value = res.invite_token
     localStorage.setItem(INVITE_KEY.value, res.invite_token)
     await refresh()
-    $q.notify({ type: 'positive', message: 'RSVP received — now cast your vote!' })
+    return true
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err, 'Could not RSVP') })
+    return false
   } finally {
     saving.value = false
   }
+}
+
+// One-step RSVP-and-vote: a first tap on a party auto-creates the RSVP (name + email required)
+// then records the vote — no host approval, no separate submit step.
+async function voteOrRsvp(optionId: string, event?: MouseEvent): Promise<void> {
+  if (view.value?.status !== 'open' || saving.value) return
+  if (!inviteToken.value && !(await submitRsvp())) return
+  await vote(optionId, event)
 }
 
 async function vote(optionId: string, event?: MouseEvent): Promise<void> {

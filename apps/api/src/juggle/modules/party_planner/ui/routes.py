@@ -298,11 +298,11 @@ def public_plan(plan_token: str, session: SessionDep) -> schemas.PublicPlanView:
 )
 def open_rsvp(
     plan_token: str, body: schemas.OpenRsvpIn, request: Request, session: SessionDep,
-    email_gateway: EmailGatewayDep,
 ) -> schemas.InviteCreatedOut:
     # Honeypot: silently accept-and-drop bot submissions with a plausible (unpersisted) receipt.
+    # The status mirrors a real auto-approved RSVP so the drop is indistinguishable from success.
     if body.website:
-        return schemas.InviteCreatedOut(invite_token=service._token(), status="pending")
+        return schemas.InviteCreatedOut(invite_token=service._token(), status="approved")
     plan = service.get_plan_by_token(session, plan_token)
     if plan is None:
         raise _GENERIC_404
@@ -313,7 +313,6 @@ def open_rsvp(
             session, plan=plan, parent_name=body.parent_name, email=body.email,
             attending=body.attending, kid_count=body.kid_count, nickname=body.nickname,
             avatar_key=body.avatar_key, marketing_opt_in=body.marketing_opt_in,
-            email_gateway=email_gateway,
         )
     except service.RateLimited as exc:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many requests") from exc

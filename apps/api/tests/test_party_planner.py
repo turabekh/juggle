@@ -139,19 +139,16 @@ def test_full_vote_to_book_flow(client: TestClient, db: Session, flag_on: None) 
     pkg_options = [o for o in pub["options"] if o["kind"] == "package"]
     assert all(o["available"] for o in pkg_options)
 
-    # Two guests RSVP (approval pending by default) → not on board/tally yet.
+    # Two guests RSVP via the share link → auto-approved (no host approval step) → on the board and
+    # able to vote immediately.
     inv1 = _rsvp(client, token, kid_count=6)
     inv2 = _rsvp(client, token, kid_count=4)
     pub = client.get(f"{PREFIX}/public/{token}").json()
-    assert pub["rsvp_count"] == 0  # unapproved
-
-    # Host approves both.
-    view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
-    for inv in view["invites"]:
-        client.post(f"{PREFIX}/plans/{pid}/invites/{inv['id']}/approve", headers=_auth(host))
+    assert pub["rsvp_count"] == 2  # counted immediately — no approval gate
 
     winning_option = pkg_options[0]["id"]
-    client.put(f"{PREFIX}/invite/{inv1}/vote", json={"option_id": winning_option})
+    assert client.put(f"{PREFIX}/invite/{inv1}/vote",
+                      json={"option_id": winning_option}).status_code == 200
     client.put(f"{PREFIX}/invite/{inv2}/vote", json={"option_id": winning_option})
     pub = client.get(f"{PREFIX}/public/{token}").json()
     assert pub["rsvp_count"] == 2
@@ -210,18 +207,23 @@ def test_vote_rejected_after_resolution(client: TestClient, db: Session, flag_on
 # --- Approval queue + option void ------------------------------------------
 
 
-def test_pending_rsvp_excluded_until_approved(
+def test_open_rsvp_is_auto_approved_and_can_vote(
     client: TestClient, db: Session, flag_on: None
 ) -> None:
+    # Anyone with the share link is approved on RSVP (no host approval step) → immediately on the
+    # board and able to vote in one step.
     host = _signup(client)
     package_id, slots = _package_with_slots(client, host)
     opened = _build_open_plan(client, host, package_id, slots)
     pid, token = opened["id"], opened["share_token"]
-    _rsvp(client, token, nickname="Pending Pat")
+    inv = _rsvp(client, token, nickname="Prompt Pat")
     pub = client.get(f"{PREFIX}/public/{token}").json()
-    assert pub["rsvp_count"] == 0 and pub["board"] == []
+    assert pub["rsvp_count"] == 1 and len(pub["board"]) == 1
     view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
-    assert view["invites"][0]["status"] == "pending"
+    assert view["invites"][0]["status"] == "approved"
+    # Voting works with no intervening /approve call.
+    opt = next(o["id"] for o in view["options"] if o["kind"] == "package")
+    assert client.put(f"{PREFIX}/invite/{inv}/vote", json={"option_id": opt}).status_code == 200
 
 
 def test_removing_voted_option_voids_its_tally(
@@ -437,6 +439,8 @@ def test_honeypot_silently_drops(client: TestClient, db: Session, flag_on: None)
         "kid_count": 1, "website": "http://spam.example",
     })
     assert resp.status_code == 201  # looks successful
+    # Response is indistinguishable from a real auto-approved RSVP (no honeypot tell).
+    assert resp.json()["status"] == "approved"
     view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
     assert view["invites"] == []  # nothing persisted
 
@@ -474,11 +478,15 @@ def test_blocked_invitee_cannot_edit_rsvp(
     pid, token = opened["id"], opened["share_token"]
     inv = _rsvp(client, token)
     view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
+    opt = next(o["id"] for o in view["options"] if o["kind"] == "package")
     client.post(f"{PREFIX}/plans/{pid}/invites/{view['invites'][0]['id']}/block",
                 headers=_auth(host))
     resp = client.put(f"{PREFIX}/invite/{inv}/rsvp",
                       json={"attending": True, "kid_count": 9})
     assert resp.status_code == 409  # opaque; no "you're blocked" oracle
+    # Moderation still gates voting even though RSVPs auto-approve.
+    assert client.put(f"{PREFIX}/invite/{inv}/vote",
+                      json={"option_id": opt}).status_code == 403
 
 
 def test_html_and_urls_stripped_from_public_text(

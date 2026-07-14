@@ -77,7 +77,10 @@ class PartyPlan(UUIDPkMixin, TimestampMixin, Base):
     birthday_kid_ranking: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     # Opaque ≥128-bit share token, set when the plan opens; noindex, expires at the deadline.
     token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
-    approval_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Open-link RSVPs are auto-approved so anyone with the share link can vote immediately (one-step
+    # RSVP-and-vote). The field is retained so a host can still block/remove abusers (moderation),
+    # and to leave room for an opt-in approval mode later; it defaults OFF.
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Soft reference to the winning plan_option (nullable = tie the host must break). Not a hard
     # FK to avoid a circular plan↔option dependency; options are voided, never hard-deleted.
     winning_option_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)

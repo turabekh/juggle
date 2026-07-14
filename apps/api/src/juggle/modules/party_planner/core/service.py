@@ -287,7 +287,9 @@ def _approved_yes_headcount(db: Session, plan_id: uuid.UUID) -> int:
 
 
 def create_plan(db: Session, *, host_id: uuid.UUID, theme: str = "default") -> PartyPlan:
-    plan = PartyPlan(host_user_id=host_id, status=PlanStatus.draft, theme=theme[:40])
+    plan = PartyPlan(
+        host_user_id=host_id, status=PlanStatus.draft, theme=theme[:40], approval_required=False
+    )
     db.add(plan)
     db.flush()
     return plan
@@ -564,10 +566,17 @@ def open_rsvp(
     db: Session, *, plan: PartyPlan, parent_name: str, email: str, attending: bool,
     kid_count: int, nickname: str | None, avatar_key: str | None,
     marketing_opt_in: bool, now: datetime | None = None,
-    email_gateway: EmailGateway | None = None,
 ) -> PlanInvite:
-    """Open-link self-RSVP. Creates an invite (pending if approval_required) + its RSVP, and
-    records marketing consent to the detached, purge-exempt store (edge 7)."""
+    """Open-link self-RSVP. Anyone with the share link is auto-approved (unless the plan opts into
+    approval) so they can vote immediately, and marketing consent is recorded to the detached,
+    purge-exempt store (edge 7).
+
+    No confirmation email is sent from this unauthenticated endpoint: the guest is already on the
+    page (their invite token is returned + stored client-side), and emailing the address they typed
+    would be an email-bombing vector now that RSVPs auto-approve (an attacker could spray
+    confirmations to arbitrary addresses). The winning-party announcement still reaches them at
+    resolution via the invite's stored email.
+    """
     now = now or _now()
     _rsvp_open(plan, now)
     maxlen = config_service.party_planner_custom_option_maxlen(db)
@@ -584,13 +593,6 @@ def open_rsvp(
     if marketing_opt_in:
         db.add(PlanMarketingConsent(email=email.strip().lower(), source="party_planner_rsvp"))
         db.flush()
-    # Only confirm to already-approved invites (approval_required=False plans). When approval is on
-    # (default), a pending open-link RSVP gets no email — closing an email-bombing vector on this
-    # unauthenticated endpoint (an attacker can't spray confirmations to arbitrary addresses).
-    if email_gateway is not None and invite.status is PlanInviteStatus.approved:
-        notifications_service.notify_planner_rsvp(
-            db, to_email=invite.email, link=_share_link(plan, invite.token), gateway=email_gateway,
-        )
     return invite
 
 
