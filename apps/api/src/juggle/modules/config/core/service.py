@@ -44,6 +44,8 @@ KEY_PARTY_PLANNER_EXTEND_HOURS = "party_planner_extend_hours"
 KEY_PARTY_PLANNER_PURGE_DAYS = "party_planner_purge_days"
 KEY_PARTY_PLANNER_RSVP_RATE_PER_HOUR = "party_planner_rsvp_rate_per_hour"
 KEY_PARTY_PLANNER_CUSTOM_OPTION_MAXLEN = "party_planner_custom_option_maxlen"
+KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN = "party_planner_page_title_maxlen"
+KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN = "party_planner_page_message_maxlen"
 
 
 @dataclass(frozen=True)
@@ -137,6 +139,14 @@ REGISTRY: dict[str, SettingSpec] = {
     KEY_PARTY_PLANNER_CUSTOM_OPTION_MAXLEN: SettingSpec(
         KEY_PARTY_PLANNER_CUSTOM_OPTION_MAXLEN, 80, int, 10, 200,
         "Max length of a custom option / nickname on a public plan page (ADR-0011)",
+    ),
+    KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN: SettingSpec(
+        KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN, 60, int, 10, 120,
+        "Max length of the host-set party page title (ADR-0011 party page)",
+    ),
+    KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN: SettingSpec(
+        KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN, 280, int, 0, 1000,
+        "Max length of the host-set party page welcome message (ADR-0011 party page)",
     ),
 }
 
@@ -328,3 +338,11 @@ def party_planner_rsvp_rate_per_hour(db: Session) -> int:
 
 def party_planner_custom_option_maxlen(db: Session) -> int:
     return int(get_value(db, KEY_PARTY_PLANNER_CUSTOM_OPTION_MAXLEN))
+
+
+def party_planner_page_title_maxlen(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN))
+
+
+def party_planner_page_message_maxlen(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN))

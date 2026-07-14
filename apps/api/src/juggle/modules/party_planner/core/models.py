@@ -72,6 +72,17 @@ class PartyPlan(UUIDPkMixin, TimestampMixin, Base):
     )
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     theme: Mapped[str] = mapped_column(String(40), default="default", nullable=False)
+    # --- Party page (host-customizable public surface; all pseudonymous, INV-3/INV-13) ---
+    # Parent-chosen party title/nickname + a host welcome note. Both are untrusted host free text,
+    # sanitised (HTML/URL strip, profanity mask, length cap) like custom-option text (edge 8) —
+    # never a child's real name/surname (guidance-enforced, like the nickname board field).
+    page_title: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    page_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Big hero avatar for the page top (∈ AVATAR_KEYS) — a sticker, never a child photo.
+    hero_avatar: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Enabled widget keys (subset of WIDGET_KEYS); empty/absent ⇒ all widgets on. The vote panel is
+    # always shown and is not a toggle.
+    page_widgets: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     # Ordered list of plan_option ids (as strings) = the birthday kid's ranking; drives the
     # ⭐ badge and the resolution tie-break (ADR-0011 edge 4). Voided entries are skipped.
     birthday_kid_ranking: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)

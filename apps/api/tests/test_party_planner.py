@@ -516,6 +516,73 @@ def test_set_theme_and_reject_unknown(client: TestClient, db: Session, flag_on: 
     assert bad.status_code == 400
 
 
+# --- Party page (host-customizable public page) ----------------------------
+
+
+def test_party_page_defaults_to_all_widgets_on(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host = _signup(client)
+    plan = client.post(f"{PREFIX}/plans", headers=_auth(host), json={}).json()
+    page = plan["page"]
+    assert page["template"] == "default" and page["title"] is None and page["hero_avatar"] is None
+    assert set(page["widgets"]) == {"welcome", "countdown", "board", "reveal_venue"}
+
+
+def test_update_party_page_reflected_in_host_and_public_views(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots)
+    pid, token = opened["id"], opened["share_token"]
+    resp = client.put(f"{PREFIX}/plans/{pid}/page", headers=_auth(host), json={
+        "template": "princess", "title": "Dino's Big Day", "message": "Come celebrate with us!",
+        "hero_avatar": "unicorn", "widgets": ["countdown", "welcome"],
+    })
+    assert resp.status_code == 200
+    page = resp.json()["page"]
+    assert page["template"] == "princess" and page["title"] == "Dino's Big Day"
+    assert page["hero_avatar"] == "unicorn"
+    assert page["widgets"] == ["welcome", "countdown"]  # canonical order, not request order
+    # The public invitee view carries the same page config so the page can render.
+    pub = client.get(f"{PREFIX}/public/{token}").json()
+    assert pub["page"]["template"] == "princess"
+    assert pub["page"]["message"] == "Come celebrate with us!"
+
+
+def test_party_page_text_sanitised_and_widgets_and_template_validated(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host = _signup(client)
+    plan = client.post(f"{PREFIX}/plans", headers=_auth(host), json={}).json()
+    pid = plan["id"]
+    resp = client.put(f"{PREFIX}/plans/{pid}/page", headers=_auth(host), json={
+        "template": "space", "title": "<b>Hi</b> http://evil.example",
+        "message": "<script>x</script> come to http://spam.example now",
+        "hero_avatar": "not-a-real-avatar", "widgets": ["bogus", "welcome"],
+    })
+    assert resp.status_code == 200
+    page = resp.json()["page"]
+    assert "<" not in page["title"] and "http" not in page["title"]
+    assert "<" not in page["message"] and "http" not in page["message"]
+    assert page["hero_avatar"] is None  # unknown avatar dropped
+    assert page["widgets"] == ["welcome"]  # unknown widget key dropped
+    # Unknown template rejected.
+    bad = client.put(f"{PREFIX}/plans/{pid}/page", headers=_auth(host), json={"template": "hacker"})
+    assert bad.status_code == 400
+
+
+def test_party_page_edit_forbidden_to_non_host(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    host, other = _signup(client), _signup(client)
+    plan = client.post(f"{PREFIX}/plans", headers=_auth(host), json={}).json()
+    resp = client.put(f"{PREFIX}/plans/{plan['id']}/page", headers=_auth(other),
+                      json={"template": "dino"})
+    assert resp.status_code == 403
+
+
 def test_emoji_reaction_toggles_and_aggregates(
     client: TestClient, db: Session, flag_on: None
 ) -> None:

@@ -74,6 +74,18 @@ class ThemeIn(BaseModel):
     theme: str = Field(max_length=40)
 
 
+class PagePatchIn(BaseModel):
+    """Full-state update of the party page. The editor holds all fields and sends them together;
+    title/message are untrusted host text (sanitised server-side), template/hero_avatar/widgets are
+    validated against closed allow-lists."""
+
+    template: str = Field(default="default", max_length=40)
+    title: str = Field(default="", max_length=200)
+    message: str = Field(default="", max_length=2000)
+    hero_avatar: str | None = Field(default=None, max_length=40)
+    widgets: list[str] = Field(default_factory=list, max_length=16)
+
+
 class ReactIn(BaseModel):
     option_id: uuid.UUID
     emoji: str = Field(max_length=16)
@@ -99,6 +111,18 @@ class OptionView(BaseModel):
     votes: int = 0
     is_favourite: bool = False  # ⭐ birthday kid's top-ranked non-voided option
     reactions: dict[str, int] = {}  # emoji → count (aggregate, unattributed)
+
+
+class PartyPageView(BaseModel):
+    """Host-customizable party page config, echoed to both host + public views. All pseudonymous:
+    a parent-chosen title/nickname + a sticker avatar + a template + enabled widget keys — never
+    child PII (INV-3/INV-13)."""
+
+    template: str
+    title: str | None
+    message: str | None
+    hero_avatar: str | None
+    widgets: list[str]
 
 
 class BoardEntry(BaseModel):
@@ -134,6 +158,7 @@ class PlanView(BaseModel):
     options: list[OptionView]
     invites: list[HostInviteView]
     rsvp_yes_headcount: int
+    page: PartyPageView
     deadline_warnings: list[str] = []
     # Transient — populated only by the confirm response so the host can settle the deposit
     # (live: mount the Payment Element; dev: dev-confirm the booking).
@@ -152,6 +177,7 @@ class PublicPlanView(BaseModel):
     options: list[OptionView]
     board: list[BoardEntry]
     rsvp_count: int
+    page: PartyPageView
     winner_option_id: uuid.UUID | None = None
     is_tie: bool = False
 

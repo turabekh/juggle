@@ -184,6 +184,24 @@ def set_theme(
     return _host_plan(session, plan_id, principal.user_id)
 
 
+@router.put("/plans/{plan_id}/page", response_model=schemas.PlanView)
+def update_page(
+    plan_id: uuid.UUID, body: schemas.PagePatchIn,
+    principal: CurrentPrincipal, session: SessionDep,
+) -> schemas.PlanView:
+    try:
+        service.update_page(
+            session, plan_id=plan_id, actor_id=principal.user_id,
+            template=body.template, title=body.title, message=body.message,
+            hero_avatar=body.hero_avatar, widgets=body.widgets,
+        )
+    except service.InvalidTheme as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown template") from exc
+    except Exception as exc:
+        raise _map_host_error(exc) from exc
+    return _host_plan(session, plan_id, principal.user_id)
+
+
 @router.post("/plans/{plan_id}/open", response_model=schemas.PlanView)
 def open_plan(
     plan_id: uuid.UUID, principal: CurrentPrincipal, session: SessionDep

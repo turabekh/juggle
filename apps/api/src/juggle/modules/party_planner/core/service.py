@@ -132,7 +132,14 @@ AVATAR_KEYS = frozenset(
     {"dino", "rocket", "unicorn", "star", "cat", "dog", "robot", "fox", "panda", "owl",
      "dragon", "balloon"}
 )
-THEMES = frozenset({"default", "dino", "space", "unicorn"})
+# Party page templates (theme skins). A style choice only — the child's gender is never stored;
+# the frontend `planTheme.ts` carries the matching colours/decorations for each key.
+THEMES = frozenset(
+    {"default", "unicorn", "princess", "superhero", "dino", "space", "rainbow", "mermaid", "jungle"}
+)
+# Host-toggleable page widgets, in display order. The vote panel is always shown (not a member).
+WIDGET_KEYS_ORDER = ("welcome", "countdown", "board", "reveal_venue")
+WIDGET_KEYS = frozenset(WIDGET_KEYS_ORDER)
 # Fixed emoji set for one-tap reactions — a closed allow-list (no arbitrary strings on the
 # public page).
 REACTION_EMOJIS = frozenset({"❤️", "🎉", "🔥", "😍", "👍", "🤩"})
@@ -306,6 +313,37 @@ def set_theme(
     if theme not in THEMES:
         raise InvalidTheme(theme)
     plan.theme = theme
+    db.flush()
+    return plan
+
+
+def update_page(
+    db: Session, *, plan_id: uuid.UUID, actor_id: uuid.UUID,
+    template: str, title: str, message: str, hero_avatar: str | None, widgets: list[str],
+) -> PartyPlan:
+    """Full-state update of the host-customizable party page. Host-only, editable while draft/open.
+    Title/message are untrusted host text → sanitised (HTML/URL strip, profanity mask, length cap),
+    like custom-option text (edge 8); they must never carry a child's real name (guidance, like the
+    nickname board field). Template/avatar/widgets are validated against closed allow-lists.
+    """
+    plan = _lock_plan(db, plan_id)
+    if plan is None:
+        raise PlanNotFound(str(plan_id))
+    _require_host(plan, actor_id)
+    _editable(plan)
+    if template not in THEMES:
+        raise InvalidTheme(template)
+    clean_title = _sanitise_public_text(title, config_service.party_planner_page_title_maxlen(db))
+    clean_msg = _sanitise_public_text(
+        message, config_service.party_planner_page_message_maxlen(db)
+    )
+    plan.theme = template
+    plan.page_title = clean_title or None
+    plan.page_message = clean_msg or None
+    plan.hero_avatar = hero_avatar if hero_avatar in AVATAR_KEYS else None
+    # Keep only known widget keys, de-duplicated in the canonical WIDGET_KEYS order.
+    enabled = {w for w in widgets if w in WIDGET_KEYS}
+    plan.page_widgets = [w for w in WIDGET_KEYS_ORDER if w in enabled]
     db.flush()
     return plan
 
@@ -1075,6 +1113,17 @@ def host_plan_view(db: Session, plan: PartyPlan) -> schemas.PlanView:
         options=_option_views(db, plan, include_voided=True), invites=invite_views,
         rsvp_yes_headcount=_approved_yes_headcount(db, plan.id),
         deadline_warnings=deadline_warnings(db, plan),
+        page=_page_view(plan),
+    )
+
+
+def _page_view(plan: PartyPlan) -> schemas.PartyPageView:
+    """The host-customizable party page config, echoed to both host + public views. Empty
+    ``page_widgets`` means 'all widgets on' (the default before a host customises)."""
+    widgets = list(plan.page_widgets) if plan.page_widgets else list(WIDGET_KEYS_ORDER)
+    return schemas.PartyPageView(
+        template=plan.theme, title=plan.page_title, message=plan.page_message,
+        hero_avatar=plan.hero_avatar, widgets=widgets,
     )
 
 
@@ -1106,7 +1155,7 @@ def public_plan_view(
     return schemas.PublicPlanView(
         status=plan.status.value, is_open=is_open, deadline_at=plan.deadline_at, theme=plan.theme,
         options=_option_views(db, plan), board=board, rsvp_count=count,
-        winner_option_id=plan.winning_option_id, is_tie=is_tie,
+        winner_option_id=plan.winning_option_id, is_tie=is_tie, page=_page_view(plan),
     )
 
 
