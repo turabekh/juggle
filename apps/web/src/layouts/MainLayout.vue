@@ -28,6 +28,14 @@
             label="My bookings"
             class="jg-nav__link"
           />
+          <q-btn
+            v-if="auth.isAuthed"
+            flat
+            no-caps
+            :to="{ name: 'party-plans' }"
+            label="Party votes"
+            class="jg-nav__link"
+          />
         </nav>
 
         <div class="jg-header__actions">
@@ -73,7 +81,7 @@
                   </q-item>
                   <q-item clickable v-close-popup :to="{ name: 'party-plans' }">
                     <q-item-section avatar><q-icon name="how_to_vote" /></q-item-section>
-                    <q-item-section>Party plans</q-item-section>
+                    <q-item-section>Party votes</q-item-section>
                   </q-item>
                   <q-item clickable v-close-popup :to="{ name: 'account' }">
                     <q-item-section avatar><q-icon name="face" /></q-item-section>

@@ -1,7 +1,7 @@
 <template>
   <q-page class="jg-page" style="max-width: 720px">
     <div class="row items-center justify-between q-mb-lg">
-      <h1 class="text-h4 q-my-none">Party plans</h1>
+      <h1 class="text-h4 q-my-none">Party votes</h1>
       <q-btn
         unelevated color="primary" no-caps icon="add" label="New plan"
         :loading="creating" @click="createPlan"
