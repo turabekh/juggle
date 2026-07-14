@@ -275,6 +275,12 @@ async function submitRsvp(): Promise<boolean> {
 async function voteOrRsvp(optionId: string, event?: MouseEvent): Promise<void> {
   if (view.value?.status !== 'open' || saving.value) return
   if (!inviteToken.value && !(await submitRsvp())) return
+  // Auto-approval means this is normally true right after RSVP; give feedback rather than a silent
+  // no-op if it isn't (a legacy approval-required plan, or a host-blocked guest).
+  if (!canVote.value) {
+    $q.notify({ type: 'warning', message: "You can't vote on this party right now." })
+    return
+  }
   await vote(optionId, event)
 }
 
