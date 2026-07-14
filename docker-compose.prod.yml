@@ -1,0 +1,96 @@
+# Juggle — production stack for a single host (e.g. a GCP Compute Engine VM).
+#
+# Reads all secrets from a local .env file (copy .env.production.example → .env
+# and fill it in). NEVER commit .env — INV-9.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build       # start / redeploy
+#   docker compose -f docker-compose.prod.yml logs -f api         # tail a service
+#   docker compose -f docker-compose.prod.yml down                # stop (keeps volumes)
+#
+# Services: db (internal) → migrate (one-shot) → api + worker → web (Caddy edge on 80/443).
+name: juggle
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: juggle
+      POSTGRES_PASSWORD: ${JUGGLE_DB_PASSWORD:?set JUGGLE_DB_PASSWORD in .env}
+      POSTGRES_DB: juggle
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U juggle -d juggle"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # No published port: the DB is reachable only inside the compose network.
+
+  # One-shot schema migration. api + worker wait for this to finish before starting,
+  # so migrations never race and never run twice concurrently.
+  migrate:
+    build:
+      context: ./apps/api
+    env_file: .env
+    command: alembic upgrade head
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./apps/api
+    env_file: .env
+    command: uvicorn juggle.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - "8000"          # internal only; the web/Caddy edge proxies to it
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # Background maintenance tick (scheduler): reclaim expired holds, waitlist sweep,
+  # party-planner resolution/nudges/purge, reminders. Idempotent; safe on a loop.
+  worker:
+    build:
+      context: ./apps/api
+    env_file: .env
+    command: python -m juggle.worker --loop --interval 300
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Edge: serves the built SPA and reverse-proxies /api/* to the API.
+  # Auto-HTTPS when DOMAIN is a real hostname; plain HTTP on :80 otherwise.
+  web:
+    build:
+      context: ./apps/web
+    environment:
+      # Empty/unset DOMAIN -> ":80" (HTTP); a hostname -> Caddy auto-provisions HTTPS.
+      SITE_ADDRESS: ${DOMAIN:-:80}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data       # persists issued TLS certificates
+      - caddy_config:/config
+
+volumes:
+  db_data:
+  caddy_data:
+  caddy_config:

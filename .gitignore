@@ -17,6 +17,7 @@ uv.lock
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Node / Quasar
 node_modules/

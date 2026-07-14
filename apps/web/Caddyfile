@@ -1,0 +1,26 @@
+# Edge server for the Juggle SPA. SITE_ADDRESS is set by compose from DOMAIN:
+#   DOMAIN unset/empty -> ":80"  (plain HTTP on every host — fine for first boot / IP access)
+#   DOMAIN=host        -> automatic HTTPS via Let's Encrypt (needs 80/443 open + DNS A record)
+{$SITE_ADDRESS::80} {
+	encode gzip zstd
+
+	# `handle` blocks are mutually exclusive and ordered, so the SPA's try_files rewrite
+	# never touches API requests. API calls from the SPA are same-origin (/api/v1/...).
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Everything else: serve the built SPA with HTML5-history fallback so deep links
+	# (e.g. /parties/plan/<token>) resolve to index.html.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		# The invite/party pages set their own noindex; these are baseline hardening.
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
