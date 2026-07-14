@@ -18,6 +18,32 @@
     </section>
 
     <div class="jg-page">
+      <!-- Your party votes — surfaced here so a created plan is visible without hunting -->
+      <section v-if="authed && myPlans.length" class="q-mb-xl">
+        <div class="row items-center justify-between q-mb-sm">
+          <h2 class="text-h6 q-my-none">Your party votes</h2>
+          <q-btn unelevated color="primary" no-caps dense icon="add" label="New vote"
+                 :loading="creating" @click="createVote" />
+        </div>
+        <div class="jg-plan-strip">
+          <router-link
+            v-for="p in myPlans" :key="p.id"
+            :to="{ name: 'party-plan-manage', params: { id: p.id } }"
+            class="jg-card jg-plan-card"
+          >
+            <div class="row items-center q-gutter-sm no-wrap">
+              <div class="jg-plan-card__glyph">{{ planGlyph(p) }}</div>
+              <div class="col overflow-hidden">
+                <div class="text-weight-600 ellipsis">{{ planDisplayTitle(p) }}</div>
+                <div class="jg-faint text-caption ellipsis">{{ planSummary(p) }}</div>
+              </div>
+            </div>
+            <q-chip dense square :color="planStatusColor(p.status)" text-color="white"
+                    :label="planStatusLabel(p.status)" class="q-mt-sm self-start" />
+          </router-link>
+        </div>
+      </section>
+
       <div class="jg-results-head">
         <h2 class="text-h6 q-my-none">
           {{ loading ? 'Loading…' : `${packages.length} ${packages.length === 1 ? 'package' : 'packages'}` }}
@@ -74,16 +100,24 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useQuasar } from 'quasar'
+import { useRouter } from 'vue-router'
 
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
 import { money } from '@/lib/format'
 import { useHead } from '@/lib/head'
-import type { PartyPackageDetail } from '@/lib/types'
+import {
+  planDisplayTitle, planGlyph, planStatusColor, planStatusLabel, planSummary,
+} from '@/lib/partyPage'
+import { useAuthStore } from '@/stores/auth'
+import type { PartyPackageDetail, PlanView } from '@/lib/types'
 
 const $q = useQuasar()
+const router = useRouter()
+const auth = useAuthStore()
+const authed = computed(() => auth.isAuthed)
 
 useHead(() => ({
   title: 'Kids birthday party venues & packages in Perth | Juggle',
@@ -95,6 +129,20 @@ useHead(() => ({
 
 const packages = ref<PartyPackageDetail[]>([])
 const loading = ref(true)
+const myPlans = ref<PlanView[]>([])
+const creating = ref(false)
+
+async function createVote(): Promise<void> {
+  creating.value = true
+  try {
+    const plan = await api.partyPlanner.createPlan()
+    void router.push({ name: 'party-plan-manage', params: { id: plan.id } })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err) })
+  } finally {
+    creating.value = false
+  }
+}
 
 onMounted(async () => {
   try {
@@ -103,6 +151,13 @@ onMounted(async () => {
     $q.notify({ type: 'negative', message: apiError(err, 'Could not load party packages') })
   } finally {
     loading.value = false
+  }
+  if (authed.value) {
+    try {
+      myPlans.value = await api.partyPlanner.listPlans()
+    } catch {
+      // The party_planner flag may be off, or the request may fail — the section just stays hidden.
+    }
   }
 })
 </script>
@@ -129,6 +184,37 @@ onMounted(async () => {
   font-size: 16px;
   margin: 0;
   max-width: 520px;
+}
+.jg-plan-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(240px, 1fr);
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+@media (max-width: 600px) {
+  .jg-plan-strip { grid-auto-columns: 84%; }
+}
+.jg-plan-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 14px;
+  text-decoration: none;
+  color: var(--jg-ink);
+  transition: box-shadow 140ms ease, transform 140ms ease;
+}
+.jg-plan-card:hover { box-shadow: var(--jg-shadow-lg); transform: translateY(-2px); }
+.jg-plan-card__glyph {
+  font-size: 24px;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--jg-surface-2, #f4f4f8);
+  flex-shrink: 0;
 }
 .jg-results-head {
   display: flex;

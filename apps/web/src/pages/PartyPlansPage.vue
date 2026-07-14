@@ -22,15 +22,15 @@
         :to="{ name: 'party-plan-manage', params: { id: p.id } }"
         class="jg-card q-pa-md jg-plan-row"
       >
-        <div>
-          <div class="text-weight-600">{{ planTitle(p) }}</div>
-          <div class="jg-faint text-caption">
-            {{ p.options.filter((o) => !o.voided).length }} options ·
-            {{ p.invites.length }} invited
-            <template v-if="p.deadline_at"> · votes close {{ dayLabel(p.deadline_at) }}</template>
+        <div class="row items-center q-gutter-sm">
+          <div class="jg-plan-glyph">{{ planGlyph(p) }}</div>
+          <div>
+            <div class="text-weight-600">{{ planDisplayTitle(p) }}</div>
+            <div class="jg-faint text-caption">{{ planSummary(p) }}</div>
           </div>
         </div>
-        <q-chip dense square :color="statusColor(p.status)" text-color="white" :label="statusLabel(p.status)" />
+        <q-chip dense square :color="planStatusColor(p.status)" text-color="white"
+                :label="planStatusLabel(p.status)" />
       </router-link>
     </div>
 
@@ -52,7 +52,9 @@ import { useRouter } from 'vue-router'
 
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
-import { dayLabel } from '@/lib/format'
+import {
+  planDisplayTitle, planGlyph, planStatusColor, planStatusLabel, planSummary,
+} from '@/lib/partyPage'
 import type { PlanView } from '@/lib/types'
 
 const $q = useQuasar()
@@ -60,21 +62,6 @@ const router = useRouter()
 const plans = ref<PlanView[]>([])
 const loading = ref(true)
 const creating = ref(false)
-
-function planTitle(p: PlanView): string {
-  const first = p.options.find((o) => o.kind === 'package' && o.package_name)
-  return first?.package_name ? `${first.package_name} + more` : 'Untitled party vote'
-}
-
-const STATUS: Record<string, { label: string; color: string }> = {
-  draft: { label: 'Draft', color: 'grey-6' },
-  open: { label: 'Voting open', color: 'primary' },
-  resolved: { label: 'Ready to book', color: 'deep-orange' },
-  booked: { label: 'Booked', color: 'positive' },
-  expired_unbooked: { label: 'Closed', color: 'grey-5' },
-}
-const statusLabel = (s: string): string => STATUS[s]?.label ?? s
-const statusColor = (s: string): string => STATUS[s]?.color ?? 'grey'
 
 async function createPlan(): Promise<void> {
   creating.value = true
@@ -107,5 +94,15 @@ onMounted(async () => {
   gap: 12px;
   text-decoration: none;
   color: var(--jg-ink);
+}
+.jg-plan-glyph {
+  font-size: 26px;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--jg-surface-2, #f4f4f8);
+  flex-shrink: 0;
 }
 </style>

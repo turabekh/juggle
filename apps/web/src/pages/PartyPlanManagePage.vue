@@ -9,7 +9,7 @@
 
     <template v-else-if="plan">
       <div class="row items-center justify-between q-mb-md">
-        <h1 class="text-h4 q-my-none">Party vote</h1>
+        <h1 class="text-h4 q-my-none">{{ planDisplayTitle(plan) }}</h1>
         <q-chip dense square :color="statusColor" text-color="white" :label="statusLabel" />
       </div>
 
@@ -253,6 +253,7 @@ import PartyPageEditor from '@/components/PartyPageEditor.vue'
 import StripePaymentPanel from '@/components/StripePaymentPanel.vue'
 import { api, apiError } from '@/lib/api'
 import { dayLabel, money, timeRange } from '@/lib/format'
+import { planDisplayTitle } from '@/lib/partyPage'
 import type { PartyPackageDetail, PlanOptionView, PlanView } from '@/lib/types'
 
 const props = defineProps<{ id: string }>()
