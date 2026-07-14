@@ -30,6 +30,7 @@ import type {
   PartyPackage,
   PartyPackageCreate,
   PartyPackageDetail,
+  PartyPagePatch,
   PartySlot,
   PlanInviteCreated,
   PlanView,
@@ -523,6 +524,10 @@ export const api = {
     },
     async setTheme(id: string, theme: string): Promise<PlanView> {
       const { data } = await http.put<PlanView>(`/party-planner/plans/${id}/theme`, { theme })
+      return data
+    },
+    async updatePage(id: string, patch: PartyPagePatch): Promise<PlanView> {
+      const { data } = await http.put<PlanView>(`/party-planner/plans/${id}/page`, patch)
       return data
     },
     async openPlan(id: string): Promise<PlanView> {

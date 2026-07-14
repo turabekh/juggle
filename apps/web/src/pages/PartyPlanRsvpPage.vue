@@ -14,11 +14,23 @@
     </EmptyState>
 
     <template v-else>
-      <div class="jg-party-hero q-mb-lg">
-        <div class="jg-party-hero__emoji">{{ theme.emoji }}</div>
-        <h1 class="jg-party-hero__title">You're invited!</h1>
-        <p class="jg-party-hero__sub">Help pick the party — vote for your favourite below.</p>
-      </div>
+      <PartyHero :template="page.template" :title="page.title" :hero-avatar="page.hero_avatar"
+                 :subtitle="heroSubtitle" class="q-mb-md" />
+
+      <!-- Welcome note widget -->
+      <section v-if="showWelcome" class="jg-card q-pa-md q-mb-md row items-start no-wrap">
+        <q-icon name="waving_hand" size="20px" class="q-mr-sm" :style="{ color: 'var(--pt-accent)' }" />
+        <div class="jg-welcome">{{ page.message }}</div>
+      </section>
+
+      <!-- Countdown & decorations widget (open only) -->
+      <section v-if="view.status === 'open' && widgetOn(page.widgets, 'countdown')"
+               class="jg-countdown q-mb-md">
+        <div class="jg-countdown__deco">
+          <span v-for="(d, i) in theme.decorations" :key="i">{{ d }}</span>
+        </div>
+        <div class="jg-countdown__time">{{ countdown }}</div>
+      </section>
 
       <!-- Reveal (resolved) -->
       <section v-if="view.status !== 'open'" class="jg-card q-pa-lg q-mb-md text-center">
@@ -31,6 +43,11 @@
           <div class="text-h6 text-weight-700">{{ optionTitle(winner) }}</div>
           <div v-if="winner.starts_at" class="jg-muted q-mt-xs">
             {{ dayLabel(winner.starts_at) }} · {{ winner.venue_name }}
+          </div>
+          <div v-if="widgetOn(page.widgets, 'reveal_venue') && winner.venue_name" class="q-mt-sm">
+            <q-btn flat dense no-caps size="sm" icon="place" :style="{ color: 'var(--pt-accent)' }"
+                   :href="mapUrl(winner.venue_name)" target="_blank" rel="noopener"
+                   label="View on map" />
           </div>
         </template>
         <template v-else>
@@ -121,7 +138,7 @@
           </div>
         </section>
 
-        <section class="jg-card q-pa-md q-mb-md">
+        <section v-if="widgetOn(page.widgets, 'board')" class="jg-card q-pa-md q-mb-md">
           <div class="text-weight-600 q-mb-xs">Who's coming ({{ view.rsvp_count }})</div>
           <div class="row q-gutter-md">
             <div v-for="(b, i) in view.board" :key="i" class="text-center" style="width: 56px">
@@ -149,12 +166,14 @@ import { useQuasar } from 'quasar'
 import { useRoute } from 'vue-router'
 
 import EmptyState from '@/components/EmptyState.vue'
+import PartyHero from '@/components/PartyHero.vue'
 import { api, apiError } from '@/lib/api'
 import { confettiBurst } from '@/lib/confetti'
 import { dayLabel, money, timeRange } from '@/lib/format'
 import { useHead } from '@/lib/head'
+import { AVATARS, avatarEmoji, widgetOn } from '@/lib/partyPage'
 import { planTheme } from '@/lib/planTheme'
-import type { InviteSelfView, PlanOptionView, PublicPlanView } from '@/lib/types'
+import type { InviteSelfView, PartyPageView, PlanOptionView, PublicPlanView } from '@/lib/types'
 
 const props = defineProps<{ token: string }>()
 const $q = useQuasar()
@@ -164,20 +183,22 @@ const route = useRoute()
 useHead(() => ({ title: "You're invited! · Juggle party vote", noindex: true }))
 
 const REACTIONS = ['❤️', '🎉', '🔥', '😍', '👍', '🤩']
-const theme = computed(() => planTheme(view.value?.theme))
+const DEFAULT_PAGE: PartyPageView = {
+  template: 'default', title: null, message: null, hero_avatar: null,
+  widgets: ['welcome', 'countdown', 'board', 'reveal_venue'],
+}
+const page = computed<PartyPageView>(() => view.value?.page ?? DEFAULT_PAGE)
+const theme = computed(() => planTheme(page.value.template))
 const themeStyle = computed(() => theme.value.vars)
+const showWelcome = computed(() => widgetOn(page.value.widgets, 'welcome') && !!page.value.message)
+const heroSubtitle = computed(() =>
+  view.value?.status === 'open' ? 'Help pick the party — vote for your favourite below.' : null,
+)
+const mapUrl = (venue: string): string =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue)}`
 const myReactions = ref<Set<string>>(new Set())
 const nowMs = ref(Date.now())
 let ticker: ReturnType<typeof setInterval> | undefined
-
-const AVATARS = [
-  { key: 'dino', emoji: '🦖' }, { key: 'rocket', emoji: '🚀' }, { key: 'unicorn', emoji: '🦄' },
-  { key: 'star', emoji: '⭐' }, { key: 'cat', emoji: '🐱' }, { key: 'dog', emoji: '🐶' },
-  { key: 'robot', emoji: '🤖' }, { key: 'fox', emoji: '🦊' }, { key: 'panda', emoji: '🐼' },
-  { key: 'owl', emoji: '🦉' }, { key: 'dragon', emoji: '🐲' }, { key: 'balloon', emoji: '🎈' },
-]
-const avatarEmoji = (key: string | null): string =>
-  AVATARS.find((a) => a.key === key)?.emoji ?? '🎈'
 
 const loading = ref(true)
 const saving = ref(false)
@@ -344,18 +365,20 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.jg-party-hero {
+.jg-welcome { white-space: pre-wrap; line-height: 1.5; color: var(--jg-ink); }
+.jg-countdown {
   text-align: center;
-  padding: 24px 20px;
-  background: linear-gradient(120% 140% at 15% 0%, var(--pt-from, #fff4e6) 0%, var(--pt-to, #ffe9f2) 100%);
-  border-radius: 18px;
+  padding: 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--pt-accent, #7b1fa2) 8%, #fff);
+  border: 1px solid color-mix(in srgb, var(--pt-accent, #7b1fa2) 22%, transparent);
 }
-.jg-party-hero__emoji { font-size: 46px; animation: jg-bob 2.4s ease-in-out infinite; }
-.jg-party-hero__title { font-size: 28px; margin: 4px 0; }
-.jg-party-hero__sub { color: var(--jg-ink-soft); margin: 0; }
-@keyframes jg-bob {
-  0%, 100% { transform: translateY(0) rotate(-3deg); }
-  50% { transform: translateY(-6px) rotate(3deg); }
+.jg-countdown__deco { font-size: 22px; letter-spacing: 6px; }
+.jg-countdown__time {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 4px;
+  color: var(--pt-accent, var(--jg-primary));
 }
 .jg-vote {
   border: 1px solid var(--jg-line);

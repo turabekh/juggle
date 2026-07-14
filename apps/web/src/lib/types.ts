@@ -227,6 +227,24 @@ export interface PlanBoardEntry {
   avatar_key: string | null
 }
 
+export type PartyWidgetKey = 'welcome' | 'countdown' | 'board' | 'reveal_venue'
+
+export interface PartyPageView {
+  template: string
+  title: string | null
+  message: string | null
+  hero_avatar: string | null
+  widgets: PartyWidgetKey[]
+}
+
+export interface PartyPagePatch {
+  template: string
+  title: string
+  message: string
+  hero_avatar: string | null
+  widgets: PartyWidgetKey[]
+}
+
 export interface PlanHostInvite {
   id: string
   mode: 'open' | 'email'
@@ -253,6 +271,7 @@ export interface PlanView {
   options: PlanOptionView[]
   invites: PlanHostInvite[]
   rsvp_yes_headcount: number
+  page: PartyPageView
   deadline_warnings: string[]
   deposit_client_secret: string | null
   deposit_payment_id: string | null
@@ -267,6 +286,7 @@ export interface PublicPlanView {
   options: PlanOptionView[]
   board: PlanBoardEntry[]
   rsvp_count: number
+  page: PartyPageView
   winner_option_id: string | null
   is_tie: boolean
 }

@@ -46,15 +46,7 @@
           </div>
         </section>
 
-        <section class="jg-card q-pa-lg q-mb-md">
-          <div class="text-weight-600 q-mb-sm">Theme</div>
-          <div class="row q-gutter-sm">
-            <q-btn v-for="t in PLAN_THEMES" :key="t.key" no-caps unelevated
-                   :color="plan.theme === t.key ? 'primary' : 'grey-3'"
-                   :text-color="plan.theme === t.key ? 'white' : 'dark'"
-                   :label="`${t.emoji} ${t.label}`" @click="setTheme(t.key)" />
-          </div>
-        </section>
+        <PartyPageEditor :plan="plan" @saved="onPlanSaved" />
 
         <section class="jg-card q-pa-lg q-mb-md">
           <div class="text-weight-600 q-mb-sm">Voting deadline</div>
@@ -139,6 +131,8 @@
             </div>
           </div>
         </section>
+
+        <PartyPageEditor :plan="plan" @saved="onPlanSaved" />
       </template>
 
       <!-- ============ DEPOSIT HAND-OFF (after confirm; plan is already 'booked') ============ -->
@@ -255,10 +249,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useQuasar } from 'quasar'
 
+import PartyPageEditor from '@/components/PartyPageEditor.vue'
 import StripePaymentPanel from '@/components/StripePaymentPanel.vue'
 import { api, apiError } from '@/lib/api'
 import { dayLabel, money, timeRange } from '@/lib/format'
-import { PLAN_THEMES } from '@/lib/planTheme'
 import type { PartyPackageDetail, PlanOptionView, PlanView } from '@/lib/types'
 
 const props = defineProps<{ id: string }>()
@@ -423,8 +417,9 @@ async function saveFavourite(fav: string | null): Promise<void> {
 async function saveDeadline(): Promise<void> {
   await guard(() => api.partyPlanner.setDeadline(props.id, new Date(deadlineInput.value).toISOString()))
 }
-async function setTheme(themeKey: string): Promise<void> {
-  await guard(() => api.partyPlanner.setTheme(props.id, themeKey))
+function onPlanSaved(updated: PlanView): void {
+  plan.value = updated
+  favouriteId.value = updated.ranking[0] ?? favouriteId.value
 }
 async function openVoting(): Promise<void> {
   await guard(() => api.partyPlanner.openPlan(props.id))

@@ -51,6 +51,11 @@ test('invitees enter details and vote in one step via the public link; tally upd
     { package_id: packageId, slot_id: slotIds[1] }, host.token)
   await api.post(`/party-planner/plans/${pid}/options/custom`,
     { text: 'Backyard party at ours' }, host.token)
+  // Customise the party page — a pseudonymous title + template that must render on the public page.
+  await apiPut(`/party-planner/plans/${pid}/page`, {
+    template: 'superhero', title: "Dino's Big Day", message: 'Come celebrate with us!',
+    hero_avatar: 'dino', widgets: ['welcome', 'countdown', 'board', 'reveal_venue'],
+  }, host.token)
   const deadline = new Date(Date.now() + 90 * 60_000).toISOString() // 90 min out; stays open
   await apiPut(`/party-planner/plans/${pid}/deadline`, { deadline_at: deadline }, host.token)
   const shareToken = (await apiPost<{ share_token: string }>(
@@ -59,7 +64,9 @@ test('invitees enter details and vote in one step via the public link; tally upd
 
   // --- Invitee: enter details via the public link (no account), then tap a party to vote ---
   await page.goto(`/parties/plan/${shareToken}`, { waitUntil: 'networkidle' })
-  await expect(page.getByText("You're invited!")).toBeVisible()
+  // The host-customized party page renders (title + welcome widget).
+  await expect(page.getByRole('heading', { name: "Dino's Big Day" })).toBeVisible()
+  await expect(page.getByText('Come celebrate with us!')).toBeVisible()
   await page.getByLabel('Your name').fill('Alex Guest')
   await page.getByLabel('Email', { exact: true }).fill(uniqueEmail('guest'))
   await page.getByLabel('How many kids are you bringing?').fill('2')
