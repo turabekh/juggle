@@ -21,6 +21,7 @@ from juggle.modules.org.ui import router as org_router
 from juggle.modules.parties.ui import router as parties_router
 from juggle.modules.party_planner.ui import router as party_planner_router
 from juggle.modules.payments.ui import router as payments_router
+from juggle.modules.planner.ui import router as planner_router
 from juggle.modules.qanda.ui import router as qanda_router
 from juggle.modules.reviews.ui import router as reviews_router
 from juggle.modules.roster.ui import router as roster_router
@@ -37,6 +38,7 @@ for _router in (
     inventory_router,
     booking_router,
     party_planner_router,
+    planner_router,
     parties_router,
     payments_router,
     reviews_router,

@@ -18,6 +18,7 @@ dependencies = [
     "email-validator>=2.1",
     "python-multipart>=0.0.9",
     "stripe>=10.0",
+    "anthropic>=0.40",
 ]
 
 [project.optional-dependencies]
@@ -107,6 +108,7 @@ layers = [
     "juggle.modules.analytics",
     "juggle.modules.comms",
     "juggle.modules.roster",
+    "juggle.modules.planner",
     "juggle.modules.search",
     "juggle.modules.reviews",
     "juggle.modules.qanda",
