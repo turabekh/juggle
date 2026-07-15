@@ -34,6 +34,12 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
+class AuthConfig(BaseModel):
+    """Which sign-in methods the client should offer."""
+
+    sms_enabled: bool
+
+
 class OtpRequest(BaseModel):
     phone: str = Field(min_length=6, max_length=32)
 

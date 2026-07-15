@@ -135,3 +135,26 @@ def test_otp_resend_is_rate_limited(client: TestClient) -> None:
     assert client.post("/api/v1/identity/otp/request", json={"phone": phone}).status_code == 202
     again = client.post("/api/v1/identity/otp/request", json={"phone": phone})
     assert again.status_code == 429
+
+
+def test_auth_config_reports_sms_available_in_dev(client: TestClient) -> None:
+    # In local dev the console fake makes SMS available.
+    assert client.get("/api/v1/identity/auth-config").json()["sms_enabled"] is True
+
+
+def test_otp_fails_closed_when_sms_unconfigured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Outside local dev with no Twilio configured, SMS sign-in is refused, and
+    # the client is told not to offer it (so the Phone tab is hidden).
+    settings = get_settings()
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "twilio_account_sid", "")
+
+    assert client.get("/api/v1/identity/auth-config").json()["sms_enabled"] is False
+    req = client.post("/api/v1/identity/otp/request", json={"phone": "0412 000 000"})
+    assert req.status_code == 503
+    ver = client.post(
+        "/api/v1/identity/otp/verify", json={"phone": "0412 000 000", "code": "000000"}
+    )
+    assert ver.status_code == 503

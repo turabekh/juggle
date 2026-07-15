@@ -11,7 +11,11 @@ from juggle.db import get_session
 from juggle.deps import CurrentPrincipal
 from juggle.modules.identity.core import schemas, service
 from juggle.modules.identity.core.models import UserAccount
-from juggle.modules.notifications.core.gateway import SmsGateway, get_sms_gateway
+from juggle.modules.notifications.core.gateway import (
+    SmsGateway,
+    get_sms_gateway,
+    sms_available,
+)
 from juggle.security import create_access_token
 from juggle.settings import get_settings
 
@@ -91,12 +95,22 @@ def logout(payload: schemas.LogoutRequest, session: SessionDep) -> None:
     service.revoke_refresh_token(session, raw=payload.refresh_token)
 
 
+@router.get("/auth-config", response_model=schemas.AuthConfig)
+def auth_config() -> schemas.AuthConfig:
+    """Public: what sign-in methods are available (drives the login UI)."""
+    return schemas.AuthConfig(sms_enabled=sms_available())
+
+
 @router.post("/otp/request", status_code=status.HTTP_202_ACCEPTED)
 def otp_request(
     payload: schemas.OtpRequest, session: SessionDep, gateway: SmsGatewayDep
 ) -> dict[str, str]:
     """Text a one-time sign-in code. Always 202 (never reveals whether the number
-    is registered); rate-limited per number."""
+    is registered); rate-limited per number. Fail-closed if SMS isn't configured."""
+    if not sms_available():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "SMS sign-in is not available"
+        )
     try:
         service.request_otp(session, phone=payload.phone, gateway=gateway)
     except service.OtpRateLimited as exc:
@@ -110,6 +124,10 @@ def otp_request(
 @router.post("/otp/verify", response_model=schemas.TokenResponse)
 def otp_verify(payload: schemas.OtpVerify, session: SessionDep) -> schemas.TokenResponse:
     """Verify a code and sign in (creating a phone-first account if new)."""
+    if not sms_available():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "SMS sign-in is not available"
+        )
     try:
         user = service.verify_otp(session, phone=payload.phone, code=payload.code)
     except service.InvalidOtp as exc:

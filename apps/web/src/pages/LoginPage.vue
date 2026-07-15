@@ -24,6 +24,7 @@
       />
 
       <q-tabs
+        v-if="smsEnabled"
         v-model="tab"
         no-caps
         dense
@@ -126,11 +127,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useQuasar } from 'quasar'
 import { useRoute, useRouter } from 'vue-router'
 
-import { apiError } from '@/lib/api'
+import { api, apiError } from '@/lib/api'
 import { audienceFromQuery, landingFor, type Audience } from '@/lib/authAudience'
 import { useAuthStore } from '@/stores/auth'
 
@@ -148,6 +149,15 @@ const audienceBlurb = computed(() =>
 )
 
 const tab = ref<'email' | 'sms'>('email')
+// SMS sign-in only shows when the server has an SMS provider configured.
+const smsEnabled = ref(false)
+onMounted(async () => {
+  try {
+    smsEnabled.value = (await api.auth.config()).sms_enabled
+  } catch {
+    smsEnabled.value = false
+  }
+})
 const email = ref('')
 const password = ref('')
 const showPw = ref(false)

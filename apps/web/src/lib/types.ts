@@ -7,6 +7,10 @@ export interface TokenResponse {
   expires_in: number
 }
 
+export interface AuthConfig {
+  sms_enabled: boolean
+}
+
 export interface User {
   id: string
   email: string

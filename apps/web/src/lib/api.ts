@@ -7,6 +7,7 @@ import { decodeJwt } from '@/lib/jwt'
 import type {
   AttendanceOut,
   AuditEvent,
+  AuthConfig,
   Availability,
   Booking,
   Broadcast,
@@ -202,6 +203,10 @@ export const api = {
     },
     async login(email: string, password: string): Promise<TokenResponse> {
       const { data } = await http.post<TokenResponse>('/identity/login', { email, password })
+      return data
+    },
+    async config(): Promise<AuthConfig> {
+      const { data } = await http.get<AuthConfig>('/identity/auth-config')
       return data
     },
     async requestOtp(phone: string): Promise<void> {
