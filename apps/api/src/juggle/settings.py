@@ -7,15 +7,21 @@ exist before the app can boot.
 """
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The `.env` lives at the repo root (next to `.env.example`), but the API is run
+# from `apps/api`, so resolve it by absolute path rather than CWD. Missing files
+# are ignored (Docker/prod inject real env vars), so this is safe everywhere.
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="JUGGLE_",
-        env_file=".env",
+        env_file=_REPO_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )

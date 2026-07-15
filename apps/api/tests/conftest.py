@@ -74,13 +74,18 @@ def client(db: Session) -> Iterator[TestClient]:
     """
     from juggle.db import get_session
     from juggle.main import app
+    from juggle.modules.notifications.core.gateway import _fake_sms_gateway, get_sms_gateway
 
     app.dependency_overrides[get_session] = lambda: db
+    # Force the in-memory SMS gateway so a developer's real Twilio creds in `.env`
+    # can never trigger a live send (or cost) during the suite.
+    app.dependency_overrides[get_sms_gateway] = lambda: _fake_sms_gateway
     try:
         with TestClient(app) as test_client:
             yield test_client
     finally:
         app.dependency_overrides.pop(get_session, None)
+        app.dependency_overrides.pop(get_sms_gateway, None)
 
 
 @pytest.fixture
