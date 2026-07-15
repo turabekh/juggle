@@ -19,6 +19,14 @@
 
         <nav class="jg-nav gt-xs">
           <q-btn flat no-caps :to="{ name: 'discover' }" label="Discover" class="jg-nav__link" />
+          <q-btn
+            v-if="auth.isAuthed"
+            flat
+            no-caps
+            :to="{ name: 'planner' }"
+            label="Holiday planner"
+            class="jg-nav__link"
+          />
           <q-btn flat no-caps :to="{ name: 'parties' }" label="Birthday parties" class="jg-nav__link" />
           <q-btn
             v-if="auth.isAuthed"
@@ -87,9 +95,14 @@
                     <q-item-section avatar><q-icon name="face" /></q-item-section>
                     <q-item-section>My kids</q-item-section>
                   </q-item>
+                  <q-separator />
                   <q-item clickable v-close-popup :to="{ name: 'provider' }">
                     <q-item-section avatar><q-icon name="storefront" /></q-item-section>
-                    <q-item-section>For providers</q-item-section>
+                    <q-item-section>
+                      <q-item-label>Provider console</q-item-label>
+                      <q-item-label caption>Switch to running activities</q-item-label>
+                    </q-item-section>
+                    <q-item-section side><q-icon name="swap_horiz" size="18px" /></q-item-section>
                   </q-item>
                   <q-item v-if="auth.isAdmin" clickable v-close-popup :to="{ name: 'admin-approvals' }">
                     <q-item-section avatar><q-icon name="admin_panel_settings" /></q-item-section>

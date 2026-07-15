@@ -63,6 +63,8 @@ import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
 import type { Org } from '@/lib/types'
 
+const emit = defineEmits<{ 'orgs-changed': [] }>()
+
 const $q = useQuasar()
 const router = useRouter()
 const orgs = ref<Org[]>([])
@@ -92,6 +94,7 @@ async function create(): Promise<void> {
     const org = await api.org.create(newName.value)
     showCreate.value = false
     newName.value = ''
+    emit('orgs-changed') // refresh the sidebar org list in ProviderLayout
     router.push({ name: 'provider-org', params: { id: org.id } })
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
