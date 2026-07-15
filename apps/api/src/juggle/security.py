@@ -5,6 +5,9 @@ may issue/verify tokens without importing another module or FastAPI. The
 FastAPI auth dependency that consumes these lives in ``juggle.deps``.
 """
 
+import hashlib
+import hmac
+import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -25,6 +28,41 @@ def hash_password(raw: str) -> str:
 
 def verify_password(raw: str, hashed: str) -> bool:
     return bcrypt.checkpw(raw.encode("utf-8")[:_BCRYPT_MAX_BYTES], hashed.encode("utf-8"))
+
+
+# --- opaque secrets (refresh tokens, OTP codes) ------------------------------
+#
+# Refresh tokens are high-entropy random strings, so a fast SHA-256 (not bcrypt)
+# is the right digest: we only ever store the hash, and lookups compare hashes.
+# OTP codes are low-entropy, so their digest is salted with the JWT secret to
+# frustrate offline guessing of a leaked table (they are also short-lived).
+
+
+def generate_refresh_token() -> str:
+    """A URL-safe, high-entropy opaque token handed to the client (never stored raw)."""
+    return secrets.token_urlsafe(48)
+
+
+def hash_refresh_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def generate_otp_code() -> str:
+    """A 6-digit numeric code (zero-padded)."""
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def hash_otp_code(code: str) -> str:
+    """Keyed digest so a leaked challenge table can't be brute-forced offline."""
+    settings = get_settings()
+    return hmac.new(
+        settings.jwt_secret.encode("utf-8"), code.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
+def verify_secret(raw: str, hashed: str) -> bool:
+    """Constant-time compare of a raw refresh token against its stored SHA-256."""
+    return hmac.compare_digest(hash_refresh_token(raw), hashed)
 
 
 @dataclass(frozen=True)

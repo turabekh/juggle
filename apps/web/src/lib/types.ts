@@ -2,7 +2,9 @@
 
 export interface TokenResponse {
   access_token: string
+  refresh_token: string
   token_type: string
+  expires_in: number
 }
 
 export interface User {
@@ -38,6 +40,54 @@ export interface ChildCreate {
   emergency_contact_name?: string | null
   emergency_contact_phone?: string | null
   photo_consent?: boolean
+}
+
+// --- AI holiday planner (§7 discovery; behind the `planner` flag) ---
+export interface PlanRequest {
+  ages: number[]
+  date_from: string
+  date_to: string
+  suburb?: string | null
+  budget_cents?: number | null
+  categories?: string[] | null
+  day_type?: string | null
+  start_after_hour?: number | null
+  drop_off_only?: boolean
+}
+
+export interface PlanCandidate {
+  session_id: string
+  title: string
+  category: string
+  organisation_name: string
+  venue_name: string
+  suburb: string | null
+  starts_at: string
+  ends_at: string
+  price_cents: number
+  age_min: number
+  age_max: number
+  seats_remaining: number
+  distance_km: number | null
+}
+
+export interface PlanItem {
+  session: PlanCandidate
+  for_ages: number[]
+  reason: string
+}
+
+export interface PlanDay {
+  day: string
+  items: PlanItem[]
+}
+
+export interface PlanOut {
+  days: PlanDay[]
+  total_cents: number
+  summary: string
+  generated_by: 'ai' | 'rules'
+  candidate_count: number
 }
 
 export interface SearchCard {

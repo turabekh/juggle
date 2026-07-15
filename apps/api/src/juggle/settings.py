@@ -33,7 +33,20 @@ class Settings(BaseSettings):
     # Default is ≥32 bytes so local dev doesn't trip pyjwt's weak-key warning.
     jwt_secret: str = Field(default="dev-insecure-secret-change-me-in-prod-0123456789")
     jwt_algorithm: str = Field(default="HS256")
-    access_token_ttl_minutes: int = Field(default=30)
+    # Access tokens are short-lived; a DB-backed refresh token (rotated on use,
+    # revocable on logout) keeps sessions alive without a long-lived bearer.
+    access_token_ttl_minutes: int = Field(default=15)
+    refresh_token_ttl_days: int = Field(default=30)
+
+    # SMS one-time-code sign-in (PRD §7.2). When the Twilio creds are unset the
+    # app uses an in-memory FakeSmsGateway that logs the code, so dev/CI need no
+    # SMS account — mirrors the Stripe/email gateway pattern.
+    otp_ttl_minutes: int = Field(default=10)
+    otp_max_attempts: int = Field(default=5)
+    otp_resend_cooldown_seconds: int = Field(default=60)
+    twilio_account_sid: str = Field(default="")
+    twilio_auth_token: str = Field(default="")
+    twilio_from_number: str = Field(default="")
 
     # CORS origins for the Quasar PWA during development.
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:9000"])
@@ -47,6 +60,13 @@ class Settings(BaseSettings):
     stripe_secret_key: str = Field(default="")
     stripe_publishable_key: str = Field(default="")
     stripe_webhook_secret: str = Field(default="")
+
+    # AI holiday planner (parent-facing). When anthropic_api_key is unset the planner
+    # uses a deterministic RuleBasedPlannerGateway (no LLM, no cost) — same
+    # gateway-Protocol fallback pattern as Stripe/email/SMS. Default model per the
+    # Anthropic guidance; child PII is never sent to the model (INV-3).
+    anthropic_api_key: str = Field(default="")
+    anthropic_model: str = Field(default="claude-opus-4-8")
 
     # Platform legal identity — the supplier on provider commission tax invoices (§8.4,
     # ADR-0002). Real ABN/name injected via env before charging in production.

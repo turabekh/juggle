@@ -12,12 +12,13 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from juggle.modules.notifications.core.gateway import EmailGateway
+from juggle.modules.notifications.core.gateway import EmailGateway, SmsGateway
 from juggle.modules.notifications.core.ical import IcalEvent, build_ics
 from juggle.modules.notifications.core.models import NotificationLog
 from juggle.modules.notifications.core.schemas import ConfirmationSession
 
 KIND_BOOKING_CONFIRMATION = "booking_confirmation"
+KIND_LOGIN_CODE = "login_code"
 KIND_SESSION_CANCELLATION = "session_cancellation"
 KIND_WAITLIST_OFFER = "waitlist_offer"
 KIND_PROVIDER_BROADCAST = "provider_broadcast"
@@ -417,6 +418,31 @@ def purge_planner_recipients(db: Session, *, emails: list[str]) -> int:
         row.to_email = ""
     db.flush()
     return len(rows)
+
+
+def send_login_code(
+    db: Session,
+    *,
+    phone: str,
+    code: str,
+    ttl_minutes: int,
+    gateway: SmsGateway,
+) -> NotificationLog:
+    """Text a one-time sign-in code. The code is delivered but never logged —
+    the ``NotificationLog`` records only that a code went to this number."""
+    body = (
+        f"Your Juggle sign-in code is {code}. It expires in {ttl_minutes} minutes. "
+        "If you didn't request this, ignore this message."
+    )
+    gateway.send(to=phone, body=body)
+    return _record(
+        db,
+        user_id=None,
+        to_email=phone,  # the delivery address for this channel is a phone number
+        kind=KIND_LOGIN_CODE,
+        subject="Your Juggle sign-in code",
+        detail={"channel": "sms"},
+    )
 
 
 def list_for_user(db: Session, user_id: uuid.UUID) -> list[NotificationLog]:

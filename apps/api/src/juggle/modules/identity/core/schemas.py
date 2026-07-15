@@ -20,7 +20,27 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
+    # Seconds until the access token expires — lets the client refresh proactively.
+    expires_in: int
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+class OtpRequest(BaseModel):
+    phone: str = Field(min_length=6, max_length=32)
+
+
+class OtpVerify(BaseModel):
+    phone: str = Field(min_length=6, max_length=32)
+    code: str = Field(min_length=4, max_length=8)
 
 
 class UserOut(BaseModel):

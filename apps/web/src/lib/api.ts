@@ -1,8 +1,9 @@
 // Typed API client. A single axios instance injects the bearer token (held in
 // a module variable set by the auth store — avoids a store↔api import cycle).
 
-import axios, { type AxiosInstance } from 'axios'
+import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
 
+import { decodeJwt } from '@/lib/jwt'
 import type {
   AttendanceOut,
   AuditEvent,
@@ -33,6 +34,8 @@ import type {
   PartyPagePatch,
   PartySlot,
   PlanInviteCreated,
+  PlanOut,
+  PlanRequest,
   PlanView,
   PublicPlanView,
   PaymentConfig,
@@ -71,8 +74,25 @@ import type {
 } from '@/lib/types'
 
 let authToken: string | null = null
+let refreshToken: string | null = null
+
 export function setAuthToken(token: string | null): void {
   authToken = token
+}
+export function setRefreshToken(token: string | null): void {
+  refreshToken = token
+}
+
+/** Hooks the auth store registers so the api layer can push rotated tokens back
+ * into store state/storage, or force a logout when a refresh fails. Keeping this
+ * as injected callbacks (not an import) avoids a store↔api cycle. */
+interface AuthCallbacks {
+  onRefreshed: (accessToken: string, refreshToken: string) => void
+  onLogout: () => void
+}
+let authCallbacks: AuthCallbacks | null = null
+export function configureAuth(cb: AuthCallbacks): void {
+  authCallbacks = cb
 }
 
 // On the client, requests are relative (Vite proxy / same-origin nginx). During
@@ -86,6 +106,70 @@ http.interceptors.request.use((config) => {
   if (authToken) config.headers.Authorization = `Bearer ${authToken}`
   return config
 })
+
+// --- transparent access-token refresh ---------------------------------------
+//
+// Access tokens are short-lived. On a 401 we rotate the refresh token exactly
+// once (single-flight, so a burst of concurrent 401s triggers one refresh) and
+// replay the original request. Refresh is skipped for the auth endpoints
+// themselves and while impersonating (an impersonation token must never be
+// silently upgraded back to the admin's session).
+
+type Retryable = InternalAxiosRequestConfig & { _retried?: boolean }
+let refreshInFlight: Promise<string> | null = null
+
+const AUTH_PATHS = [
+  '/identity/refresh',
+  '/identity/login',
+  '/identity/signup',
+  '/identity/otp',
+  '/identity/logout',
+]
+
+function runRefresh(): Promise<string> {
+  if (!refreshInFlight) {
+    // Bare axios (not `http`) so this request bypasses the 401 interceptor.
+    refreshInFlight = axios
+      .post<TokenResponse>(`${API_BASE}/identity/refresh`, { refresh_token: refreshToken })
+      .then(({ data }) => {
+        authToken = data.access_token
+        refreshToken = data.refresh_token
+        authCallbacks?.onRefreshed(data.access_token, data.refresh_token)
+        return data.access_token
+      })
+      .finally(() => {
+        refreshInFlight = null
+      })
+  }
+  return refreshInFlight
+}
+
+http.interceptors.response.use(
+  (response) => response,
+  async (error: unknown) => {
+    if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error
+    const original = error.config as Retryable | undefined
+    const url = original?.url ?? ''
+    if (
+      !original ||
+      original._retried ||
+      !refreshToken ||
+      AUTH_PATHS.some((p) => url.includes(p)) ||
+      decodeJwt(authToken ?? '')?.imp // don't refresh an impersonation session
+    ) {
+      throw error
+    }
+    try {
+      const freshAccess = await runRefresh()
+      original._retried = true
+      original.headers.Authorization = `Bearer ${freshAccess}`
+      return http(original)
+    } catch {
+      authCallbacks?.onLogout()
+      throw error
+    }
+  },
+)
 
 /** Extract a human-friendly message from an API error. */
 export function apiError(err: unknown, fallback = 'Something went wrong'): string {
@@ -119,6 +203,16 @@ export const api = {
     async login(email: string, password: string): Promise<TokenResponse> {
       const { data } = await http.post<TokenResponse>('/identity/login', { email, password })
       return data
+    },
+    async requestOtp(phone: string): Promise<void> {
+      await http.post('/identity/otp/request', { phone })
+    },
+    async verifyOtp(phone: string, code: string): Promise<TokenResponse> {
+      const { data } = await http.post<TokenResponse>('/identity/otp/verify', { phone, code })
+      return data
+    },
+    async logout(refreshToken: string): Promise<void> {
+      await http.post('/identity/logout', { refresh_token: refreshToken })
     },
     async me(): Promise<User> {
       const { data } = await http.get<User>('/identity/me')
@@ -160,6 +254,12 @@ export const api = {
       const { data } = await http.get<SearchResults>('/search/sessions', {
         params: cleanParams(filters),
       })
+      return data
+    },
+  },
+  planner: {
+    async plan(payload: PlanRequest): Promise<PlanOut> {
+      const { data } = await http.post<PlanOut>('/planner/plan', payload)
       return data
     },
   },
