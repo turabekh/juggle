@@ -94,6 +94,34 @@
         <span class="jg-total">{{ money(plan.total_cents) }} total</span>
       </div>
 
+      <div v-if="plan.days.length && auth.isAuthed" class="q-mb-lg">
+        <q-btn
+          v-if="!addedToCart"
+          unelevated
+          color="primary"
+          no-caps
+          icon="add_shopping_cart"
+          label="Add whole plan to cart"
+          :loading="addingAll"
+          @click="addWholePlan"
+        />
+        <q-btn
+          v-else
+          outline
+          color="primary"
+          no-caps
+          icon="shopping_cart"
+          label="View cart"
+          :to="{ name: 'cart' }"
+        />
+        <span class="jg-muted text-caption q-ml-sm">
+          Holds a seat per matching child for every session — you can adjust before checkout.
+        </span>
+      </div>
+      <div v-else-if="plan.days.length && !auth.isAuthed" class="jg-muted text-caption q-mb-lg">
+        <q-icon name="info" size="16px" /> Sign in and add your kids to book this plan in one tap.
+      </div>
+
       <div v-for="day in plan.days" :key="day.day" class="q-mb-lg">
         <div class="jg-dayhead">{{ longDay(day.day) }}</div>
         <div class="q-gutter-sm">
@@ -137,13 +165,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useQuasar } from 'quasar'
+import { useRouter } from 'vue-router'
 
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
-import { CATEGORIES, categoryMeta, money, timeRange } from '@/lib/format'
-import type { PlanOut } from '@/lib/types'
+import { ageAt, CATEGORIES, categoryMeta, money, timeRange } from '@/lib/format'
+import type { Child, PlanOut } from '@/lib/types'
+import { useAuthStore } from '@/stores/auth'
+import { useCartStore } from '@/stores/cart'
 
 const $q = useQuasar()
+const router = useRouter()
+const auth = useAuthStore()
+const cart = useCartStore()
 
 const ageOptions = computed(() => Array.from({ length: 16 }, (_, i) => i + 2))
 const ages = ref<number[]>([])
@@ -156,6 +190,8 @@ const dayType = ref<'any' | 'weekday' | 'weekend'>('any')
 
 const loading = ref(false)
 const plan = ref<PlanOut | null>(null)
+const addingAll = ref(false)
+const addedToCart = ref(false)
 
 function toggleInterest(value: string): void {
   const i = interests.value.indexOf(value)
@@ -173,6 +209,7 @@ function longDay(iso: string): string {
 
 async function build(): Promise<void> {
   loading.value = true
+  addedToCart.value = false
   try {
     plan.value = await api.planner.plan({
       ages: ages.value,
@@ -188,6 +225,90 @@ async function build(): Promise<void> {
     $q.notify({ type: 'negative', message: apiError(err, 'Could not build a plan') })
   } finally {
     loading.value = false
+  }
+}
+
+/** Children whose age at the session start falls in the session's age range. */
+function matchingChildren(item: PlanOut['days'][number]['items'][number], kids: Child[]): Child[] {
+  const s = item.session
+  return kids.filter((c) => {
+    const age = ageAt(c.date_of_birth, s.starts_at)
+    return age >= s.age_min && age <= s.age_max
+  })
+}
+
+/**
+ * Hold a seat for every matching child across every session in the plan and add
+ * each to the cart. Reuses the same session→hold→cart rails as the detail page —
+ * no new money code. Sessions with no age-matching child are skipped.
+ */
+async function addWholePlan(): Promise<void> {
+  if (!plan.value) return
+  addingAll.value = true
+  try {
+    let kids: Child[]
+    try {
+      kids = await api.children.list()
+    } catch (err) {
+      $q.notify({ type: 'negative', message: apiError(err, 'Could not load your kids') })
+      return
+    }
+    if (kids.length === 0) {
+      $q.notify({ type: 'warning', message: 'Add a child to your profile first, then add the plan.' })
+      return
+    }
+
+    const items = plan.value.days.flatMap((d) => d.items)
+    let added = 0
+    let skipped = 0
+    let failed = 0
+    for (const item of items) {
+      const matched = matchingChildren(item, kids)
+      if (matched.length === 0) {
+        skipped += 1
+        continue
+      }
+      try {
+        const hold = await api.inventory.hold(item.session.session_id, matched.length)
+        cart.add({
+          holdId: hold.id,
+          sessionId: item.session.session_id,
+          title: item.session.title,
+          orgName: item.session.organisation_name,
+          venueName: item.session.venue_name,
+          startsAt: item.session.starts_at,
+          endsAt: item.session.ends_at,
+          priceCents: item.session.price_cents,
+          childIds: matched.map((c) => c.id),
+        })
+        added += 1
+      } catch {
+        failed += 1 // seats may have gone since the plan was built — skip and continue
+      }
+    }
+
+    if (added === 0) {
+      $q.notify({
+        type: 'warning',
+        message: skipped
+          ? "None of the plan's sessions matched your kids' ages."
+          : 'Could not hold seats — they may have just sold out.',
+      })
+      return
+    }
+    addedToCart.value = true
+    const extras = [
+      skipped ? `${skipped} skipped (age)` : '',
+      failed ? `${failed} unavailable` : '',
+    ].filter(Boolean)
+    $q.notify({
+      type: 'positive',
+      message: `Added ${added} session${added === 1 ? '' : 's'} to cart`
+        + (extras.length ? ` · ${extras.join(', ')}` : ''),
+      actions: [{ label: 'View cart', color: 'white', handler: () => router.push({ name: 'cart' }) }],
+    })
+  } finally {
+    addingAll.value = false
   }
 }
 </script>

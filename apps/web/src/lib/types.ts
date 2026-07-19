@@ -61,6 +61,7 @@ export interface PlanRequest {
 
 export interface PlanCandidate {
   session_id: string
+  program_id: string
   title: string
   category: string
   organisation_name: string
