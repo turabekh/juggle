@@ -15,7 +15,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # The `.env` lives at the repo root (next to `.env.example`), but the API is run
 # from `apps/api`, so resolve it by absolute path rather than CWD. Missing files
 # are ignored (Docker/prod inject real env vars), so this is safe everywhere.
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+# In dev the tree is <repo>/apps/api/src/juggle/settings.py (parents[4] = repo
+# root); in a container the package sits at /app/src/juggle, which is shallower —
+# guard the index so a shallow tree resolves to filesystem root (no .env there,
+# so it's simply ignored) instead of raising IndexError at import time.
+_PARENTS = Path(__file__).resolve().parents
+_REPO_ROOT = _PARENTS[4] if len(_PARENTS) > 4 else _PARENTS[-1]
 
 
 class Settings(BaseSettings):
