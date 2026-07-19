@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -43,8 +43,11 @@ def signup(payload: schemas.SignupRequest, session: SessionDep) -> schemas.Token
             email=payload.email,
             password=payload.password,
             full_name=payload.full_name,
-            phone=payload.phone,
         )
+    except service.ReservedEmail as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "That email is not allowed"
+        ) from exc
     except service.EmailAlreadyExists as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered") from exc
     return _tokens(session, user)
@@ -103,20 +106,30 @@ def auth_config() -> schemas.AuthConfig:
 
 @router.post("/otp/request", status_code=status.HTTP_202_ACCEPTED)
 def otp_request(
-    payload: schemas.OtpRequest, session: SessionDep, gateway: SmsGatewayDep
+    payload: schemas.OtpRequest,
+    request: Request,
+    session: SessionDep,
+    gateway: SmsGatewayDep,
 ) -> dict[str, str]:
-    """Text a one-time sign-in code. Always 202 (never reveals whether the number
-    is registered); rate-limited per number. Fail-closed if SMS isn't configured."""
+    """Text a one-time sign-in code. Never reveals whether the number is
+    registered; rate-limited per number, per IP, and globally. Fail-closed if
+    SMS isn't configured."""
     if not sms_available():
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "SMS sign-in is not available"
         )
+    ip = request.client.host if request.client else None
     try:
-        service.request_otp(session, phone=payload.phone, gateway=gateway)
+        service.request_otp(session, phone=payload.phone, gateway=gateway, ip=ip)
     except service.OtpRateLimited as exc:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
             f"Please wait {exc} seconds before requesting another code",
+        ) from exc
+    except service.OtpSendThrottled as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many code requests — please try again later",
         ) from exc
     return {"status": "sent"}
 

@@ -197,6 +197,8 @@ def run_due_jobs(
     party_planner_service.send_planner_nudges(db, now=now, email_gateway=gateway)
     plans_swept = party_planner_service.sweep_stale_resolved(db, now=now)
     plans_purged = party_planner_service.purge_expired_plan_pii(db, now=now)
+    # Bound the auth tables: drop expired refresh tokens / OTP challenges / throttle windows.
+    auth_rows_pruned = identity_service.prune_expired_auth(db, now=now)
 
     return JobSummary(
         holds_reclaimed=holds_reclaimed,
@@ -212,4 +214,5 @@ def run_due_jobs(
         plans_resolved=plans_resolved,
         plans_swept=plans_swept,
         plans_purged=plans_purged,
+        auth_rows_pruned=auth_rows_pruned,
     )

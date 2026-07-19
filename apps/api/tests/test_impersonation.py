@@ -139,3 +139,22 @@ def test_impersonation_requires_admin(client: TestClient) -> None:
         json={"target_user_id": target_id, "mode": "view_as"},
     )
     assert resp.status_code == 403
+
+
+def test_impersonation_survives_target_deactivation(
+    client: TestClient, make_admin: Callable[[], str]
+) -> None:
+    """The live account-status gate (deleted/suspended -> 401) keys on the admin
+    actor, not the target: a support session must still be able to view a
+    deactivated account — often exactly what's being investigated (PRD §10.3)."""
+    admin = make_admin()
+    target_token, target_id = _signup(client)
+    token = _impersonate(client, admin, target_id, "view_as")["token"]
+
+    # The target account is deactivated (self-service deletion sets status=deleted).
+    assert client.delete("/api/v1/identity/me", headers=_auth(target_token)).status_code == 204
+
+    # The admin can still view-as the (now-deactivated) target.
+    me = client.get("/api/v1/identity/me", headers=_auth(token))
+    assert me.status_code == 200
+    assert me.json()["id"] == target_id

@@ -2,11 +2,17 @@
 
 import re
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from juggle.modules.identity.core import service as identity_service
+from juggle.modules.identity.core.models import OtpChallenge, RefreshToken
 from juggle.modules.notifications.core.gateway import _fake_sms_gateway
+from juggle.security import hash_refresh_token
 from juggle.settings import get_settings
 
 
@@ -97,8 +103,8 @@ def test_otp_request_then_verify_creates_phone_first_account(client: TestClient)
 
     me = client.get("/api/v1/identity/me", headers=_auth(token))
     assert me.status_code == 200
-    # Normalised to E.164 and stored behind a placeholder email.
-    assert me.json()["email"] == "sms-61412345678@example.com"
+    # Normalised to E.164 and stored behind a reserved, non-registerable placeholder.
+    assert me.json()["email"] == "sms-61412345678@phone.juggle.invalid"
 
 
 def test_otp_signs_back_into_the_same_account(
@@ -158,3 +164,110 @@ def test_otp_fails_closed_when_sms_unconfigured(
         "/api/v1/identity/otp/verify", json={"phone": "0412 000 000", "code": "000000"}
     )
     assert ver.status_code == 503
+
+
+# --- hardening (handoff §6) --------------------------------------------------
+
+
+def test_signup_ignores_phone_so_it_cannot_squat_a_number(client: TestClient) -> None:
+    # A phone in the sign-up body is ignored: the account is NOT bound to it, so a
+    # later OTP for that number resolves to a *separate* phone-first account.
+    email = f"squatter-{uuid.uuid4().hex[:8]}@example.com"
+    resp = client.post(
+        "/api/v1/identity/signup",
+        json={"email": email, "password": "supersecret", "phone": "0412 999 888"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    client.post("/api/v1/identity/otp/request", json={"phone": "0412 999 888"})
+    verify = client.post(
+        "/api/v1/identity/otp/verify",
+        json={"phone": "0412 999 888", "code": _latest_code("61412999888")},
+    )
+    me = client.get("/api/v1/identity/me", headers=_auth(verify.json()["access_token"]))
+    assert me.json()["email"] != email  # the sign-up account never claimed the number
+
+
+def test_signup_rejects_reserved_placeholder_email(client: TestClient) -> None:
+    # The `.invalid` phone-account namespace can't be registered (would let an
+    # attacker pre-squat the address the SMS flow mints for a victim's number).
+    resp = client.post(
+        "/api/v1/identity/signup",
+        json={"email": "sms-61412345678@phone.juggle.invalid", "password": "supersecret"},
+    )
+    assert resp.status_code == 422
+
+
+def test_deleted_account_access_token_stops_working_immediately(client: TestClient) -> None:
+    tokens = _signup(client)
+    access = tokens["access_token"]
+    assert client.get("/api/v1/identity/me", headers=_auth(access)).status_code == 200
+
+    assert client.delete("/api/v1/identity/me", headers=_auth(access)).status_code == 204
+    # The still-unexpired access token must not keep working past deletion.
+    assert client.get("/api/v1/identity/me", headers=_auth(access)).status_code == 401
+
+
+def test_otp_global_send_cap_blocks_bombing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "otp_resend_cooldown_seconds", 0)
+    monkeypatch.setattr(settings, "otp_global_max_per_hour", 2)
+
+    def _req(phone: str) -> int:
+        return client.post("/api/v1/identity/otp/request", json={"phone": phone}).status_code
+
+    # Distinct numbers (no per-number cooldown); the global ceiling stops the third.
+    assert _req("0412000001") == 202
+    assert _req("0412000002") == 202
+    assert _req("0412000003") == 429
+
+
+def test_otp_per_number_daily_cap(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "otp_resend_cooldown_seconds", 0)  # isolate the daily cap
+    monkeypatch.setattr(settings, "otp_max_per_number_per_day", 1)
+    phone = "0412 555 000"
+    assert client.post("/api/v1/identity/otp/request", json={"phone": phone}).status_code == 202
+    assert client.post("/api/v1/identity/otp/request", json={"phone": phone}).status_code == 429
+
+
+def test_create_guardian_rejects_reserved_email(db: Session) -> None:
+    # Defence-in-depth guard for non-HTTP callers (HTTP is already blocked by EmailStr).
+    with pytest.raises(identity_service.ReservedEmail):
+        identity_service.create_guardian(db, email="x@squat.invalid", password="supersecret")
+
+
+def test_prune_expired_auth_drops_dead_rows_but_keeps_live_ones(db: Session) -> None:
+    user = identity_service.create_guardian(
+        db, email=f"prune-{uuid.uuid4().hex[:8]}@example.com", password="supersecret"
+    )
+    now = datetime.now(UTC)
+    db.add(
+        RefreshToken(
+            user_id=user.id,
+            token_hash="dead" + uuid.uuid4().hex,
+            expires_at=now - timedelta(days=1),  # already expired → prunable
+        )
+    )
+    db.add(
+        OtpChallenge(
+            phone="+6199999999",
+            code_hash="x",
+            expires_at=now - timedelta(days=2),  # well past the OTP retention window
+        )
+    )
+    live_raw = identity_service.issue_refresh_token(db, user_id=user.id)  # 30-day TTL, must survive
+    db.flush()
+
+    pruned = identity_service.prune_expired_auth(db, now=now)
+    assert pruned >= 2
+    assert (
+        db.scalar(
+            select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(live_raw))
+        )
+        is not None
+    )

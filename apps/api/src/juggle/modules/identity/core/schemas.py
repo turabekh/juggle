@@ -10,7 +10,8 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     full_name: str | None = Field(default=None, max_length=200)
-    phone: str | None = Field(default=None, max_length=32)
+    # No phone here by design: a number is bound to an account only by proving
+    # possession via the SMS one-time-code flow (prevents phone squatting).
 
 
 class LoginRequest(BaseModel):
@@ -53,7 +54,9 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    email: EmailStr
+    # Plain str, not EmailStr: a phone-first account carries a synthetic,
+    # non-deliverable placeholder address (reserved `.invalid` domain).
+    email: str
     full_name: str | None
     is_admin: bool
     created_at: datetime

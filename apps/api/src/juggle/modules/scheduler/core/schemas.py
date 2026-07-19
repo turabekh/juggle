@@ -19,3 +19,4 @@ class JobSummary(BaseModel):
     plans_resolved: int = 0
     plans_swept: int = 0
     plans_purged: int = 0
+    auth_rows_pruned: int = 0

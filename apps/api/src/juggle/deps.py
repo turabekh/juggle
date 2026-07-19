@@ -37,6 +37,19 @@ def get_current_principal(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
+    # A short-lived access token must stop working the moment its account is
+    # deleted or suspended — the JWT alone can't know that, so check live status.
+    # For an impersonation token, the gating account is the *admin actor*, not the
+    # target: a suspended/deleted target is often exactly what a support session is
+    # investigating (PRD §10.3), so its status must not lock the admin out.
+    subject_id = principal.impersonator_id if principal.is_impersonating else principal.user_id
+    if not _account_active(session, subject_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account is no longer active",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     if principal.is_impersonating:
         # An ended or expired session invalidates the token immediately (PRD §10.3).
         active = (
@@ -66,6 +79,16 @@ def get_current_principal(
             )
 
     return principal
+
+
+def _account_active(session: Session, user_id: object) -> bool:
+    # Raw query (not the identity model) so this auth infra stays decoupled from
+    # the identity module — deps is imported by every module's ui.
+    row = session.execute(
+        text("SELECT status FROM user_account WHERE id = :id"),
+        {"id": str(user_id)},
+    ).first()
+    return row is not None and row[0] == "active"
 
 
 def _impersonation_active(session: Session, session_id: object) -> bool:

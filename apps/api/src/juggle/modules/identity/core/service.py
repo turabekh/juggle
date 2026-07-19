@@ -7,12 +7,15 @@ panel and product share one code path (PRD §10.4).
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
-from sqlalchemy import or_, select
+from sqlalchemy import CursorResult, delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from juggle.modules.audit.core import service as audit_service
 from juggle.modules.identity.core.models import (
+    AuthThrottle,
     Child,
     GuardianLink,
     OtpChallenge,
@@ -38,6 +41,13 @@ class EmailAlreadyExists(Exception):
     """Raised when signing up with an email that is already registered."""
 
 
+class ReservedEmail(Exception):
+    """The email is in a reserved namespace (phone-account / deleted sentinels).
+
+    Blocking these at sign-up stops an attacker pre-registering the address the
+    SMS flow would mint for a victim's number (which would otherwise squat it)."""
+
+
 class InvalidRefreshToken(Exception):
     """The presented refresh token is unknown, expired, or already revoked."""
 
@@ -52,6 +62,10 @@ class RefreshTokenReuse(InvalidRefreshToken):
 
 class OtpRateLimited(Exception):
     """A sign-in code was requested again inside the resend cooldown."""
+
+
+class OtpSendThrottled(Exception):
+    """An OTP send was blocked by a per-number/per-IP/global cap (abuse/cost)."""
 
 
 class InvalidOtp(Exception):
@@ -74,21 +88,38 @@ class LinkNotFound(Exception):
     """No such co-guardian link for this user."""
 
 
+# Reserved e-mail domain for phone-first accounts. `.invalid` is reserved by
+# RFC 2606 (guaranteed non-deliverable), and sign-up refuses it — so the address
+# the SMS flow mints for a number can never be pre-registered by someone else.
+_PHONE_ACCOUNT_DOMAIN = "phone.juggle.invalid"
+_RESERVED_EMAIL_SUFFIXES = (".invalid",)
+
+
+def _is_reserved_email(email: str) -> bool:
+    return email.strip().lower().endswith(_RESERVED_EMAIL_SUFFIXES)
+
+
 def create_guardian(
     session: Session,
     *,
     email: str,
     password: str,
     full_name: str | None = None,
-    phone: str | None = None,
 ) -> UserAccount:
+    """Create an email+password guardian.
+
+    Phone is deliberately NOT accepted here: a phone number is only ever bound to
+    an account by proving possession through the SMS one-time-code flow, so an
+    email sign-up can't squat someone else's (unverified) number.
+    """
+    if _is_reserved_email(email):
+        raise ReservedEmail(email)
     if session.scalar(select(UserAccount).where(UserAccount.email == email)) is not None:
         raise EmailAlreadyExists(email)
     user = UserAccount(
         email=email,
         password_hash=hash_password(password),
         full_name=full_name,
-        phone=phone,
     )
     session.add(user)
     session.flush()
@@ -135,8 +166,13 @@ def rotate_refresh_token(session: Session, *, raw: str) -> tuple[UserAccount, st
     means it was replayed (or the account was compromised): we revoke every token
     for that user as a safety response. Raises ``InvalidRefreshToken`` otherwise.
     """
+    # Lock the row: two concurrent rotations of the same token must serialise, so
+    # the second sees revoked_at set and trips reuse detection instead of both
+    # succeeding and silently forking the token family.
     token = session.scalar(
-        select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(raw))
+        select(RefreshToken)
+        .where(RefreshToken.token_hash == hash_refresh_token(raw))
+        .with_for_update()
     )
     if token is None:
         raise InvalidRefreshToken("unknown token")
@@ -191,6 +227,27 @@ def revoke_all_refresh_tokens(session: Session, *, user_id: uuid.UUID) -> int:
     return len(tokens)
 
 
+def prune_expired_auth(session: Session, *, now: datetime) -> int:
+    """Delete auth rows that can no longer do anything, so the tables don't grow
+    without bound (run from the maintenance tick).
+
+    Removes **expired** refresh tokens (an expired token is already rejected, so
+    dropping it loses nothing — revoked-but-unexpired rows are KEPT so replay of a
+    live-window token still trips reuse detection), spent/expired OTP challenges,
+    and stale throttle windows. Returns the number of rows deleted."""
+    otp_cutoff = now - timedelta(days=1)
+    statements = (
+        delete(RefreshToken).where(RefreshToken.expires_at < now),
+        delete(OtpChallenge).where(OtpChallenge.expires_at < otp_cutoff),
+        delete(AuthThrottle).where(AuthThrottle.window_started_at < otp_cutoff),
+    )
+    deleted = 0
+    for stmt in statements:
+        deleted += cast("CursorResult[object]", session.execute(stmt)).rowcount
+    session.flush()
+    return deleted
+
+
 # --- SMS one-time-code sign-in (PRD §7.2) ------------------------------------
 
 _DIGITS = re.compile(r"\D")
@@ -210,9 +267,66 @@ def normalize_phone(raw: str) -> str:
     return "+" + digits
 
 
-def request_otp(session: Session, *, phone: str, gateway: SmsGateway) -> None:
+def _hit_rate_limit(
+    session: Session, *, scope_key: str, now: datetime, window: timedelta, limit: int
+) -> bool:
+    """Persistent fixed-window counter for ``scope_key``. Returns True when the
+    request would exceed ``limit`` (and does NOT record it); else records a hit
+    and returns False. Row-locked so concurrent requests can't both slip under."""
+    row = session.execute(
+        select(AuthThrottle).where(AuthThrottle.scope_key == scope_key).with_for_update()
+    ).scalar_one_or_none()
+    if row is None:
+        # First request for this scope. FOR UPDATE can't gap-lock a not-yet-existing
+        # row, so two concurrent creators race the unique index — guard the insert in
+        # a savepoint and fall through to the existing-row path on conflict (rather
+        # than 500). The nested rollback discards the pending row (SQLAlchemy expunges
+        # it), leaving the outer transaction usable.
+        session.add(AuthThrottle(scope_key=scope_key, window_started_at=now, count=1))
+        try:
+            with session.begin_nested():
+                session.flush()
+            return False
+        except IntegrityError:
+            row = session.execute(
+                select(AuthThrottle).where(AuthThrottle.scope_key == scope_key).with_for_update()
+            ).scalar_one()
+    if now - row.window_started_at >= window:
+        row.window_started_at = now
+        row.count = 1
+        session.flush()
+        return False
+    if row.count >= limit:
+        return True
+    row.count += 1
+    session.flush()
+    return False
+
+
+def _enforce_otp_send_limits(
+    session: Session, *, normalized: str, ip: str | None, now: datetime
+) -> None:
+    """Block SMS-bombing / runaway Twilio cost: caps per number/day, per IP/hour,
+    and a global per-hour ceiling — beyond the short per-number resend cooldown."""
+    settings = get_settings()
+    hour, day = timedelta(hours=1), timedelta(days=1)
+    checks: list[tuple[str, timedelta, int]] = [
+        (f"otp:num:{normalized}", day, settings.otp_max_per_number_per_day),
+        ("otp:global", hour, settings.otp_global_max_per_hour),
+    ]
+    if ip:
+        checks.append((f"otp:ip:{ip}", hour, settings.otp_max_per_ip_per_hour))
+    for scope_key, window, limit in checks:
+        if _hit_rate_limit(session, scope_key=scope_key, now=now, window=window, limit=limit):
+            raise OtpSendThrottled(scope_key)
+
+
+def request_otp(
+    session: Session, *, phone: str, gateway: SmsGateway, ip: str | None = None
+) -> None:
     """Generate a sign-in code for ``phone`` and text it. Rate-limited by a
-    per-number resend cooldown to blunt SMS-bombing / cost abuse."""
+    per-number resend cooldown plus per-number/per-IP/global send caps to blunt
+    SMS-bombing and Twilio-cost abuse."""
     settings = get_settings()
     normalized = normalize_phone(phone)
     now = datetime.now(UTC)
@@ -227,6 +341,8 @@ def request_otp(session: Session, *, phone: str, gateway: SmsGateway) -> None:
         age = (now - recent.created_at).total_seconds()
         if age < settings.otp_resend_cooldown_seconds:
             raise OtpRateLimited(str(int(settings.otp_resend_cooldown_seconds - age)))
+
+    _enforce_otp_send_limits(session, normalized=normalized, ip=ip, now=now)
 
     code = generate_otp_code()
     challenge = OtpChallenge(
@@ -254,6 +370,8 @@ def verify_otp(session: Session, *, phone: str, code: str) -> UserAccount:
     normalized = normalize_phone(phone)
     now = datetime.now(UTC)
 
+    # Lock the challenge row so parallel guesses can't both read the same
+    # ``attempts`` and each pass the cap (brute-force via concurrency).
     challenge = session.scalar(
         select(OtpChallenge)
         .where(
@@ -263,6 +381,7 @@ def verify_otp(session: Session, *, phone: str, code: str) -> UserAccount:
         )
         .order_by(OtpChallenge.created_at.desc())
         .limit(1)
+        .with_for_update()
     )
     if challenge is None:
         raise InvalidOtp("no active code")
@@ -292,12 +411,24 @@ def _find_or_create_by_phone(session: Session, *, phone: str) -> UserAccount:
         if user.status is not UserStatus.active:
             raise InvalidOtp("inactive account")
         return user
-    # IANA's reserved documentation domain — a valid, guaranteed-undeliverable
-    # placeholder (a real address can't collide). The phone is the true identifier.
-    placeholder_email = f"sms-{phone.lstrip('+')}@example.com"
+    # Placeholder in the reserved `.invalid` namespace that sign-up refuses, so it
+    # can't have been pre-registered (see create_guardian). The phone is the true
+    # identifier. Guard the insert against a concurrent first-OTP for the same
+    # number: the phone UNIQUE constraint makes one racer's flush fail — catch it
+    # and return the row the winner created rather than 500.
+    placeholder_email = f"sms-{phone.lstrip('+')}@{_PHONE_ACCOUNT_DOMAIN}"
     user = UserAccount(email=placeholder_email, phone=phone, password_hash=None)
     session.add(user)
-    session.flush()
+    try:
+        with session.begin_nested():
+            session.flush()
+    except IntegrityError:
+        existing = session.scalar(select(UserAccount).where(UserAccount.phone == phone))
+        if existing is None:
+            raise
+        if existing.status is not UserStatus.active:
+            raise InvalidOtp("inactive account") from None
+        return existing
     return user
 
 

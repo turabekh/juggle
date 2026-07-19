@@ -181,6 +181,7 @@ def test_run_endpoint_requires_admin(client: TestClient, make_admin) -> None:
         "plans_resolved",
         "plans_swept",
         "plans_purged",
+        "auth_rows_pruned",
     }
 
 

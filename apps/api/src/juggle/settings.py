@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     otp_ttl_minutes: int = Field(default=10)
     otp_max_attempts: int = Field(default=5)
     otp_resend_cooldown_seconds: int = Field(default=60)
+    # SMS-bomb / cost controls beyond the per-number resend cooldown: caps on how
+    # many codes one number/IP/the whole platform can trigger in a window.
+    otp_max_per_number_per_day: int = Field(default=5)
+    otp_max_per_ip_per_hour: int = Field(default=5)
+    otp_global_max_per_hour: int = Field(default=500)
     twilio_account_sid: str = Field(default="")
     twilio_auth_token: str = Field(default="")
     twilio_from_number: str = Field(default="")

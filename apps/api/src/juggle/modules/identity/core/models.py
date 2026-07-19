@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -110,6 +111,23 @@ class RefreshToken(UUIDPkMixin, TimestampMixin, Base):
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("refresh_token.id", ondelete="SET NULL"), nullable=True
     )
+
+
+class AuthThrottle(UUIDPkMixin, TimestampMixin, Base):
+    """Persistent fixed-window rate-limit counter for the SMS one-time-code sink.
+
+    Mirrors ``party_planner.PlanThrottle``: one row per scope (a normalised
+    number, a client IP, or the global ``otp`` bucket) so the SMS-bombing / cost
+    caps survive across worker processes. Read ``FOR UPDATE`` so concurrent
+    requests can't both slip under the cap.
+    """
+
+    __tablename__ = "auth_throttle"
+    __table_args__ = (Index("uq_auth_throttle_scope", "scope_key", unique=True),)
+
+    scope_key: Mapped[str] = mapped_column(String(160), nullable=False)  # e.g. "otp:ip:1.2.3.4"
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
 class OtpChallenge(UUIDPkMixin, TimestampMixin, Base):
