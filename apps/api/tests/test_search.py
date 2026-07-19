@@ -2,9 +2,21 @@
 over published, available inventory."""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from juggle.modules.search.core import service
+
+# Perth-local (UTC+8) reference sessions (E2 day/time facets): (starts_at, ends_at) pairs.
+SAT = ("2026-10-03T02:00:00Z", "2026-10-03T04:00:00Z")        # Perth Sat 10:00–12:00
+SUN = ("2026-10-04T02:00:00Z", "2026-10-04T04:00:00Z")        # Perth Sun
+WED_AFTER = ("2026-09-30T08:00:00Z", "2026-09-30T10:00:00Z")  # Perth Wed 16:00 (after school)
+WED_BEFORE = ("2026-09-30T01:00:00Z", "2026-09-30T03:00:00Z")  # Perth Wed 09:00 (before school)
+FAR_SAT = ("2026-10-10T02:00:00Z", "2026-10-10T04:00:00Z")    # Perth Sat, beyond the horizon
+FEED_NOW = datetime(2026, 9, 29, tzinfo=UTC)  # Perth Tue 08:00 — the coming week has the above
 
 # Perth CBD and a point ~11 km south (0.1° latitude).
 CBD = (-31.9523, 115.8613)
@@ -186,3 +198,61 @@ def test_unpublished_sessions_are_not_searchable(client: TestClient) -> None:
 def test_lat_without_lng_is_rejected(client: TestClient) -> None:
     resp = client.get("/api/v1/search/sessions", params={"lat": CBD[0]})
     assert resp.status_code == 422
+
+
+# --- E2: any-day one-off facets + feeds (Perth-local) -----------------------
+
+def test_when_facet_filters_by_perth_weekday_and_after_school(client: TestClient) -> None:
+    token = _signup(client)
+    sat = _publish_session(client, token, coords=CBD, title="Sat", starts_at=SAT[0], ends_at=SAT[1])
+    wed_after = _publish_session(
+        client, token, coords=CBD, title="WedPM", starts_at=WED_AFTER[0], ends_at=WED_AFTER[1]
+    )
+    wed_before = _publish_session(
+        client, token, coords=CBD, title="WedAM", starts_at=WED_BEFORE[0], ends_at=WED_BEFORE[1]
+    )
+
+    weekend = {c["session_id"] for c in _search(client, when="weekend")}
+    assert sat in weekend and wed_after not in weekend and wed_before not in weekend
+
+    weekday = {c["session_id"] for c in _search(client, when="weekday")}
+    assert wed_after in weekday and wed_before in weekday and sat not in weekday
+
+    after_school = {c["session_id"] for c in _search(client, when="after_school")}
+    assert wed_after in after_school  # weekday ≥ 3pm Perth
+    assert wed_before not in after_school  # weekday but 9am
+    assert sat not in after_school  # weekend excluded
+
+
+def test_this_weekend_feed(client: TestClient, db: Session) -> None:
+    token = _signup(client)
+    sat = _publish_session(client, token, coords=CBD, title="Sat", starts_at=SAT[0], ends_at=SAT[1])
+    sun = _publish_session(client, token, coords=CBD, title="Sun", starts_at=SUN[0], ends_at=SUN[1])
+    wed = _publish_session(
+        client, token, coords=CBD, title="Wed", starts_at=WED_AFTER[0], ends_at=WED_AFTER[1]
+    )
+    # A Saturday beyond the ~7-day horizon must not appear.
+    far_sat = _publish_session(
+        client, token, coords=CBD, title="FarSat", starts_at=FAR_SAT[0], ends_at=FAR_SAT[1]
+    )
+
+    ids = {str(c.session_id) for c in service.this_weekend_sessions(db, now=FEED_NOW)}
+    assert sat in ids and sun in ids
+    assert wed not in ids
+    assert far_sat not in ids  # horizon bound
+
+
+def test_after_school_feed(client: TestClient, db: Session) -> None:
+    token = _signup(client)
+    wed_after = _publish_session(
+        client, token, coords=CBD, title="WedPM", starts_at=WED_AFTER[0], ends_at=WED_AFTER[1]
+    )
+    wed_before = _publish_session(
+        client, token, coords=CBD, title="WedAM", starts_at=WED_BEFORE[0], ends_at=WED_BEFORE[1]
+    )
+    sat = _publish_session(client, token, coords=CBD, title="Sat", starts_at=SAT[0], ends_at=SAT[1])
+
+    ids = {str(c.session_id) for c in service.after_school_this_week_sessions(db, now=FEED_NOW)}
+    assert wed_after in ids
+    assert wed_before not in ids  # before 3pm
+    assert sat not in ids  # weekend

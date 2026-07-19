@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-ssr
+.vite
+coverage
+playwright-report
+test-results
+e2e/_*.spec.ts
+.env
+.env.*
+*.log

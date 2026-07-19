@@ -27,6 +27,8 @@ from juggle.modules.inventory.core import service as inventory_service
 from juggle.modules.notifications.core import service as notifications_service
 from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
 from juggle.modules.org.core import service as org_service
+from juggle.modules.parties.core import service as parties_service
+from juggle.modules.party_planner.core import service as party_planner_service
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
 from juggle.modules.scheduler.core.models import SessionReminder
 from juggle.modules.scheduler.core.schemas import JobSummary
@@ -178,19 +180,39 @@ def run_due_jobs(
     abandoned = booking_service.sweep_abandoned_checkouts(
         db, gateway=payment_gateway, now=now
     )
+    party_deposits_swept = parties_service.sweep_abandoned_deposits(
+        db, gateway=payment_gateway, now=now
+    )
+    party_balances_processed = parties_service.process_party_balances(
+        db, gateway=payment_gateway, email_gateway=gateway, now=now
+    )
     holds_reclaimed = inventory_service.reclaim_all_expired(db, now=now)
     waitlist_run = waitlist_service.process_all(db)
     reminders_sent = _send_reminders(db, now=now, gateway=gateway)
     what_to_bring_sent = _send_what_to_bring(db, now=now, gateway=gateway)
     compliance_expired = org_service.expire_due_compliance(db, today=now.date())
+    # Party Planner (ADR-0011): resolve plans past their deadline (announcing the reveal), fire the
+    # low-RSVP / re-vote nudges, sweep stale/orphaned ones, and purge expired guest PII.
+    plans_resolved = party_planner_service.resolve_due_plans(db, now=now, email_gateway=gateway)
+    party_planner_service.send_planner_nudges(db, now=now, email_gateway=gateway)
+    plans_swept = party_planner_service.sweep_stale_resolved(db, now=now)
+    plans_purged = party_planner_service.purge_expired_plan_pii(db, now=now)
+    # Bound the auth tables: drop expired refresh tokens / OTP challenges / throttle windows.
+    auth_rows_pruned = identity_service.prune_expired_auth(db, now=now)
 
     return JobSummary(
         holds_reclaimed=holds_reclaimed,
         abandoned_checkouts_swept=abandoned,
+        party_deposits_swept=party_deposits_swept,
+        party_balances_processed=party_balances_processed,
         waitlist_sessions_processed=waitlist_run.sessions_processed,
         waitlist_offers_made=waitlist_run.offers_made,
         waitlist_offers_expired=waitlist_run.offers_expired,
         reminders_sent=reminders_sent,
         what_to_bring_sent=what_to_bring_sent,
         compliance_expired=compliance_expired,
+        plans_resolved=plans_resolved,
+        plans_swept=plans_swept,
+        plans_purged=plans_purged,
+        auth_rows_pruned=auth_rows_pruned,
     )

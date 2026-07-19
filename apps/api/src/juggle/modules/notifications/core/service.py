@@ -12,18 +12,27 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from juggle.modules.notifications.core.gateway import EmailGateway
+from juggle.modules.notifications.core.gateway import EmailGateway, SmsGateway
 from juggle.modules.notifications.core.ical import IcalEvent, build_ics
 from juggle.modules.notifications.core.models import NotificationLog
 from juggle.modules.notifications.core.schemas import ConfirmationSession
 
 KIND_BOOKING_CONFIRMATION = "booking_confirmation"
+KIND_LOGIN_CODE = "login_code"
 KIND_SESSION_CANCELLATION = "session_cancellation"
 KIND_WAITLIST_OFFER = "waitlist_offer"
 KIND_PROVIDER_BROADCAST = "provider_broadcast"
 KIND_SESSION_REMINDER = "session_reminder"
 KIND_WHAT_TO_BRING = "what_to_bring"
 KIND_SEAT_UNAVAILABLE_REFUND = "seat_unavailable_refund"
+KIND_PARTY_PAYMENT_ACTION = "party_payment_action"
+KIND_PARTY_CANCELLED = "party_cancelled"
+KIND_PLANNER_INVITE = "planner_invite"
+KIND_PLANNER_RSVP = "planner_rsvp_confirmation"
+KIND_PLANNER_REVEAL = "planner_reveal"
+KIND_PLANNER_CHANGE = "planner_change_of_plans"
+KIND_PLANNER_LOW_RSVP = "planner_low_rsvp"
+KIND_PLANNER_REVOTE = "planner_revote"
 
 
 def _money(cents: int) -> str:
@@ -149,6 +158,50 @@ def notify_seat_unavailable_refund(
     )
 
 
+def notify_party_payment_action_needed(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    to_email: str,
+    party_title: str,
+    balance_cents: int,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """A party balance charge failed — ask the host to update their card (ADR-0008 §2)."""
+    subject = f"Action needed: payment for {party_title}"
+    body = (
+        f"We couldn't charge the remaining balance ({_money(balance_cents)}) for your booking of "
+        f"{party_title}. Please update your card details so we can complete the payment — "
+        "otherwise the booking will be cancelled and your deposit refunded."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(
+        db, user_id=user_id, to_email=to_email, kind=KIND_PARTY_PAYMENT_ACTION,
+        subject=subject, detail={"balance_cents": balance_cents},
+    )
+
+
+def notify_party_cancelled(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    to_email: str,
+    party_title: str,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """A party booking was cancelled; any refund due is processed (ADR-0008/0010)."""
+    subject = f"Cancelled: {party_title}"
+    body = (
+        f"Your booking of {party_title} has been cancelled. Any refund due has been processed "
+        "to your original payment method. You're welcome to book again."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(
+        db, user_id=user_id, to_email=to_email, kind=KIND_PARTY_CANCELLED,
+        subject=subject, detail={},
+    )
+
+
 def notify_waitlist_offer(
     db: Session,
     *,
@@ -256,6 +309,139 @@ def notify_session_reminder(
         kind=KIND_SESSION_REMINDER,
         subject=subject,
         detail={"window": window},
+    )
+
+
+# --- Party Planner (ADR-0011) — all transactional; no child PII in any of these (INV-13) ----
+
+def notify_planner_invite(
+    db: Session, *, to_email: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "You're invited to help pick a party! 🎉"
+    body = (
+        "You've been invited to vote on a kids' birthday party.\n\n"
+        f"RSVP and cast your vote here: {link}\n\n"
+        "Powered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_INVITE,
+                   subject=subject, detail={})
+
+
+def notify_planner_rsvp(
+    db: Session, *, to_email: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "Thanks for your RSVP 🎈"
+    body = (
+        "Thanks for RSVPing! You can change your vote any time before voting closes:\n\n"
+        f"{link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_RSVP,
+                   subject=subject, detail={})
+
+
+def notify_planner_reveal(
+    db: Session, *, to_email: str, winner_label: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "🎊 The party's decided!"
+    body = (
+        f"The votes are in — the party is: {winner_label}.\n\n"
+        f"See the details: {link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_REVEAL,
+                   subject=subject, detail={})
+
+
+def notify_planner_change(
+    db: Session, *, to_email: str, new_label: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "Change of plans for the party"
+    body = (
+        f"The host has updated the party — it's now: {new_label}.\n\n"
+        f"See the details: {link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_CHANGE,
+                   subject=subject, detail={})
+
+
+def notify_planner_low_rsvp(
+    db: Session, *, user_id: uuid.UUID, to_email: str, rsvp_count: int, link: str,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "Your party vote could use a few more RSVPs"
+    body = (
+        f"So far {rsvp_count} guest(s) have RSVP'd to your party vote. Voting closes soon — "
+        "share the link again, or extend the deadline from your dashboard:\n\n"
+        f"{link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=user_id, to_email=to_email, kind=KIND_PLANNER_LOW_RSVP,
+                   subject=subject, detail={"rsvp_count": rsvp_count})
+
+
+def notify_planner_revote(
+    db: Session, *, to_email: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    subject = "One of the party options changed — re-vote?"
+    body = (
+        "An option you voted for was removed from the party vote. Pop back and pick another:\n\n"
+        f"{link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_REVOTE,
+                   subject=subject, detail={})
+
+
+_PLANNER_GUEST_KINDS = (
+    KIND_PLANNER_INVITE, KIND_PLANNER_RSVP, KIND_PLANNER_REVEAL,
+    KIND_PLANNER_CHANGE, KIND_PLANNER_REVOTE,
+)
+
+
+def purge_planner_recipients(db: Session, *, emails: list[str]) -> int:
+    """Scrub guest addresses from the transactional planner delivery logs at purge time (edge 7).
+    Only guest-facing kinds are touched — the host's own low-RSVP nudge log is left intact."""
+    if not emails:
+        return 0
+    rows = list(
+        db.scalars(
+            select(NotificationLog).where(
+                NotificationLog.kind.in_(_PLANNER_GUEST_KINDS),
+                NotificationLog.to_email.in_(emails),
+            )
+        )
+    )
+    for row in rows:
+        row.to_email = ""
+    db.flush()
+    return len(rows)
+
+
+def send_login_code(
+    db: Session,
+    *,
+    phone: str,
+    code: str,
+    ttl_minutes: int,
+    gateway: SmsGateway,
+) -> NotificationLog:
+    """Text a one-time sign-in code. The code is delivered but never logged —
+    the ``NotificationLog`` records only that a code went to this number."""
+    body = (
+        f"Your Juggle sign-in code is {code}. It expires in {ttl_minutes} minutes. "
+        "If you didn't request this, ignore this message."
+    )
+    gateway.send(to=phone, body=body)
+    return _record(
+        db,
+        user_id=None,
+        to_email=phone,  # the delivery address for this channel is a phone number
+        kind=KIND_LOGIN_CODE,
+        subject="Your Juggle sign-in code",
+        detail={"channel": "sms"},
     )
 
 

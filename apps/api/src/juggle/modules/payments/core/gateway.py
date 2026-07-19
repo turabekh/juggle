@@ -71,11 +71,16 @@ class PaymentGateway(Protocol):
         application_fee_cents: int,
         currency: str,
         idempotency_key: str,
+        setup_future_usage: str | None = None,
     ) -> PaymentIntentResult: ...
 
     def confirm(self, intent_id: str) -> PaymentConfirmResult: ...
 
     def cancel_payment_intent(self, intent_id: str) -> PaymentConfirmResult: ...
+
+    def charge_saved_card(
+        self, *, deposit_intent_id: str, amount_cents: int, currency: str, idempotency_key: str
+    ) -> PaymentIntentResult: ...
 
     def refund(self, intent_id: str, amount_cents: int) -> RefundResult: ...
 
@@ -114,6 +119,7 @@ class FakeGateway:
         application_fee_cents: int,
         currency: str,
         idempotency_key: str,
+        setup_future_usage: str | None = None,
     ) -> PaymentIntentResult:
         intent_id = f"pi_fake_{uuid.uuid4().hex}"
         self._intents[intent_id] = "requires_confirmation"
@@ -128,6 +134,13 @@ class FakeGateway:
     def cancel_payment_intent(self, intent_id: str) -> PaymentConfirmResult:
         self._intents[intent_id] = "canceled"
         return PaymentConfirmResult(id=intent_id, status="canceled", succeeded=False)
+
+    def charge_saved_card(
+        self, *, deposit_intent_id: str, amount_cents: int, currency: str, idempotency_key: str
+    ) -> PaymentIntentResult:
+        intent_id = f"pi_fake_bal_{uuid.uuid4().hex}"
+        self._intents[intent_id] = "succeeded"
+        return PaymentIntentResult(id=intent_id, client_secret="", status="succeeded")
 
     def refund(self, intent_id: str, amount_cents: int) -> RefundResult:
         return RefundResult(id=f"re_fake_{uuid.uuid4().hex}", status="succeeded")
@@ -173,18 +186,23 @@ class StripeGateway:
         application_fee_cents: int,
         currency: str,
         idempotency_key: str,
+        setup_future_usage: str | None = None,
     ) -> PaymentIntentResult:
         # Separate charges: a plain charge on the PLATFORM account — deliberately NO
         # transfer_data.destination and NO application_fee_amount (ADR 0001). Card-only
         # so success/failure lands within the checkout window (ADR 0005). The fee is
-        # internal accounting, carried as metadata only.
+        # internal accounting, carried as metadata only. setup_future_usage="off_session"
+        # saves the card so a party balance can be charged off-session at T-7d (B3).
+        params: dict[str, object] = {
+            "amount": amount_cents,
+            "currency": currency,
+            "payment_method_types": ["card"],
+            "metadata": {"application_fee_cents": str(application_fee_cents)},
+        }
+        if setup_future_usage is not None:
+            params["setup_future_usage"] = setup_future_usage
         intent = self._client.payment_intents.create(
-            params={
-                "amount": amount_cents,
-                "currency": currency,
-                "payment_method_types": ["card"],
-                "metadata": {"application_fee_cents": str(application_fee_cents)},
-            },
+            params=params,  # type: ignore[arg-type]
             options={"idempotency_key": idempotency_key},
         )
         return PaymentIntentResult(
@@ -214,6 +232,45 @@ class StripeGateway:
             params={"payment_intent": intent_id, "amount": amount_cents}
         )
         return RefundResult(id=refund.id, status=refund.status or "")
+
+    def charge_saved_card(
+        self, *, deposit_intent_id: str, amount_cents: int, currency: str, idempotency_key: str
+    ) -> PaymentIntentResult:
+        # Off-session party balance charge (ADR-0008, B3): reuse the card saved on the deposit
+        # (setup_future_usage=off_session). Derive the customer + payment method from the
+        # deposit PI, then confirm a new off-session PaymentIntent. Idempotency key per attempt.
+        deposit = self._client.payment_intents.retrieve(deposit_intent_id)
+        customer = deposit.customer
+        customer_id = customer if isinstance(customer, str) else (customer.id if customer else "")
+        pm = deposit.payment_method
+        pm_id = pm if isinstance(pm, str) else (pm.id if pm else "")
+        try:
+            intent = self._client.payment_intents.create(
+                params={
+                    "amount": amount_cents,
+                    "currency": currency,
+                    "customer": customer_id,
+                    "payment_method": pm_id,
+                    "off_session": True,
+                    "confirm": True,
+                },
+                options={"idempotency_key": idempotency_key},
+            )
+        except stripe.CardError as exc:
+            # An off-session decline (insufficient funds, expired card, issuer decline, or a
+            # 3DS-required "authentication_required") RAISES rather than returning a status.
+            # Surface it as a non-succeeded result so the caller retries — never crash the tick.
+            failed_pi = getattr(exc, "payment_intent", None)
+            return PaymentIntentResult(
+                id=str((failed_pi or {}).get("id", "") or ""),
+                client_secret="",
+                status="requires_payment_method",
+            )
+        return PaymentIntentResult(
+            id=intent.id,
+            client_secret=intent.client_secret or "",
+            status=intent.status or "requires_payment_method",
+        )
 
     def transfer(
         self, *, destination: str | None, amount_cents: int, idempotency_key: str | None = None

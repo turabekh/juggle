@@ -30,9 +30,23 @@ from juggle.modules.search.core.schemas import SearchCard
 DEFAULT_RADIUS_KM = 25.0
 MAX_LIMIT = 100
 
+# WA has no daylight saving (INV-7): a fixed +8 offset is exact year-round, so "which day
+# of the week / after school" is evaluated in Perth local time, not UTC.
+PERTH_TZ = "Australia/Perth"
+PERTH_OFFSET = timedelta(hours=8)
+AFTER_SCHOOL_HOUR = 15  # 3pm local — the "after school this week" cutoff (E2)
+WEEKDAYS = frozenset({0, 1, 2, 3, 4})  # Mon..Fri (Python weekday numbering)
+WEEKEND = frozenset({5, 6})            # Sat, Sun
+FEED_HORIZON_DAYS = 7                  # bound feeds to the near term (this week/weekend)
+
 
 def _day_start(day: date) -> datetime:
     return datetime.combine(day, time.min, tzinfo=UTC)
+
+
+def _perth_local(col: Any) -> Any:
+    """A ``timestamptz`` column rendered as Perth wall-clock (``AT TIME ZONE``)."""
+    return func.timezone(PERTH_TZ, col)
 
 
 def search_sessions(
@@ -49,6 +63,8 @@ def search_sessions(
     category: str | None = None,
     price_max_cents: int | None = None,
     session_type: str | None = None,
+    days_of_week: frozenset[int] | None = None,
+    start_after_local_hour: int | None = None,
     available_only: bool = True,
     limit: int = 50,
     offset: int = 0,
@@ -102,6 +118,13 @@ def search_sessions(
         stmt = stmt.where(ProgramSession.price_cents <= price_max_cents)
     if session_type is not None:
         stmt = stmt.where(ProgramSession.session_type == session_type)
+    if days_of_week is not None and days_of_week:
+        # Perth-local weekday: Postgres isodow is 1=Mon..7=Sun; our set is 0=Mon..6=Sun.
+        isodow = func.extract("isodow", _perth_local(ProgramSession.starts_at))
+        stmt = stmt.where(isodow.in_(sorted(d + 1 for d in days_of_week)))
+    if start_after_local_hour is not None:
+        local_hour = func.extract("hour", _perth_local(ProgramSession.starts_at))
+        stmt = stmt.where(local_hour >= start_after_local_hour)
     if available_only:
         stmt = stmt.where(ProgramSession.seats_taken < ProgramSession.capacity)
 
@@ -139,3 +162,53 @@ def search_sessions(
         db, event_type="search_performed", props={"results": len(cards)}
     )
     return cards
+
+
+def this_weekend_sessions(
+    db: Session,
+    *,
+    lat: float | None = None,
+    lng: float | None = None,
+    radius_km: float = DEFAULT_RADIUS_KM,
+    suburb: str | None = None,
+    postcode: str | None = None,
+    child_age: int | None = None,
+    category: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    now: datetime | None = None,
+) -> list[SearchCard]:
+    """"This weekend" feed (E2): bookable Sat/Sun sessions (Perth local) in the coming
+    week, near the caller. Reads the live inventory projection (INV-8)."""
+    now = now or datetime.now(UTC)
+    horizon = (now + PERTH_OFFSET).date() + timedelta(days=FEED_HORIZON_DAYS)
+    return search_sessions(
+        db, lat=lat, lng=lng, radius_km=radius_km, suburb=suburb, postcode=postcode,
+        child_age=child_age, category=category, date_to=horizon, days_of_week=WEEKEND,
+        limit=limit, offset=offset, now=now,
+    )
+
+
+def after_school_this_week_sessions(
+    db: Session,
+    *,
+    lat: float | None = None,
+    lng: float | None = None,
+    radius_km: float = DEFAULT_RADIUS_KM,
+    suburb: str | None = None,
+    postcode: str | None = None,
+    child_age: int | None = None,
+    category: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    now: datetime | None = None,
+) -> list[SearchCard]:
+    """"After school this week" feed (E2): bookable weekday sessions starting from 3pm
+    Perth local, in the coming week, near the caller. Live inventory (INV-8)."""
+    now = now or datetime.now(UTC)
+    horizon = (now + PERTH_OFFSET).date() + timedelta(days=FEED_HORIZON_DAYS)
+    return search_sessions(
+        db, lat=lat, lng=lng, radius_km=radius_km, suburb=suburb, postcode=postcode,
+        child_age=child_age, category=category, date_to=horizon, days_of_week=WEEKDAYS,
+        start_after_local_hour=AFTER_SCHOOL_HOUR, limit=limit, offset=offset, now=now,
+    )

@@ -1,6 +1,6 @@
 # Juggle 🤹
 
-A two-sided **booking marketplace for kids' school-holiday activities and birthday parties**, launching in Perth, Australia. Parents search by suburb, date, and child age and book across multiple providers in one cart with **live seat availability**; providers get free self-serve tools to list sessions, manage rosters, and get paid; and a first-class admin console runs the whole thing.
+A two-sided, **year-round booking marketplace for kids' activities** — school-holiday programs, weekend & after-school one-offs, and birthday parties — launching in Perth, Australia (holidays are the peak, not the scope). Parents search by suburb, date, and child age and book across multiple providers in one cart with **live seat availability**; providers get free self-serve tools to list sessions, manage rosters, and get paid; and a first-class admin console runs the whole thing.
 
 > "Juggle" is a working title pending a name/trademark check. See [`docs/juggle-prd.md`](docs/juggle-prd.md) for the full product spec.
 

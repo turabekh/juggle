@@ -52,6 +52,24 @@ class RefundRequest(BaseModel):
     reason: str
 
 
+# Listing moderation rejection reasons (ADR-0006 / EXT-1 §2-E2, §10). `recurring_enrolment`
+# is the E2 fence: recurring/term-enrolment classes disguised as one-offs are not allowed.
+ListingRejectionReason = Literal[
+    "recurring_enrolment", "safety_concern", "misleading_content", "policy_violation", "other"
+]
+
+
+class ListingRejectIn(BaseModel):
+    reason: ListingRejectionReason
+    note: str | None = None
+
+
+class ListingModerationOut(BaseModel):
+    program_id: uuid.UUID
+    status: str
+    reason: ListingRejectionReason
+
+
 class ImpersonationCreate(BaseModel):
     target_user_id: uuid.UUID
     mode: Literal["view_as", "act_as"]

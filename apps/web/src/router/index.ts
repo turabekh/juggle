@@ -12,12 +12,48 @@ export function createAppRouter(history: RouterHistory) {
       children: [
         { path: '', name: 'discover', component: () => import('@/pages/DiscoverPage.vue') },
         {
+          path: 'planner',
+          name: 'planner',
+          component: () => import('@/pages/PlannerPage.vue'),
+          meta: { requiresAuth: true },
+        },
+        {
           path: 'sessions/:id',
           name: 'session',
           component: () => import('@/pages/SessionDetailPage.vue'),
           props: true,
         },
         { path: 'cart', name: 'cart', component: () => import('@/pages/CartPage.vue') },
+        {
+          path: 'parties',
+          name: 'parties',
+          component: () => import('@/pages/PartiesPage.vue'),
+        },
+        {
+          path: 'parties/packages/:id',
+          name: 'party-package',
+          component: () => import('@/pages/PartyPackagePage.vue'),
+          props: true,
+        },
+        {
+          path: 'parties/plans',
+          name: 'party-plans',
+          component: () => import('@/pages/PartyPlansPage.vue'),
+          meta: { requiresAuth: true },
+        },
+        {
+          path: 'parties/plans/:id',
+          name: 'party-plan-manage',
+          component: () => import('@/pages/PartyPlanManagePage.vue'),
+          props: true,
+          meta: { requiresAuth: true },
+        },
+        {
+          path: 'parties/plan/:token',
+          name: 'party-plan-rsvp',
+          component: () => import('@/pages/PartyPlanRsvpPage.vue'),
+          props: true,
+        },
         {
           path: 'checkout',
           name: 'checkout',
@@ -42,25 +78,30 @@ export function createAppRouter(history: RouterHistory) {
           component: () => import('@/pages/NotificationsPage.vue'),
           meta: { requiresAuth: true },
         },
+      ],
+    },
+    {
+      // Provider console — a separate experience with its own sidebar chrome.
+      path: '/provider',
+      component: () => import('@/layouts/ProviderLayout.vue'),
+      meta: { requiresAuth: true },
+      children: [
         {
-          path: 'provider',
+          path: '',
           name: 'provider',
           component: () => import('@/pages/provider/ProviderDashboard.vue'),
-          meta: { requiresAuth: true },
         },
         {
-          path: 'provider/orgs/:id',
+          path: 'orgs/:id',
           name: 'provider-org',
           component: () => import('@/pages/provider/ProviderOrgPage.vue'),
           props: true,
-          meta: { requiresAuth: true },
         },
         {
-          path: 'provider/programs/:id',
+          path: 'programs/:id',
           name: 'provider-program',
           component: () => import('@/pages/provider/ProviderProgramPage.vue'),
           props: true,
-          meta: { requiresAuth: true },
         },
       ],
     },

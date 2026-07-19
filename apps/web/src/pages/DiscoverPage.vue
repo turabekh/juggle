@@ -56,6 +56,18 @@
     </section>
 
     <div class="jg-page">
+      <!-- Birthday parties entry point -->
+      <router-link :to="{ name: 'parties' }" class="jg-party-banner">
+        <div class="jg-party-banner__emoji">🎉</div>
+        <div class="jg-party-banner__text">
+          <div class="jg-party-banner__title">Planning a birthday party?</div>
+          <div class="jg-party-banner__sub">
+            Browse party packages from local providers — instant-book with a deposit.
+          </div>
+        </div>
+        <q-icon name="chevron_right" size="24px" class="jg-party-banner__chev" />
+      </router-link>
+
       <!-- Category chips -->
       <div class="jg-cats">
         <button
@@ -120,6 +132,21 @@
             style="width: 140px"
             @update:model-value="runSearch"
           />
+        </div>
+        <div class="jg-filters__item">
+          <span class="jg-filters__label">When</span>
+          <div class="row items-center q-gutter-xs">
+            <q-chip
+              v-for="opt in whenOptions"
+              :key="opt.value ?? 'any'"
+              clickable
+              dense
+              :color="filters.when === opt.value ? 'primary' : 'grey-3'"
+              :text-color="filters.when === opt.value ? 'white' : 'dark'"
+              :label="opt.label"
+              @click="setWhen(opt.value)"
+            />
+          </div>
         </div>
         <q-space />
         <q-toggle
@@ -201,9 +228,17 @@ function blankFilters(): SearchFilters {
     category: null,
     price_max_cents: null,
     session_type: null,
+    when: null,
     available_only: true,
   }
 }
+
+const whenOptions: { label: string; value: SearchFilters['when'] }[] = [
+  { label: 'Any day', value: null },
+  { label: 'Weekend', value: 'weekend' },
+  { label: 'After school', value: 'after_school' },
+  { label: 'Weekday', value: 'weekday' },
+]
 
 const filters = reactive<SearchFilters>(blankFilters())
 const results = ref<SearchCard[]>([])
@@ -215,6 +250,11 @@ const ageModel = ref<number | null>(null)
 const priceDollars = ref<number | null>(null)
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
+
+function setWhen(value: SearchFilters['when']): void {
+  filters.when = value
+  void runSearch()
+}
 
 async function runSearch(): Promise<void> {
   filters.child_age = ageModel.value === null || Number.isNaN(ageModel.value) ? null : ageModel.value
@@ -312,6 +352,23 @@ onMounted(runSearch)
 .jg-searchbar__go { border-radius: 999px; padding: 8px 22px; }
 .jg-hero__nearme { margin-top: 12px; }
 
+/* Mobile: the pill searchbar stacks so nothing gets crushed. */
+@media (max-width: 599px) {
+  .jg-hero { padding: 6px 14px 30px; }
+  .jg-hero__sub { font-size: 15px; margin-bottom: 18px; }
+  .jg-searchbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    border-radius: 18px;
+    padding: 10px 14px;
+  }
+  .jg-searchbar__field { flex: 1 1 auto; padding: 4px 0; }
+  .jg-searchbar__field--date { max-width: none; }
+  .jg-searchbar__divider { width: 100%; height: 1px; }
+  .jg-searchbar__go { width: 100%; border-radius: 12px; padding: 12px; margin-top: 6px; }
+}
+
 .jg-cats {
   display: flex;
   gap: 10px;
@@ -351,6 +408,13 @@ onMounted(runSearch)
 .jg-filters__item { display: flex; align-items: center; gap: 10px; }
 .jg-filters__label { font-size: 13px; font-weight: 600; color: var(--jg-ink-soft); }
 
+/* Mobile: stack the filter rows so labels/inputs don't collide. */
+@media (max-width: 599px) {
+  .jg-filters { flex-direction: column; align-items: stretch; gap: 14px; padding: 14px; }
+  .jg-filters__item { justify-content: space-between; flex-wrap: wrap; }
+  .jg-filters :deep(.q-space) { display: none; }
+}
+
 .jg-results-head {
   display: flex;
   align-items: center;
@@ -362,4 +426,27 @@ onMounted(runSearch)
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 18px;
 }
+
+.jg-party-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  text-decoration: none;
+  color: var(--jg-ink);
+  background: linear-gradient(100% 100% at 0% 0%, #fff4e6 0%, #ffe9f2 100%);
+  border: 1px solid #ffd9c2;
+  border-radius: 16px;
+  padding: 16px 20px;
+  margin: 18px 0 6px;
+  transition: box-shadow 140ms ease, transform 140ms ease;
+}
+.jg-party-banner:hover {
+  box-shadow: var(--jg-shadow-lg);
+  transform: translateY(-1px);
+}
+.jg-party-banner__emoji { font-size: 30px; line-height: 1; }
+.jg-party-banner__text { flex: 1 1 auto; }
+.jg-party-banner__title { font-weight: 700; font-size: 16px; }
+.jg-party-banner__sub { color: var(--jg-ink-soft); font-size: 14px; }
+.jg-party-banner__chev { color: var(--jg-ink-soft); }
 </style>

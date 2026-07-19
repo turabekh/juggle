@@ -105,6 +105,10 @@ def get_session(db: Session, session_id: uuid.UUID) -> ProgramSession | None:
     return db.get(ProgramSession, session_id)
 
 
+def get_venue(db: Session, venue_id: uuid.UUID) -> Venue | None:
+    return db.get(Venue, venue_id)
+
+
 def list_org_venues(
     db: Session, *, organisation_id: uuid.UUID, actor_id: uuid.UUID
 ) -> list[Venue]:
@@ -142,6 +146,17 @@ def list_org_programs(
             .order_by(Program.created_at)
         )
     )
+
+
+def admin_unpublish_program(db: Session, *, program_id: uuid.UUID) -> Program:
+    """Unpublish a listing on platform authority (moderation) — no org-membership check.
+    Called only from the admin module, which gates + audits the action."""
+    program = db.get(Program, program_id)
+    if program is None:
+        raise ProgramNotFound(str(program_id))
+    program.status = ProgramStatus.unpublished
+    db.flush()
+    return program
 
 
 def set_program_status(

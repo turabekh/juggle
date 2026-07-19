@@ -1,0 +1,144 @@
+# PRD Extension 1 — Year-Round Demand & Parent Growth Loops
+
+| | |
+|---|---|
+| Document | `docs/PRD-EXT-1.md` — extends `docs/PRD.md` v0.1; modifies nothing in the MVP cutline |
+| Owner | Turaboy Holmirzaev |
+| Date | July 2026 |
+| Status | Approved for phased build. **No EXT item may begin before the spring MVP ships**, except G3-lite (pre-launch email capture, already in GTM plan). |
+
+## 1. Purpose
+
+Two gaps in the base PRD, one document:
+
+1. **Seasonality** (base PRD Risk #3): four holiday spikes/year is a fragile revenue curve. This extension adds year-round demand surfaces **without touching loyalty-category enrolments** — the disintermediation trap stays fenced off.
+2. **Parent acquisition**: demand-side growth is engineered into the product as loops (bookers recruit bookers), not bought as marketing. Principle: kids' activities are social goods — a booking a friend joins is worth three ads.
+
+Binding constraints inherited from base PRD: variety-seeking categories only; INV-1…11 apply throughout; anything here that conflicts with shipping spring MVP loses.
+
+## 2. Demand calendar (E-series)
+
+### E1 — Pupil-free days [P1]
+The unguarded flank: same acute pain as holidays ("random Friday, both parents working"), zero competition, desperate-intent SEO, and demand that recurs ~monthly somewhere in Perth.
+
+- **School-specific reality:** WA pupil-free days vary per school, not statewide. Data model: `school` (name, suburb, geo, sector), `guardian_school` (family's school links, set during onboarding or first booking), `pd_day` (school, date, source, status).
+- **Dataset строится three ways:** admin-curated from published school calendars (seed ~top-100 Perth schools), parent-submitted with moderation queue (§10.2 addition), provider-tagged ("we run PD-day programs").
+- **Surfaces:** "Pupil-free day coming up at <school> — programs that day near you" (email/push + home banner, T-14d and T-5d); providers can flag sessions as PD-day programs; programmatic SEO pages per date × region.
+- **Config (§10.1 delta):** PD dataset management UI, alert lead times.
+
+### E2 — Weekend & one-off sessions [P2]
+Saturday pottery, one-day STEM intensives, drop-in circus. Mechanically identical to holiday sessions (same `session` object, date outside holiday calendar) — this is surface work, not model work.
+
+- **Surfaces:** "This weekend" feed (the Discover tab's bookable half), weekend filter in search.
+- **Listing policy (guardrail):** one-off/drop-in only; recurring-enrolment classes disguised as one-offs are rejected at moderation. The fence around the loyalty trap is editorial, enforced in §10.2.
+
+### E3 — Long weekends & public holidays [P1, ships with E1]
+Pure calendar entries (national/state holidays already known); same alert + surface machinery as E1. Near-zero marginal build.
+
+### E4 — Trial passes & new-family bounties for term classes [P3]
+The only safe way to touch the biggest money pool in the category: monetize the **switch moment**, never the relationship.
+
+- **Product:** "Try before you enrol" — book taster sessions at up to N studios in an enrolment window; provider pays a lead fee per **attended trial** ($30–80, config-bounded), optional success bounty on confirmed enrolment (self-reported, audit-sampled).
+- **Hand-off is the feature:** after the trial, the relationship (enrolment, billing, scheduling) belongs entirely to the provider. Juggle stores no recurring billing, no term schedules, no make-up classes. Restated as a non-goal below because every future contributor will be tempted.
+- **Attribution window:** 30 days trial→enrolment for bounty claims; disputes via §10.2 console.
+- **Anti-gaming:** attended-trial fee (check-in-verified) is primary revenue; enrolment bounty is upside, never load-bearing.
+
+## 3. Parent growth loops (G-series)
+
+### G1 — "Book together" share links [P1]
+Post-booking share sheet → deep link to the exact session with live seats.
+
+- **Copy defaults privacy-first:** "We've booked Robotics Camp Tue 30 Sep — spots left if you want to join!" Child's first name appears **only** if the sender opts in per share (INV-13). Links never expose rosters or attendee identity.
+- **Attribution:** `share_link` carries referrer guardian; booking through it records the edge (feeds metrics + future referral credit).
+- **Placement:** confirmation screen, confirmation email, bookings dashboard.
+
+### G2 — Party Planner (invites + vote-to-book) [active gate per ADR-0006; evolved by ADR-0011]
+The acquisition sleeper: one party pushes 10–15 parent emails through a Juggle-branded moment. G2
+**evolves from plain invite/RSVP into a vote-to-book planner** — the vote is the engagement/virality
+mechanic and doubles as the date + headcount decision. Full decision set: **ADR-0011**.
+
+- **Host** picks up to 4 party options (Juggle packages, each carrying its specific slot datetime — a
+  vote is implicitly a date vote — plus max 1 custom free-text option), sets a voting deadline, ranks
+  their own child's favourites (⭐ badge), and shares a link (open + optional per-guest email invites).
+- **Invitees** RSVP without accounts via an opaque, noindex, deadline-expiring token: parent
+  name/email + attending-kid count + optional nickname/avatar, then **one vote** (editable until the
+  deadline). They see a live tally, countdown, and a pseudonymous who's-in board.
+- **Resolution** at the deadline (scheduler tick): winner announced to all invitees automatically;
+  host prompted to confirm the booking (headcount prefilled from "yes" RSVPs, T-72h rule per base §9)
+  or override (sends a "change of plans" notice). Package winners book through the existing parties +
+  payments rails; custom winners get a "book something similar" nudge. **Votes are non-binding on
+  inventory** — no holds/deposits during voting; options show live availability (INV-12).
+- **Privacy/consent (INV-13):** votes anonymous to everyone (tallies only, no vote-by-invite endpoint);
+  guest emails are transactional-only; marketing contact needs a separate opt-in at RSVP (Spam Act
+  2003). **No public rosters or attendee visibility (§10):** the who's-in board is audience-scoped,
+  pseudonymous (parent nickname/avatar only, never a child identity), and never public/indexable;
+  child first name + dietary are collected only post-resolution from confirmed guests and are visible
+  to host + provider only. Guest PII auto-purges N days after the event; marketing opt-ins persist
+  separately. Ships behind the `party_planner` flag, OFF until the real email gateway lands.
+
+### G3 — Sold-out capture: waitlists + availability alerts [P1]
+Extends base §7.7 waitlists into a subscription asset: "notify me when spots open," "tell me when summer programs drop," per category/suburb/age-band alerts — all capturable **pre-account** (email + kids' ages only). Every disappointment becomes a subscriber. *G3-lite (landing-page email capture with age fields) is already live in the GTM plan and is the only pre-launch EXT item.*
+
+### G4 — Honest scarcity surfaces [P1]
+"3 spots left" badges, "80% booked" session states, "filling fast" collections — powered exclusively by the true inventory projection (INV-8) and governed by new INV-12: **only real numbers, ever.** Display thresholds configurable in §10.1. This is the data moat doing the marketing; the moment it's ever caught being fake, the moat drains.
+
+### G5 — Weekly Discover digest [P1 email; Discover tab remains P2]
+Age-personalised "what's on for your kids this week/weekend" email: bookable sessions + admin-curated free community events (library, council — generosity is the strategy). Send-time and curation via §10.1; strict opt-in/unsubscribe (Spam Act). The newsletter precedes and funds the eventual Discover tab with an audience.
+
+### G6 — Referral credits [P2]
+Give $10 / get $10 booking credit, config-bounded amounts, standard fraud guards (velocity, self-referral block, credit expiry). Amplifier, not igniter — ships only after G1 attribution exists.
+
+## 4. Channel bridges (B-series) [P2 unless noted]
+
+- **B1 — ELC/kindy partner pages:** co-branded landing + QR per centre, partner attribution code, "school-age holiday care for siblings/graduates" framing. Leverages founder's ECEC placement network. Manual partner onboarding; dashboard later.
+- **B2 — P&C rev-share tracking:** partner entity + attributed bookings + exportable payout report (manual EFT fine initially).
+- **B3 — Employer/FIFO family benefit [P3]:** bulk holiday-program credits as an employee family benefit (mining sector entry via existing network). Note-only until multi-cycle proof.
+
+## 5. New invariants (adopt into CLAUDE.md)
+
+- **INV-12 Scarcity is never fabricated.** Every urgency signal (spots left, % booked, filling fast) derives from the live inventory projection; no synthetic countdowns, no fake "others are viewing," no threshold that displays sooner than truth. If marketing wants urgency, inventory supplies it or it doesn't exist.
+- **INV-13 Growth surfaces leak no child PII.** Share links, invites, alerts, digests: no child names in URLs, query params, or analytics events; child first name in share/invite copy only by per-instance sender opt-in; guest/invitee contact data scoped to its transactional purpose with separate marketing consent (Spam Act 2003 discipline).
+
+## 6. Config additions (base §10.1 deltas)
+
+Scarcity display thresholds; referral give/get amounts + expiry; trial lead fee + bounty bounds; PD-day dataset management + alert lead times; digest send-time + curation slots; partner codes.
+
+## 7. Data model deltas
+
+`school, guardian_school, pd_day, share_link, referral, referral_credit, invite, invite_rsvp, alert_subscription, partner, partner_attribution, trial_booking, lead_fee_event`. Module placement (`growth` module vs distributing into catalog/notifications) is an ADR at build time per house rules — recommendation: new `growth` module owning share/referral/invite/alerts + partner attribution; `school`/`pd_day` into `catalog` as geo reference data.
+
+**Party Planner (G2, ADR-0011)** supersedes the flat `invite`/`invite_rsvp` pair above with a
+planner set in a new **`party_planner`** module (layered immediately above `parties`):
+`party_plan, plan_option, plan_invite, plan_rsvp, plan_vote`. No child columns live in these tables —
+the post-resolution roster (child first name + dietary) lives on the resulting `party_booking`
+(INV-3). `plan_vote` has `UNIQUE(plan_invite_id)` (one editable vote per invite) and no read path
+exposes vote-by-invite (votes anonymous).
+
+## 8. Success metrics (per feature, conservative)
+
+| Loop | Metric | Healthy |
+|---|---|---|
+| G1 share links | share→visit→booking conversion | ≥8% of bookings shared; ≥15% of visits book |
+| G2 Party Planner | resolved plan→package booking; RSVPs per plan; invitee→signup within 60d | ≥40%; ≥10; ≥10% |
+| G3 alerts | alert→booking next cycle | ≥20% |
+| G5 digest | open rate; digest→session views | ≥45%; ≥10% CTR |
+| E1 PD days | bookings per PD date (top-20 schools) | ≥15 by 3rd occurrence |
+| E4 trials | attended-trial rate; provider repeat purchase of leads | ≥70%; ≥50% |
+
+North-star addition: **% of new guardians arriving via another guardian's loop** (target ≥25% by mid-2027) — the number that says the flywheel is real.
+
+## 9. Sequencing (relative, not calendar-bound)
+
+> **Revised by ADR-0006 (always-on repositioning, 2026-07-12):** **E2**, the **parties vertical**
+> (base PRD §9), and **G2** are pulled up from the P2 window into the **active build gate**, built
+> A→B→C→D (see `docs/PLANS/always-on-marketplace.md`). SSR is promoted to launch-blocking. The order
+> below is otherwise unchanged; the moved items are struck from step 3.
+
+1. **Pre-launch (now):** G3-lite email capture only. Nothing else starts.
+2. **Post-spring / P1 build window:** G1, G3 full, G4, G5, E1+E3 — alongside base-PRD P1 items (reviews, SMS, refund automation). These are the anti-seasonality bridge to summer.
+3. **Active gate (ADR-0006):** **E2**, the **parties vertical**, and **G2** (same release as parties — the invite loop is half the reason to build parties). Still P2 here: G6, B1, B2.
+4. **P3, after multi-cycle proof:** E4, B3.
+
+## 10. Non-goals (restated, because temptation is structural)
+
+No recurring billing or term-enrolment management, ever, under any feature flag. No purchased contact lists. No fabricated urgency (INV-12). No public rosters or attendee visibility. No chat. No paid placement in the digest while organic trust is being built (revisit ≥2027 with disclosure rules).

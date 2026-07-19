@@ -26,6 +26,15 @@ class PaymentStatus(enum.StrEnum):
     partially_refunded = "partially_refunded"
 
 
+class PaymentPurpose(enum.StrEnum):
+    """What a Payment settles — the shared Stripe webhook routes on this so a party
+    deposit/balance isn't mistaken for a marketplace cart (which would auto-refund it)."""
+
+    cart = "cart"                  # a marketplace checkout (booking module)
+    party_deposit = "party_deposit"
+    party_balance = "party_balance"
+
+
 class PayoutStatus(enum.StrEnum):
     scheduled = "scheduled"
     paid = "paid"
@@ -60,6 +69,11 @@ class Payment(UUIDPkMixin, TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(3), default="aud", nullable=False)
     status: Mapped[PaymentStatus] = mapped_column(
         Enum(PaymentStatus, name="payment_status"), default=PaymentStatus.pending, nullable=False
+    )
+    purpose: Mapped[PaymentPurpose] = mapped_column(
+        Enum(PaymentPurpose, name="payment_purpose"),
+        default=PaymentPurpose.cart,
+        nullable=False,
     )
 
 

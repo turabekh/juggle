@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-Context for Claude Code working in this repository. Read it before making changes, and keep it up to date as the project evolves.
+The single authoritative instructions file for Claude Code in this repository (it supersedes the former `CLAUDE2.md`). Read it before making changes, then **read the latest file in `docs/HANDOFF/`** before starting work. Keep this file up to date as the project evolves — don't add a second instructions file.
 
 ## Project overview
 
-**Juggle** (working title) is a two-sided **booking marketplace for kids' school-holiday activities and birthday parties**, launching in Perth, Australia. It has:
+**Juggle** (working title) is a two-sided, **year-round booking marketplace for kids' activities** — school-holiday programs, weekend & after-school one-offs, and birthday parties — launching in Perth, Australia. School holidays are the *peak demand moment, not the scope* (ADR-0006). It has:
 
 - a **parent-facing marketplace** — search by suburb/date/child-age, live seat availability, one-cart multi-provider checkout, manage bookings;
 - **free SaaS-lite tools for providers** — self-serve listings, session/capacity management, live roster, Stripe payouts (this is both the supply hook and the source of live availability);
@@ -72,6 +72,36 @@ jungler/
 - **Child data is sensitive (PRD §11).** Collect the minimum (first name, DOB, medical/emergency contact); no child surname or photos at MVP; never put child PII in analytics events; guardian-only access.
 - **Types & style:** mypy strict, no `any`/untyped defs; ruff (`E,F,I,UP,B`); named exports; snake_case Python. Keep dependencies minimal.
 
+## Domain invariants (non-negotiable)
+
+State which of these a plan/change touches, and how it's respected. Several are enforced at the DB/query layer, not by trust — keep them that way.
+
+- **INV-1 No oversell / no stranded paid seat.** `catalog.Session.seats_taken` is the only occupancy counter; `confirmed + active/reserved holds ≤ capacity` is enforced transactionally under the session row lock, with the `ck_session_no_oversell` CHECK as the DB backstop. Browsing holds carry a TTL; a checked-out seat is a **firm reservation** (not TTL-reclaimed) resolved only by confirm/cancel/abandoned-sweep (ADR-0005).
+- **INV-2 Money moves only through `payments`** (the gateway Protocol). All Stripe webhooks verify the raw-body signature before parsing and are idempotent via the `stripe_event` UNIQUE(event_id) ledger.
+- **INV-3 Child-data minimisation.** First name, DOB, medical/allergy, emergency contact only — no child surname or photos, ever. Child PII never appears in logs, analytics events, error reports, or LLM prompts.
+- **INV-4 WWCC gating.** A staff member without a current, verified WA Working with Children Check is not assignable to a session roster — enforced by query/expiry, not trust.
+- **INV-5 Refund floor.** A provider-cancelled session ⇒ automatic 100% refund to every booking, and the provider's payout for it is clawed back (decrement if scheduled, Stripe Transfer Reversal if paid).
+- **INV-6 Price display is GST-inclusive** (ACCC component pricing); the platform fee is calculated fee-exclusive and invoiced +GST; provider net = line − fee − gst, per-session rounding (ADR-0002).
+- **INV-7 Time is UTC in storage, `Australia/Perth` at the edge.** WA has no daylight saving — don't import DST assumptions.
+- **INV-8 Availability shown = availability true.** Any surface showing seats-remaining reads the live inventory projection, never a stale cached count.
+- **INV-9 Repo hygiene.** No secrets in the repo; `.env.example` is the contract. Synthetic data only in fixtures/seeds — no real parent/child data.
+- **INV-10 Impersonation is never invisible or anonymous.** Every impersonation token carries the true actor; every action under it is audit-logged; sensitive actions are hard-blocked; the impersonated UI always shows the banner (M7b).
+- **INV-11 Runtime config is governed.** Every `platform_setting` is typed, bounded, versioned, and audit-logged; code reads it only through `config.service` — no hardcoded values for anything §10.1 makes configurable.
+- **INV-12 Scarcity is never fabricated.** Every urgency signal derives from the live inventory projection — no synthetic countdowns/viewer counts/early thresholds.
+- **INV-13 Growth surfaces leak no child PII** — no child names in share links, invites, alerts, digests, or their analytics.
+
+## Process
+
+- **Architectural decisions → `docs/ADR/NNNN-title.md`** (PROPOSED until accepted). Completed milestones/sessions → a handoff in **`docs/HANDOFF/YYYY-MM-DD-<slug>.md`**; **read the latest handoff at the start of a session.** Plans for anything touching money/inventory/child-data → `docs/PLANS/`.
+- **Adversarially review money/inventory/child-data changes before merging** — pressure-test the diff for the invariant it touches (a fresh skeptical pass, e.g. a review subagent), not just green tests. Trust the reviewer over optimism; fix or justify every load-bearing finding.
+- **Verify behaviour, not just `make check`** — exercise the changed flow (the payments track was smoke-tested end-to-end through the API). Don't run data-committing scripts against the shared dev/test DB — use the rolled-back test fixture.
+
+## Git discipline
+
+- **Never push, force-push, tag-push, or merge without explicit approval in the current session.** Commit locally freely on feature branches.
+- **Conventional commits scoped to feature IDs** (`feat(F-PAY-3): …`), branch per feature (`feat/…`), commit at each green step.
+- End commit messages with the `Co-Authored-By: Claude …` trailer; end PR bodies with the Claude Code generated-by line.
+
 ## Commands
 
 Run from the repo root (see `make help`). Backend commands run in `apps/api` via `uv`.
@@ -102,11 +132,20 @@ Run `make check` before considering a change finished.
 - [ ] No child PII added to logs/analytics events
 - [ ] Module boundaries respected (no cross-module `core` imports; new modules added to contracts)
 
+## Phase gates
+
+Scope tags come from `docs/juggle-prd.md` and `docs/juggle-prd-ext-1.md`. Only build what's in the active gate; anything else, raise it, don't build it.
+
+- **MVP + Phase-1 core** — done/underway (see Status above): search/listing/checkout, provider tools, admin console, reviews/waitlist/comms/analytics/scheduler/qanda, and the **payments track (F-PAY-0…6)**.
+- **Active gate (ADR-0006 — always-on repositioning):** **E2** any-day one-off/drop-in sessions, the **parties vertical** (PRD §9, instant-book + request-to-quote), and **G2 Party Planner — vote-to-book invites + RSVP** (ADR-0011: host picks ≤4 options → invitees RSVP+vote via a tokenized public link → deadline resolves to a winner + one-tap booking through the existing parties/payments rails; a planning layer only, no new money code; new `party_planner` module above `parties`; behind the `party_planner` flag, OFF until real email lands) — pulled up from P2, built A→B→C→D per `docs/PLANS/always-on-marketplace.md`. **SSR** promoted to launch-blocking.
+- **Still P1/P2/P3 (locked until raised):** the rest of PRD-EXT-1 (G1/G3-full/G4/G5, E1/E3, G6, B-series, E4), SMS, SSO, KidSport.
+
 ## What NOT to do
 
 - Don't import one module's `core` from another module — use a service interface.
 - Don't add FastAPI/Starlette imports inside any `core/` package.
 - Don't hard-code runtime/product config (fees, TTLs, taxonomy) — it belongs in DB/admin config.
 - Don't enforce capacity only in application code — the DB constraint is the guarantee.
-- Don't build out-of-scope surfaces (CCS reporting, term classes, chat/DMs, native apps) — see PRD §17.
-- Don't put child surnames/photos in the data model or child PII in analytics.
+- **Never build recurring billing or term-enrolment management, ever, under any feature flag** (EXT-1 §10, reaffirmed by ADR-0006). One-off/drop-in sessions are in scope; the *ongoing* relationship (enrolment, term schedules, make-up classes, recurring billing) belongs entirely to the provider. Recurring-enrolment listings disguised as one-offs are **rejected at moderation** (§10.2). The only ever-permitted touch of term classes is the E4 trial-pass *switch moment* (P3), never the relationship.
+- Don't build other out-of-scope surfaces (CCS reporting, chat/DMs, native apps, purchased contact lists, fabricated urgency) — see PRD §17 and EXT-1 §10.
+- Don't put child surnames/photos in the data model or child PII in analytics/share-links/invites (INV-3/INV-13).

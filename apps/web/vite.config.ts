@@ -22,7 +22,7 @@ export default defineConfig({
     port: 9000,
     // Proxy API calls to the FastAPI backend during dev (no CORS fuss).
     proxy: {
-      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+      '/api': { target: process.env.VITE_API_TARGET || 'http://localhost:8000', changeOrigin: true },
     },
   },
 })

@@ -27,6 +27,7 @@ from juggle.modules.payments.core.gateway import (
 )
 from juggle.modules.payments.core.models import (
     Payment,
+    PaymentPurpose,
     PaymentStatus,
     Payout,
     PayoutStatus,
@@ -78,16 +79,19 @@ def create_payment(
     idempotency_key: str,
     gateway: PaymentGateway,
     currency: str = "aud",
+    purpose: PaymentPurpose = PaymentPurpose.cart,
+    setup_future_usage: str | None = None,
 ) -> tuple[Payment, PaymentIntentResult]:
     """Create the Stripe PaymentIntent (separate charge — no application_fee/destination,
     ADR-0001/0005) and the local Payment row. The caller passes the per-session-summed
-    fee + GST so rounding stays per-session (ADR-0002). Returns the payment and the intent
-    so the caller can hand the client_secret to the Payment Element."""
+    fee + GST so rounding stays per-session (ADR-0002). ``purpose`` routes the shared webhook
+    (cart vs party); ``setup_future_usage`` saves the card for an off-session party balance."""
     intent = gateway.create_payment_intent(
         amount_cents=amount_cents,
         application_fee_cents=application_fee_cents,
         currency=currency,
         idempotency_key=idempotency_key,
+        setup_future_usage=setup_future_usage,
     )
     payment = Payment(
         guardian_id=guardian_id,
@@ -98,10 +102,40 @@ def create_payment(
         fee_gst_cents=fee_gst_cents,
         currency=currency,
         status=PaymentStatus.pending,
+        purpose=purpose,
     )
     db.add(payment)
     db.flush()
     return payment, intent
+
+
+def record_payment(
+    db: Session,
+    *,
+    guardian_id: uuid.UUID,
+    amount_cents: int,
+    stripe_payment_intent_id: str,
+    purpose: PaymentPurpose,
+    status: PaymentStatus,
+    idempotency_key: str | None = None,
+    currency: str = "aud",
+) -> Payment:
+    """Record a Payment whose PaymentIntent was already created by the caller (e.g. an
+    off-session party balance charge), so no gateway call happens here."""
+    payment = Payment(
+        guardian_id=guardian_id,
+        stripe_payment_intent_id=stripe_payment_intent_id,
+        idempotency_key=idempotency_key,
+        amount_cents=amount_cents,
+        application_fee_cents=0,
+        fee_gst_cents=0,
+        currency=currency,
+        status=status,
+        purpose=purpose,
+    )
+    db.add(payment)
+    db.flush()
+    return payment
 
 
 def find_by_idempotency_key(
@@ -393,6 +427,23 @@ def adjust_payout_for_refund(
         payout.status = PayoutStatus.reversed
     db.flush()
     return reverse
+
+
+def accrue_party_payout(
+    db: Session, *, organisation_id: uuid.UUID, net_cents: int, scheduled_for: datetime
+) -> Payout:
+    """A standalone provider payout for one party (session_id is None — parties aren't
+    sessions, so these must NOT merge like per-session accruals do)."""
+    payout = Payout(
+        organisation_id=organisation_id,
+        session_id=None,
+        amount_cents=net_cents,
+        status=PayoutStatus.scheduled,
+        scheduled_for=scheduled_for,
+    )
+    db.add(payout)
+    db.flush()
+    return payout
 
 
 def list_org_payouts(

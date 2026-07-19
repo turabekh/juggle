@@ -5,8 +5,23 @@
         <span style="font-size: 24px">🤹</span>
         <span>Juggle</span>
       </router-link>
-      <h1 class="text-h5 q-mt-md q-mb-xs">Create your account</h1>
-      <p class="jg-muted q-mb-lg">One account for all your kids' holiday plans.</p>
+      <h1 class="text-h5 q-mt-md q-mb-xs">{{ heading }}</h1>
+      <p class="jg-muted q-mb-md">{{ blurb }}</p>
+
+      <q-btn-toggle
+        v-model="audience"
+        spread
+        no-caps
+        unelevated
+        class="jg-audience q-mb-lg"
+        toggle-color="primary"
+        color="white"
+        text-color="grey-8"
+        :options="[
+          { value: 'parent', label: 'I\'m a parent', icon: 'family_restroom' },
+          { value: 'provider', label: 'I run activities', icon: 'storefront' },
+        ]"
+      />
 
       <q-form @submit="submit" class="q-gutter-md">
         <q-input v-model="fullName" outlined label="Your name" autofocus />
@@ -41,24 +56,37 @@
 
       <div class="jg-auth__foot">
         Already have an account?
-        <router-link :to="{ name: 'login', query: route.query }" class="jg-link">Sign in</router-link>
+        <router-link :to="{ name: 'login', query: { ...route.query, as: audience } }" class="jg-link">
+          Sign in
+        </router-link>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useQuasar } from 'quasar'
 import { useRoute, useRouter } from 'vue-router'
 
 import { apiError } from '@/lib/api'
+import { audienceFromQuery, landingFor, type Audience } from '@/lib/authAudience'
 import { useAuthStore } from '@/stores/auth'
 
 const $q = useQuasar()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+
+const audience = ref<Audience>(audienceFromQuery(route.query.as))
+const heading = computed(() =>
+  audience.value === 'provider' ? 'Create a provider account' : 'Create your account',
+)
+const blurb = computed(() =>
+  audience.value === 'provider'
+    ? "One account to list activities and manage bookings. You'll set up your organisation next."
+    : "One account for all your kids' holiday plans.",
+)
 
 const fullName = ref('')
 const email = ref('')
@@ -73,8 +101,7 @@ async function submit(): Promise<void> {
   loading.value = true
   try {
     await auth.signup(email.value, password.value, fullName.value || undefined)
-    const redirect = (route.query.redirect as string) || '/'
-    router.push(redirect)
+    router.push(landingFor(audience.value, route.query.redirect as string | undefined))
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err, 'Could not create account') })
   } finally {
@@ -104,4 +131,9 @@ async function submit(): Promise<void> {
 }
 .jg-auth__foot { margin-top: 20px; font-size: 14px; color: var(--jg-ink-soft); }
 .jg-link { color: var(--jg-primary); font-weight: 600; text-decoration: none; }
+.jg-audience {
+  border: 1px solid var(--jg-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
 </style>

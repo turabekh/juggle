@@ -31,6 +31,21 @@ KEY_PAYOUT_DELAY_DAYS = "payout_delay_days"
 KEY_IMPERSONATION_TTL_MINUTES = "impersonation_ttl_minutes"
 KEY_WAITLIST_CLAIM_WINDOW_MINUTES = "waitlist_claim_window_minutes"
 KEY_MAX_ACTIVE_HOLDS_PER_GUARDIAN = "max_active_holds_per_guardian"
+KEY_PARTY_DEPOSIT_PCT = "party_deposit_pct"
+KEY_PARTY_BALANCE_OFFSET_DAYS = "party_balance_offset_days"
+KEY_PARTY_BALANCE_CUTOFF_HOURS = "party_balance_cutoff_hours"
+KEY_PARTY_BALANCE_RETRY_INTERVAL_HOURS = "party_balance_retry_interval_hours"
+KEY_PARTY_BALANCE_MAX_ATTEMPTS = "party_balance_max_attempts"
+# Party Planner (ADR-0011)
+KEY_PARTY_PLANNER_MAX_OPTIONS = "party_planner_max_options"
+KEY_PARTY_PLANNER_MIN_DEADLINE_GAP_HOURS = "party_planner_min_deadline_gap_hours"
+KEY_PARTY_PLANNER_LOW_RSVP_THRESHOLD = "party_planner_low_rsvp_threshold"
+KEY_PARTY_PLANNER_EXTEND_HOURS = "party_planner_extend_hours"
+KEY_PARTY_PLANNER_PURGE_DAYS = "party_planner_purge_days"
+KEY_PARTY_PLANNER_RSVP_RATE_PER_HOUR = "party_planner_rsvp_rate_per_hour"
+KEY_PARTY_PLANNER_CUSTOM_OPTION_MAXLEN = "party_planner_custom_option_maxlen"
+KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN = "party_planner_page_title_maxlen"
+KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN = "party_planner_page_message_maxlen"
 
 
 @dataclass(frozen=True)
@@ -76,6 +91,62 @@ REGISTRY: dict[str, SettingSpec] = {
     KEY_MAX_ACTIVE_HOLDS_PER_GUARDIAN: SettingSpec(
         KEY_MAX_ACTIVE_HOLDS_PER_GUARDIAN, 8, int, 1, 50,
         "Max concurrent active seat holds per guardian (anti-hoarding)",
+    ),
+    KEY_PARTY_DEPOSIT_PCT: SettingSpec(
+        KEY_PARTY_DEPOSIT_PCT, 30, int, 10, 100,
+        "Party booking deposit percentage of the total (ADR-0007)",
+    ),
+    KEY_PARTY_BALANCE_OFFSET_DAYS: SettingSpec(
+        KEY_PARTY_BALANCE_OFFSET_DAYS, 7, int, 0, 30,
+        "Days before a party to start charging the balance (ADR-0008)",
+    ),
+    KEY_PARTY_BALANCE_CUTOFF_HOURS: SettingSpec(
+        KEY_PARTY_BALANCE_CUTOFF_HOURS, 72, int, 0, 336,
+        "Hours before a party after which an unpaid balance auto-cancels (ADR-0008)",
+    ),
+    KEY_PARTY_BALANCE_RETRY_INTERVAL_HOURS: SettingSpec(
+        KEY_PARTY_BALANCE_RETRY_INTERVAL_HOURS, 48, int, 1, 336,
+        "Minimum hours between party balance-charge attempts (ADR-0008)",
+    ),
+    KEY_PARTY_BALANCE_MAX_ATTEMPTS: SettingSpec(
+        KEY_PARTY_BALANCE_MAX_ATTEMPTS, 3, int, 1, 10,
+        "Max party balance-charge attempts before auto-cancel (ADR-0008)",
+    ),
+    KEY_PARTY_PLANNER_MAX_OPTIONS: SettingSpec(
+        KEY_PARTY_PLANNER_MAX_OPTIONS, 4, int, 2, 4,
+        "Max options a party plan may offer (ADR-0011)",
+    ),
+    KEY_PARTY_PLANNER_MIN_DEADLINE_GAP_HOURS: SettingSpec(
+        KEY_PARTY_PLANNER_MIN_DEADLINE_GAP_HOURS, 24, int, 1, 168,
+        "Min hours between a plan deadline and its earliest option slot (ADR-0011)",
+    ),
+    KEY_PARTY_PLANNER_LOW_RSVP_THRESHOLD: SettingSpec(
+        KEY_PARTY_PLANNER_LOW_RSVP_THRESHOLD, 5, int, 0, 100,
+        "RSVP count below which a low-participation nudge fires at T-24h (ADR-0011)",
+    ),
+    KEY_PARTY_PLANNER_EXTEND_HOURS: SettingSpec(
+        KEY_PARTY_PLANNER_EXTEND_HOURS, 48, int, 1, 168,
+        "One-tap deadline extension length (ADR-0011)",
+    ),
+    KEY_PARTY_PLANNER_PURGE_DAYS: SettingSpec(
+        KEY_PARTY_PLANNER_PURGE_DAYS, 30, int, 1, 365,
+        "Days after the event to purge guest PII from a plan (ADR-0011)",
+    ),
+    KEY_PARTY_PLANNER_RSVP_RATE_PER_HOUR: SettingSpec(
+        KEY_PARTY_PLANNER_RSVP_RATE_PER_HOUR, 20, int, 1, 1000,
+        "Per-IP/per-token RSVP+vote requests allowed per hour (ADR-0011)",
+    ),
+    KEY_PARTY_PLANNER_CUSTOM_OPTION_MAXLEN: SettingSpec(
+        KEY_PARTY_PLANNER_CUSTOM_OPTION_MAXLEN, 80, int, 10, 200,
+        "Max length of a custom option / nickname on a public plan page (ADR-0011)",
+    ),
+    KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN: SettingSpec(
+        KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN, 60, int, 10, 120,
+        "Max length of the host-set party page title (ADR-0011 party page)",
+    ),
+    KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN: SettingSpec(
+        KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN, 280, int, 0, 1000,
+        "Max length of the host-set party page welcome message (ADR-0011 party page)",
     ),
 }
 
@@ -219,3 +290,59 @@ def waitlist_claim_window_minutes(db: Session) -> int:
 
 def max_active_holds_per_guardian(db: Session) -> int:
     return int(get_value(db, KEY_MAX_ACTIVE_HOLDS_PER_GUARDIAN))
+
+
+def party_deposit_pct(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_DEPOSIT_PCT))
+
+
+def party_balance_offset_days(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_BALANCE_OFFSET_DAYS))
+
+
+def party_balance_cutoff_hours(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_BALANCE_CUTOFF_HOURS))
+
+
+def party_balance_retry_interval_hours(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_BALANCE_RETRY_INTERVAL_HOURS))
+
+
+def party_balance_max_attempts(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_BALANCE_MAX_ATTEMPTS))
+
+
+def party_planner_max_options(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_MAX_OPTIONS))
+
+
+def party_planner_min_deadline_gap_hours(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_MIN_DEADLINE_GAP_HOURS))
+
+
+def party_planner_low_rsvp_threshold(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_LOW_RSVP_THRESHOLD))
+
+
+def party_planner_extend_hours(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_EXTEND_HOURS))
+
+
+def party_planner_purge_days(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_PURGE_DAYS))
+
+
+def party_planner_rsvp_rate_per_hour(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_RSVP_RATE_PER_HOUR))
+
+
+def party_planner_custom_option_maxlen(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_CUSTOM_OPTION_MAXLEN))
+
+
+def party_planner_page_title_maxlen(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN))
+
+
+def party_planner_page_message_maxlen(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN))

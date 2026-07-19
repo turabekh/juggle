@@ -36,18 +36,23 @@ def db(engine: Engine) -> Iterator[Session]:
 
     Any committed platform settings / feature flags (from seeds or manual use)
     are cleared *within* this transaction so every test sees the built-in config
-    defaults; the deletes roll back, leaving persisted data untouched.
+    defaults; likewise any committed party plans (leaked drafts / a developer's own
+    demo plan on the shared dev DB) are cleared so the planner's cross-plan queries
+    (e.g. ``resolve_due_plans`` / nudge counts) stay deterministic. The deletes roll
+    back, leaving persisted data untouched.
     """
     from sqlalchemy import delete
 
     from juggle.modules.config.core.models import PlatformSetting
     from juggle.modules.flags.core.models import FeatureFlag
+    from juggle.modules.party_planner.core.models import PartyPlan
 
     connection = engine.connect()
     transaction = connection.begin()
     session = Session(bind=connection)
     session.execute(delete(PlatformSetting))
     session.execute(delete(FeatureFlag))
+    session.execute(delete(PartyPlan))  # cascades to plan_option/invite/rsvp/vote/reaction
     session.flush()
     try:
         yield session
@@ -69,13 +74,18 @@ def client(db: Session) -> Iterator[TestClient]:
     """
     from juggle.db import get_session
     from juggle.main import app
+    from juggle.modules.notifications.core.gateway import _fake_sms_gateway, get_sms_gateway
 
     app.dependency_overrides[get_session] = lambda: db
+    # Force the in-memory SMS gateway so a developer's real Twilio creds in `.env`
+    # can never trigger a live send (or cost) during the suite.
+    app.dependency_overrides[get_sms_gateway] = lambda: _fake_sms_gateway
     try:
         with TestClient(app) as test_client:
             yield test_client
     finally:
         app.dependency_overrides.pop(get_session, None)
+        app.dependency_overrides.pop(get_sms_gateway, None)
 
 
 @pytest.fixture

@@ -2,7 +2,13 @@
 
 export interface TokenResponse {
   access_token: string
+  refresh_token: string
   token_type: string
+  expires_in: number
+}
+
+export interface AuthConfig {
+  sms_enabled: boolean
 }
 
 export interface User {
@@ -38,6 +44,55 @@ export interface ChildCreate {
   emergency_contact_name?: string | null
   emergency_contact_phone?: string | null
   photo_consent?: boolean
+}
+
+// --- AI holiday planner (§7 discovery; behind the `planner` flag) ---
+export interface PlanRequest {
+  ages: number[]
+  date_from: string
+  date_to: string
+  suburb?: string | null
+  budget_cents?: number | null
+  categories?: string[] | null
+  day_type?: string | null
+  start_after_hour?: number | null
+  drop_off_only?: boolean
+}
+
+export interface PlanCandidate {
+  session_id: string
+  program_id: string
+  title: string
+  category: string
+  organisation_name: string
+  venue_name: string
+  suburb: string | null
+  starts_at: string
+  ends_at: string
+  price_cents: number
+  age_min: number
+  age_max: number
+  seats_remaining: number
+  distance_km: number | null
+}
+
+export interface PlanItem {
+  session: PlanCandidate
+  for_ages: number[]
+  reason: string
+}
+
+export interface PlanDay {
+  day: string
+  items: PlanItem[]
+}
+
+export interface PlanOut {
+  days: PlanDay[]
+  total_cents: number
+  summary: string
+  generated_by: 'ai' | 'rules'
+  candidate_count: number
 }
 
 export interface SearchCard {
@@ -150,6 +205,167 @@ export interface PaymentConfig {
   publishable_key: string | null
 }
 
+export interface PartyPackage {
+  id: string
+  organisation_id: string
+  venue_id: string
+  name: string
+  description: string | null
+  per_head_price_cents: number
+  min_headcount: number
+  max_headcount: number
+  deposit_pct: number | null
+  outdoor: boolean
+  status: string
+}
+
+export interface PartyPackageCreate {
+  venue_id: string
+  name: string
+  description?: string | null
+  per_head_price_cents: number
+  min_headcount: number
+  max_headcount: number
+  deposit_pct?: number | null
+  outdoor?: boolean
+}
+
+export interface PartyPackageDetail extends PartyPackage {
+  organisation_name: string
+  venue_name: string
+  venue_suburb: string | null
+  deposit_pct_effective: number
+}
+
+export interface PartySlot {
+  id: string
+  package_id: string
+  starts_at: string
+  ends_at: string
+  status: string
+}
+
+export interface PartyBooking {
+  id: string
+  slot_id: string
+  package_id: string
+  headcount: number
+  total_cents: number
+  deposit_cents: number
+  balance_cents: number
+  status: string
+  client_secret: string | null
+}
+
+// --- Party Planner (ADR-0011) ------------------------------------------------
+
+export interface PlanOptionView {
+  id: string
+  kind: 'package' | 'custom'
+  position: number
+  voided: boolean
+  custom_text: string | null
+  package_id: string | null
+  package_name: string | null
+  venue_name: string | null
+  starts_at: string | null
+  ends_at: string | null
+  per_head_price_cents: number | null
+  available: boolean | null
+  votes: number
+  is_favourite: boolean
+  reactions: Record<string, number>
+}
+
+export interface PlanBoardEntry {
+  nickname: string | null
+  avatar_key: string | null
+}
+
+export type PartyWidgetKey = 'welcome' | 'countdown' | 'board' | 'reveal_venue'
+
+export interface PartyPageView {
+  template: string
+  title: string | null
+  message: string | null
+  hero_avatar: string | null
+  widgets: PartyWidgetKey[]
+}
+
+export interface PartyPagePatch {
+  template: string
+  title: string
+  message: string
+  hero_avatar: string | null
+  widgets: PartyWidgetKey[]
+}
+
+export interface PlanHostInvite {
+  id: string
+  mode: 'open' | 'email'
+  parent_name: string
+  email: string
+  status: 'pending' | 'approved' | 'removed' | 'blocked'
+  attending: boolean | null
+  kid_count: number | null
+  nickname: string | null
+  avatar_key: string | null
+}
+
+export interface PlanView {
+  id: string
+  status: 'draft' | 'open' | 'resolved' | 'booked' | 'expired_unbooked'
+  deadline_at: string | null
+  theme: string
+  approval_required: boolean
+  share_token: string | null
+  share_path: string | null
+  winning_option_id: string | null
+  booking_id: string | null
+  ranking: string[]
+  options: PlanOptionView[]
+  invites: PlanHostInvite[]
+  rsvp_yes_headcount: number
+  page: PartyPageView
+  deadline_warnings: string[]
+  deposit_client_secret: string | null
+  deposit_payment_id: string | null
+  deposit_cents: number | null
+}
+
+export interface PublicPlanView {
+  status: 'draft' | 'open' | 'resolved' | 'booked' | 'expired_unbooked'
+  is_open: boolean
+  deadline_at: string | null
+  theme: string
+  options: PlanOptionView[]
+  board: PlanBoardEntry[]
+  rsvp_count: number
+  page: PartyPageView
+  winner_option_id: string | null
+  is_tie: boolean
+}
+
+export interface PlanInviteCreated {
+  invite_token: string
+  status: string
+}
+
+export interface PlanRsvpView {
+  attending: boolean
+  kid_count: number
+  nickname: string | null
+  avatar_key: string | null
+}
+
+export interface InviteSelfView {
+  invite_token: string
+  status: 'pending' | 'approved' | 'removed' | 'blocked'
+  has_voted: boolean
+  rsvp: PlanRsvpView | null
+  plan: PublicPlanView
+}
+
 export interface ProviderOrderSummary {
   payment_id: string
   ordered_at: string
@@ -214,6 +430,7 @@ export interface SearchFilters {
   category: Category | null
   price_max_cents: number | null
   session_type: 'half_day' | 'full_day' | null
+  when: 'weekend' | 'weekday' | 'after_school' | null
   available_only: boolean
 }
 

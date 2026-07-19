@@ -23,8 +23,25 @@
             v-if="auth.isAuthed"
             flat
             no-caps
+            :to="{ name: 'planner' }"
+            label="Holiday planner"
+            class="jg-nav__link"
+          />
+          <q-btn flat no-caps :to="{ name: 'parties' }" label="Birthday parties" class="jg-nav__link" />
+          <q-btn
+            v-if="auth.isAuthed"
+            flat
+            no-caps
             :to="{ name: 'bookings' }"
             label="My bookings"
+            class="jg-nav__link"
+          />
+          <q-btn
+            v-if="auth.isAuthed"
+            flat
+            no-caps
+            :to="{ name: 'party-plans' }"
+            label="Party votes"
             class="jg-nav__link"
           />
         </nav>
@@ -70,13 +87,22 @@
                     <q-item-section avatar><q-icon name="confirmation_number" /></q-item-section>
                     <q-item-section>My bookings</q-item-section>
                   </q-item>
+                  <q-item clickable v-close-popup :to="{ name: 'party-plans' }">
+                    <q-item-section avatar><q-icon name="how_to_vote" /></q-item-section>
+                    <q-item-section>Party votes</q-item-section>
+                  </q-item>
                   <q-item clickable v-close-popup :to="{ name: 'account' }">
                     <q-item-section avatar><q-icon name="face" /></q-item-section>
                     <q-item-section>My kids</q-item-section>
                   </q-item>
+                  <q-separator />
                   <q-item clickable v-close-popup :to="{ name: 'provider' }">
                     <q-item-section avatar><q-icon name="storefront" /></q-item-section>
-                    <q-item-section>For providers</q-item-section>
+                    <q-item-section>
+                      <q-item-label>Provider console</q-item-label>
+                      <q-item-label caption>Switch to running activities</q-item-label>
+                    </q-item-section>
+                    <q-item-section side><q-icon name="swap_horiz" size="18px" /></q-item-section>
                   </q-item>
                   <q-item v-if="auth.isAdmin" clickable v-close-popup :to="{ name: 'admin-approvals' }">
                     <q-item-section avatar><q-icon name="admin_panel_settings" /></q-item-section>

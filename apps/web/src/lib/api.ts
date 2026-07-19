@@ -1,11 +1,13 @@
 // Typed API client. A single axios instance injects the bearer token (held in
 // a module variable set by the auth store — avoids a store↔api import cycle).
 
-import axios, { type AxiosInstance } from 'axios'
+import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
 
+import { decodeJwt } from '@/lib/jwt'
 import type {
   AttendanceOut,
   AuditEvent,
+  AuthConfig,
   Availability,
   Booking,
   Broadcast,
@@ -25,6 +27,18 @@ import type {
   JobSummary,
   Notification,
   Order,
+  InviteSelfView,
+  PartyBooking,
+  PartyPackage,
+  PartyPackageCreate,
+  PartyPackageDetail,
+  PartyPagePatch,
+  PartySlot,
+  PlanInviteCreated,
+  PlanOut,
+  PlanRequest,
+  PlanView,
+  PublicPlanView,
   PaymentConfig,
   PaymentStatus,
   ProviderOrderSummary,
@@ -61,8 +75,25 @@ import type {
 } from '@/lib/types'
 
 let authToken: string | null = null
+let refreshToken: string | null = null
+
 export function setAuthToken(token: string | null): void {
   authToken = token
+}
+export function setRefreshToken(token: string | null): void {
+  refreshToken = token
+}
+
+/** Hooks the auth store registers so the api layer can push rotated tokens back
+ * into store state/storage, or force a logout when a refresh fails. Keeping this
+ * as injected callbacks (not an import) avoids a store↔api cycle. */
+interface AuthCallbacks {
+  onRefreshed: (accessToken: string, refreshToken: string) => void
+  onLogout: () => void
+}
+let authCallbacks: AuthCallbacks | null = null
+export function configureAuth(cb: AuthCallbacks): void {
+  authCallbacks = cb
 }
 
 // On the client, requests are relative (Vite proxy / same-origin nginx). During
@@ -76,6 +107,70 @@ http.interceptors.request.use((config) => {
   if (authToken) config.headers.Authorization = `Bearer ${authToken}`
   return config
 })
+
+// --- transparent access-token refresh ---------------------------------------
+//
+// Access tokens are short-lived. On a 401 we rotate the refresh token exactly
+// once (single-flight, so a burst of concurrent 401s triggers one refresh) and
+// replay the original request. Refresh is skipped for the auth endpoints
+// themselves and while impersonating (an impersonation token must never be
+// silently upgraded back to the admin's session).
+
+type Retryable = InternalAxiosRequestConfig & { _retried?: boolean }
+let refreshInFlight: Promise<string> | null = null
+
+const AUTH_PATHS = [
+  '/identity/refresh',
+  '/identity/login',
+  '/identity/signup',
+  '/identity/otp',
+  '/identity/logout',
+]
+
+function runRefresh(): Promise<string> {
+  if (!refreshInFlight) {
+    // Bare axios (not `http`) so this request bypasses the 401 interceptor.
+    refreshInFlight = axios
+      .post<TokenResponse>(`${API_BASE}/identity/refresh`, { refresh_token: refreshToken })
+      .then(({ data }) => {
+        authToken = data.access_token
+        refreshToken = data.refresh_token
+        authCallbacks?.onRefreshed(data.access_token, data.refresh_token)
+        return data.access_token
+      })
+      .finally(() => {
+        refreshInFlight = null
+      })
+  }
+  return refreshInFlight
+}
+
+http.interceptors.response.use(
+  (response) => response,
+  async (error: unknown) => {
+    if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error
+    const original = error.config as Retryable | undefined
+    const url = original?.url ?? ''
+    if (
+      !original ||
+      original._retried ||
+      !refreshToken ||
+      AUTH_PATHS.some((p) => url.includes(p)) ||
+      decodeJwt(authToken ?? '')?.imp // don't refresh an impersonation session
+    ) {
+      throw error
+    }
+    try {
+      const freshAccess = await runRefresh()
+      original._retried = true
+      original.headers.Authorization = `Bearer ${freshAccess}`
+      return http(original)
+    } catch {
+      authCallbacks?.onLogout()
+      throw error
+    }
+  },
+)
 
 /** Extract a human-friendly message from an API error. */
 export function apiError(err: unknown, fallback = 'Something went wrong'): string {
@@ -109,6 +204,20 @@ export const api = {
     async login(email: string, password: string): Promise<TokenResponse> {
       const { data } = await http.post<TokenResponse>('/identity/login', { email, password })
       return data
+    },
+    async config(): Promise<AuthConfig> {
+      const { data } = await http.get<AuthConfig>('/identity/auth-config')
+      return data
+    },
+    async requestOtp(phone: string): Promise<void> {
+      await http.post('/identity/otp/request', { phone })
+    },
+    async verifyOtp(phone: string, code: string): Promise<TokenResponse> {
+      const { data } = await http.post<TokenResponse>('/identity/otp/verify', { phone, code })
+      return data
+    },
+    async logout(refreshToken: string): Promise<void> {
+      await http.post('/identity/logout', { refresh_token: refreshToken })
     },
     async me(): Promise<User> {
       const { data } = await http.get<User>('/identity/me')
@@ -150,6 +259,12 @@ export const api = {
       const { data } = await http.get<SearchResults>('/search/sessions', {
         params: cleanParams(filters),
       })
+      return data
+    },
+  },
+  planner: {
+    async plan(payload: PlanRequest): Promise<PlanOut> {
+      const { data } = await http.post<PlanOut>('/planner/plan', payload)
       return data
     },
   },
@@ -395,6 +510,214 @@ export const api = {
       const { data } = await http.post<ConnectStatus>('/payments/connect/refresh', {
         organisation_id: organisationId,
       })
+      return data
+    },
+  },
+  parties: {
+    // Provider
+    async providerPackages(orgId: string): Promise<PartyPackage[]> {
+      const { data } = await http.get<PartyPackage[]>(`/parties/orgs/${orgId}/packages/manage`)
+      return data
+    },
+    async createPackage(orgId: string, payload: PartyPackageCreate): Promise<PartyPackage> {
+      const { data } = await http.post<PartyPackage>(`/parties/orgs/${orgId}/packages`, payload)
+      return data
+    },
+    async updatePackage(packageId: string, payload: PartyPackageCreate): Promise<PartyPackage> {
+      const { data } = await http.put<PartyPackage>(`/parties/packages/${packageId}`, payload)
+      return data
+    },
+    async archivePackage(packageId: string): Promise<PartyPackage> {
+      const { data } = await http.post<PartyPackage>(`/parties/packages/${packageId}/archive`)
+      return data
+    },
+    async unarchivePackage(packageId: string): Promise<PartyPackage> {
+      const { data } = await http.post<PartyPackage>(`/parties/packages/${packageId}/unarchive`)
+      return data
+    },
+    async addSlots(
+      packageId: string,
+      slots: { starts_at: string; ends_at: string }[],
+    ): Promise<PartySlot[]> {
+      const { data } = await http.post<PartySlot[]>(`/parties/packages/${packageId}/slots`, {
+        slots,
+      })
+      return data
+    },
+    // Public / parent
+    async activePackages(orgId: string): Promise<PartyPackage[]> {
+      const { data } = await http.get<PartyPackage[]>(`/parties/orgs/${orgId}/packages`)
+      return data
+    },
+    async allPackages(): Promise<PartyPackageDetail[]> {
+      const { data } = await http.get<PartyPackageDetail[]>('/parties/packages')
+      return data
+    },
+    async package(packageId: string): Promise<PartyPackageDetail> {
+      const { data } = await http.get<PartyPackageDetail>(`/parties/packages/${packageId}`)
+      return data
+    },
+    async slots(packageId: string): Promise<PartySlot[]> {
+      const { data } = await http.get<PartySlot[]>(`/parties/packages/${packageId}/slots`)
+      return data
+    },
+    async book(slotId: string, headcount: number): Promise<PartyBooking> {
+      const { data } = await http.post<PartyBooking>(`/parties/slots/${slotId}/book`, {
+        headcount,
+      })
+      return data
+    },
+    async devConfirm(bookingId: string): Promise<PartyBooking> {
+      const { data } = await http.post<PartyBooking>(`/parties/bookings/${bookingId}/dev-confirm`)
+      return data
+    },
+    async adjust(bookingId: string, headcount: number): Promise<PartyBooking> {
+      const { data } = await http.post<PartyBooking>(`/parties/bookings/${bookingId}/adjust`, {
+        headcount,
+      })
+      return data
+    },
+    async cancel(bookingId: string): Promise<PartyBooking> {
+      const { data } = await http.post<PartyBooking>(`/parties/bookings/${bookingId}/cancel`)
+      return data
+    },
+  },
+  partyPlanner: {
+    // --- Host (authenticated) ---
+    async createPlan(theme = 'default'): Promise<PlanView> {
+      const { data } = await http.post<PlanView>('/party-planner/plans', { theme })
+      return data
+    },
+    async listPlans(): Promise<PlanView[]> {
+      const { data } = await http.get<PlanView[]>('/party-planner/plans')
+      return data
+    },
+    async getPlan(id: string): Promise<PlanView> {
+      const { data } = await http.get<PlanView>(`/party-planner/plans/${id}`)
+      return data
+    },
+    async addPackageOption(id: string, packageId: string, slotId: string): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/options/package`, {
+        package_id: packageId,
+        slot_id: slotId,
+      })
+      return data
+    },
+    async addCustomOption(id: string, text: string): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/options/custom`, {
+        text,
+      })
+      return data
+    },
+    async removeOption(id: string, optionId: string): Promise<PlanView> {
+      const { data } = await http.delete<PlanView>(
+        `/party-planner/plans/${id}/options/${optionId}`,
+      )
+      return data
+    },
+    async setRanking(id: string, optionIds: string[]): Promise<PlanView> {
+      const { data } = await http.put<PlanView>(`/party-planner/plans/${id}/ranking`, {
+        option_ids: optionIds,
+      })
+      return data
+    },
+    async setDeadline(id: string, deadlineAt: string): Promise<PlanView> {
+      const { data } = await http.put<PlanView>(`/party-planner/plans/${id}/deadline`, {
+        deadline_at: deadlineAt,
+      })
+      return data
+    },
+    async setTheme(id: string, theme: string): Promise<PlanView> {
+      const { data } = await http.put<PlanView>(`/party-planner/plans/${id}/theme`, { theme })
+      return data
+    },
+    async updatePage(id: string, patch: PartyPagePatch): Promise<PlanView> {
+      const { data } = await http.put<PlanView>(`/party-planner/plans/${id}/page`, patch)
+      return data
+    },
+    async openPlan(id: string): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/open`)
+      return data
+    },
+    async extend(id: string): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/extend`)
+      return data
+    },
+    async addInvites(id: string, invites: { email: string; name: string }[]): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/invites`, { invites })
+      return data
+    },
+    async setInvite(
+      id: string,
+      inviteId: string,
+      action: 'approve' | 'remove' | 'block',
+    ): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(
+        `/party-planner/plans/${id}/invites/${inviteId}/${action}`,
+      )
+      return data
+    },
+    async confirm(
+      id: string,
+      payload: { option_id?: string; headcount?: number } = {},
+    ): Promise<PlanView> {
+      const { data } = await http.post<PlanView>(`/party-planner/plans/${id}/confirm`, payload)
+      return data
+    },
+    // --- Public (tokenized, no auth) ---
+    async publicPlan(token: string): Promise<PublicPlanView> {
+      const { data } = await http.get<PublicPlanView>(`/party-planner/public/${token}`)
+      return data
+    },
+    async openRsvp(
+      token: string,
+      body: {
+        parent_name: string
+        email: string
+        attending: boolean
+        kid_count: number
+        nickname?: string | null
+        avatar_key?: string | null
+        marketing_opt_in?: boolean
+      },
+    ): Promise<PlanInviteCreated> {
+      const { data } = await http.post<PlanInviteCreated>(
+        `/party-planner/public/${token}/rsvp`,
+        body,
+      )
+      return data
+    },
+    async inviteSelf(inviteToken: string): Promise<InviteSelfView> {
+      const { data } = await http.get<InviteSelfView>(`/party-planner/invite/${inviteToken}`)
+      return data
+    },
+    async editRsvp(
+      inviteToken: string,
+      body: {
+        attending: boolean
+        kid_count: number
+        nickname?: string | null
+        avatar_key?: string | null
+      },
+    ): Promise<InviteSelfView> {
+      const { data } = await http.put<InviteSelfView>(
+        `/party-planner/invite/${inviteToken}/rsvp`,
+        body,
+      )
+      return data
+    },
+    async vote(inviteToken: string, optionId: string): Promise<InviteSelfView> {
+      const { data } = await http.put<InviteSelfView>(
+        `/party-planner/invite/${inviteToken}/vote`,
+        { option_id: optionId },
+      )
+      return data
+    },
+    async react(inviteToken: string, optionId: string, emoji: string): Promise<InviteSelfView> {
+      const { data } = await http.put<InviteSelfView>(
+        `/party-planner/invite/${inviteToken}/react`,
+        { option_id: optionId, emoji },
+      )
       return data
     },
   },
