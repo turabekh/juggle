@@ -43,7 +43,7 @@ Note the VM's **external IP**: `gcloud compute instances describe juggle --zone=
 
 ## 2. Point DNS at the VM (for HTTPS)
 
-Add an **A record** for your host (e.g. `parties.example.com`) → the VM's external IP.
+Add an **A record** for your apex host (e.g. `kidspots.store`) → the VM's external IP.
 Skip this to test over plain HTTP first (leave `DOMAIN` blank in `.env`).
 
 ## 3. Install Docker on the VM
@@ -60,7 +60,7 @@ sudo usermod -aG docker "$USER"        # then log out/in so `docker` works witho
 ```bash
 # Clone (or scp) the repo:
 git clone https://github.com/turabekh/juggle.git && cd juggle
-git checkout feat/party-planner        # or the branch/tag you're deploying
+# `main` has the full stack (the feature branches were merged). Use a tag/branch if you pin one.
 
 # Create the env file from the template and fill in secrets:
 cp .env.production.example .env
