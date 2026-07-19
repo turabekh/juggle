@@ -71,18 +71,19 @@
         ]"
       />
 
-      <q-btn
-        unelevated
-        color="primary"
-        no-caps
-        size="lg"
-        class="q-mt-lg"
-        icon="auto_awesome"
-        label="Build my plan"
-        :loading="loading"
-        :disable="!ages.length || !dateFrom || !dateTo"
-        @click="build"
-      />
+      <div class="jg-build-row">
+        <q-btn
+          unelevated
+          color="primary"
+          no-caps
+          class="jg-build-btn"
+          icon="auto_awesome"
+          label="Build my plan"
+          :loading="loading"
+          :disable="!ages.length || !dateFrom || !dateTo"
+          @click="build"
+        />
+      </div>
     </section>
 
     <!-- Result -->
@@ -314,6 +315,12 @@ async function addWholePlan(): Promise<void> {
 </script>
 
 <style scoped>
+.jg-build-row { display: flex; justify-content: flex-end; margin-top: 20px; }
+.jg-build-btn { border-radius: 12px; padding: 10px 24px; font-weight: 600; }
+@media (max-width: 599px) {
+  .jg-build-row { justify-content: stretch; }
+  .jg-build-btn { width: 100%; }
+}
 .jg-label { font-size: 13px; font-weight: 600; color: var(--jg-ink-soft); margin-bottom: 6px; }
 .jg-cats { display: flex; flex-wrap: wrap; gap: 8px; }
 .jg-cat {

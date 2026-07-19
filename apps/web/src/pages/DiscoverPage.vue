@@ -352,6 +352,23 @@ onMounted(runSearch)
 .jg-searchbar__go { border-radius: 999px; padding: 8px 22px; }
 .jg-hero__nearme { margin-top: 12px; }
 
+/* Mobile: the pill searchbar stacks so nothing gets crushed. */
+@media (max-width: 599px) {
+  .jg-hero { padding: 6px 14px 30px; }
+  .jg-hero__sub { font-size: 15px; margin-bottom: 18px; }
+  .jg-searchbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    border-radius: 18px;
+    padding: 10px 14px;
+  }
+  .jg-searchbar__field { flex: 1 1 auto; padding: 4px 0; }
+  .jg-searchbar__field--date { max-width: none; }
+  .jg-searchbar__divider { width: 100%; height: 1px; }
+  .jg-searchbar__go { width: 100%; border-radius: 12px; padding: 12px; margin-top: 6px; }
+}
+
 .jg-cats {
   display: flex;
   gap: 10px;
@@ -390,6 +407,13 @@ onMounted(runSearch)
 }
 .jg-filters__item { display: flex; align-items: center; gap: 10px; }
 .jg-filters__label { font-size: 13px; font-weight: 600; color: var(--jg-ink-soft); }
+
+/* Mobile: stack the filter rows so labels/inputs don't collide. */
+@media (max-width: 599px) {
+  .jg-filters { flex-direction: column; align-items: stretch; gap: 14px; padding: 14px; }
+  .jg-filters__item { justify-content: space-between; flex-wrap: wrap; }
+  .jg-filters :deep(.q-space) { display: none; }
+}
 
 .jg-results-head {
   display: flex;
