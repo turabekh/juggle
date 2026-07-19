@@ -9,6 +9,7 @@ import type { User } from '@/lib/types'
 const TOKEN_KEY = 'juggle.token'
 const REFRESH_KEY = 'juggle.refresh'
 const ADMIN_BACKUP_KEY = 'juggle.adminToken'
+const ADMIN_REFRESH_BACKUP_KEY = 'juggle.adminRefresh'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(null)
@@ -76,6 +77,7 @@ export const useAuthStore = defineStore('auth', () => {
     storage.remove(TOKEN_KEY)
     storage.remove(REFRESH_KEY)
     storage.remove(ADMIN_BACKUP_KEY)
+    storage.remove(ADMIN_REFRESH_BACKUP_KEY)
   }
 
   function logout(): void {
@@ -85,25 +87,43 @@ export const useAuthStore = defineStore('auth', () => {
     _clearLocal()
   }
 
-  /** Swap the admin token for an impersonation token, backing the admin up. The
-   * admin's refresh token is left in place; the api layer refuses to refresh an
-   * impersonation session, so it can't be silently upgraded back to admin. */
+  /** Swap the admin token for an impersonation token, backing the admin up.
+   *
+   * The admin's refresh token is pulled OUT of play for the duration (backed up,
+   * then nulled): the api layer already refuses to refresh an impersonation
+   * session, but that guard is a client-side JWT decode — nulling the refresh
+   * token is the fail-closed backstop, so a 401 under impersonation can never
+   * mint a fresh admin session even if the decode check is bypassed (INV-10). */
   async function enterImpersonation(impersonationToken: string): Promise<void> {
     if (token.value) storage.set(ADMIN_BACKUP_KEY, token.value)
+    if (refreshToken.value) storage.set(ADMIN_REFRESH_BACKUP_KEY, refreshToken.value)
+    // Take the admin's refresh token out of memory/storage for the session.
+    refreshToken.value = null
+    setRefreshToken(null)
+    storage.remove(REFRESH_KEY)
     token.value = impersonationToken
     setAuthToken(impersonationToken)
     storage.set(TOKEN_KEY, impersonationToken)
     user.value = await api.auth.me()
   }
 
-  /** Restore the admin session after an impersonation. */
+  /** Restore the admin session (access + refresh) after an impersonation. */
   async function exitImpersonation(): Promise<void> {
     const backup = storage.get(ADMIN_BACKUP_KEY)
+    const refreshBackup = storage.get(ADMIN_REFRESH_BACKUP_KEY)
     storage.remove(ADMIN_BACKUP_KEY)
+    storage.remove(ADMIN_REFRESH_BACKUP_KEY)
     if (backup) {
       token.value = backup
       setAuthToken(backup)
       storage.set(TOKEN_KEY, backup)
+      // Put the admin's refresh token back so an expired admin access token can
+      // be transparently refreshed again.
+      if (refreshBackup) {
+        refreshToken.value = refreshBackup
+        setRefreshToken(refreshBackup)
+        storage.set(REFRESH_KEY, refreshBackup)
+      }
       user.value = await api.auth.me()
     } else {
       logout()
@@ -124,7 +144,18 @@ export const useAuthStore = defineStore('auth', () => {
         // If the access token has expired, the api layer refreshes transparently.
         user.value = await api.auth.me()
       } catch {
-        _clearLocal()
+        // A dead token on reload mid-impersonation must fall back to the backed-up
+        // admin session, not wipe it — otherwise reloading logs the admin fully
+        // out (an impersonation token can't be refreshed, so me() fails here).
+        if (decodeJwt(storedToken)?.imp && storage.get(ADMIN_BACKUP_KEY)) {
+          try {
+            await exitImpersonation()
+          } catch {
+            _clearLocal()
+          }
+        } else {
+          _clearLocal()
+        }
       }
     }
     ready.value = true
