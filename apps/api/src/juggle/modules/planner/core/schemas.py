@@ -35,6 +35,7 @@ class CandidateSession(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     session_id: uuid.UUID
+    program_id: uuid.UUID  # identifies the activity — used to vary the plan across days
     title: str
     category: str
     organisation_name: str

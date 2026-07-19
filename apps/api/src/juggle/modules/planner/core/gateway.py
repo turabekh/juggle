@@ -10,9 +10,11 @@ INV-3: the brief carries child *ages* only, and candidates are public listing
 data — no child name/DOB/medical ever reaches the model.
 """
 
+import uuid
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 from juggle.modules.planner.core.schemas import (
     CandidateSession,
@@ -21,6 +23,8 @@ from juggle.modules.planner.core.schemas import (
     PlanRequest,
 )
 from juggle.settings import get_settings
+
+_PERTH = ZoneInfo("Australia/Perth")  # WA has no DST (INV-7) — group by local day
 
 
 class PlannerGateway(Protocol):
@@ -64,26 +68,36 @@ class RuleBasedPlannerGateway:
         )
         picked: list[PlanDraftItem] = []
         used_days: set[date] = set()
+        used_programs: set[uuid.UUID] = set()
         spent = 0
-        for cand in ranked:
-            day = cand.starts_at.date()
-            if day in used_days:  # one activity per day keeps the plan uncluttered
-                continue
-            if request.budget_cents is not None and spent + cand.price_cents > request.budget_cents:
-                continue
-            fits = [a for a in request.ages if _age_fits(a, cand)]
-            picked.append(
-                PlanDraftItem(
-                    session_id=cand.session_id,
-                    for_ages=fits,
-                    reason=f"{cand.category.title()} at {cand.venue_name} — a good fit for "
-                    f"age {', '.join(str(a) for a in fits)}.",
+        # Two passes: first fill each day with a *different* activity (variety);
+        # then, only if days remain empty, allow repeating an activity to fill them.
+        for allow_repeat in (False, True):
+            for cand in ranked:
+                if len(picked) >= self.max_days:
+                    break
+                day = cand.starts_at.astimezone(_PERTH).date()  # local day (INV-7)
+                if day in used_days:  # one activity per day keeps the plan uncluttered
+                    continue
+                if not allow_repeat and cand.program_id in used_programs:
+                    continue  # already have this activity — prefer something new
+                if (
+                    request.budget_cents is not None
+                    and spent + cand.price_cents > request.budget_cents
+                ):
+                    continue
+                fits = [a for a in request.ages if _age_fits(a, cand)]
+                picked.append(
+                    PlanDraftItem(
+                        session_id=cand.session_id,
+                        for_ages=fits,
+                        reason=f"{cand.category.title()} at {cand.venue_name} — a good fit for "
+                        f"age {', '.join(str(a) for a in fits)}.",
+                    )
                 )
-            )
-            used_days.add(day)
-            spent += cand.price_cents
-            if len(picked) >= self.max_days:
-                break
+                used_days.add(day)
+                used_programs.add(cand.program_id)
+                spent += cand.price_cents
 
         if picked:
             summary = (
@@ -101,7 +115,9 @@ _SYSTEM = (
     "You are a helpful assistant that plans a school-holiday activity itinerary for a "
     "parent, choosing ONLY from a provided list of real, bookable sessions. Never invent "
     "sessions. Select a set that fits the children's AGES, stays within budget, and avoids "
-    "two sessions overlapping in time (prefer at most one per day). For each pick give a "
+    "two sessions overlapping in time (prefer at most one per day). Prefer a VARIETY of "
+    "different activities across the days — avoid booking the same activity two days running "
+    "unless there is genuinely nothing else that fits. For each pick give a "
     "short, warm one-line reason. Then write a friendly 1-2 sentence summary. Refer to "
     "children only by age — you are given ages, never names."
 )
