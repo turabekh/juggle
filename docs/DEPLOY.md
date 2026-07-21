@@ -151,7 +151,37 @@ docker compose -f docker-compose.prod.yml up -d
   (via the Cloud SQL Auth Proxy or private IP). Then take scheduled backups off the app's shoulders.
 - **Secrets.** `.env` on the box is the simplest option; for stronger hygiene use GCP Secret Manager
   and inject at deploy time. Never commit `.env` (INV-9).
-- **Backups.** Schedule the `pg_dump` above via cron and copy to a GCS bucket.
-- **SSH exposure.** Leave port 22 restricted to your IP / IAP; only 80/443 need to be public.
+- **Backups.** Automated — nightly `pg_dump` → GCS. See §10.
+- **SSH exposure.** Done for kidspots.store — port 22 is restricted to the operator IP + Google's
+  IAP range via two firewall rules (`kidspots-ssh-allow` priority 1000, `kidspots-ssh-deny` priority
+  1100) targeting the `kidspots-ssh` network tag, so only this VM is affected. IP changed? Use
+  `gcloud compute ssh kidspots --zone=australia-southeast1-b --tunnel-through-iap`.
 - **Image builds.** For faster/leaner deploys, build images in CI and push to Artifact Registry,
   then `image:` them in the compose file instead of `build:`.
+
+## 10. Automated backups & restore test
+
+Nightly off-box backups to Google Cloud Storage, plus a recoverability check.
+
+**One-time setup (already done for kidspots.store):**
+- Bucket `gs://lotscope-501014-kidspots-db-backups` (australia-southeast1) with a 30-day
+  auto-delete lifecycle rule.
+- The VM's service account needs **storage read-write scope** (set with the VM stopped:
+  `gcloud compute instances set-service-account kidspots --zone=... --scopes=devstorage.read_write,...`)
+  **and** `roles/storage.objectAdmin` on the bucket
+  (`gcloud storage buckets add-iam-policy-binding <bucket> --member=serviceAccount:<sa> --role=roles/storage.objectAdmin`).
+- `scripts/kidspots-backup.sh` installed at `/usr/local/bin/kidspots-backup.sh`, run by root cron:
+  `0 18 * * * /usr/local/bin/kidspots-backup.sh >> /var/log/kidspots-backup.log 2>&1` (02:00 Perth).
+
+**Verify recoverability** (safe — restores into a throwaway DB, never touches live):
+```bash
+./scripts/kidspots-restore-test.sh    # run on the VM
+```
+
+**Restore a backup into live** (only if you mean it):
+```bash
+gcloud storage cp gs://lotscope-501014-kidspots-db-backups/juggle-<stamp>.sql.gz - \
+  | gunzip | sudo docker compose -f docker-compose.prod.yml exec -T db psql -U juggle -d juggle
+```
+
+Both scripts honour `KIDSPOTS_BACKUP_BUCKET` / `KIDSPOTS_COMPOSE_FILE` env overrides.
