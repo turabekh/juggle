@@ -64,6 +64,19 @@ class Settings(BaseSettings):
     twilio_auth_token: str = Field(default="")
     twilio_from_number: str = Field(default="")
 
+    # Transactional email (Postmark / Amazon SES / any SMTP provider). When the
+    # SMTP host + from-address are unset the app uses the in-memory
+    # FakeEmailGateway, so dev/CI need no email account — same gateway-Protocol
+    # fallback pattern as Stripe/SMS. Set these to send real mail (booking
+    # confirmations, waitlist offers, and — once its flag is on — party invites).
+    email_smtp_host: str = Field(default="")
+    email_smtp_port: int = Field(default=587)
+    email_smtp_username: str = Field(default="")
+    email_smtp_password: str = Field(default="")
+    email_smtp_starttls: bool = Field(default=True)
+    email_from_address: str = Field(default="")
+    email_from_name: str = Field(default="Juggle")
+
     # CORS origins for the Quasar PWA during development.
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:9000"])
 

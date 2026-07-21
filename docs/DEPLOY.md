@@ -109,9 +109,18 @@ flags, bookings ops).
 ## 7. Post-deploy configuration
 
 - **Runtime config** (fee %, seat-hold TTL, etc.) is edited in the **admin panel**, not `.env`.
-- **Enable `party_planner`** (only after you're comfortable with email being stubbed): admin →
-  Flags → turn on `party_planner`. Guest-facing emails (invites, reveal) currently run through the
-  stub gateway — do not rely on real delivery until a provider (e.g. Postmark) is wired.
+- **Transactional email (SMTP).** Blank `JUGGLE_EMAIL_SMTP_*` runs the in-memory FakeEmailGateway
+  (nothing is sent). To send real mail (booking confirmations, waitlist offers, party invites),
+  set `JUGGLE_EMAIL_SMTP_HOST` + `JUGGLE_EMAIL_FROM_ADDRESS` (and username/password) in `.env` and
+  `up -d` again — the gateway activates automatically, same pattern as Stripe/Twilio. Providers:
+  - **Postmark:** host `smtp.postmarkapp.com`, port `587`, username **and** password = your Server
+    API token.
+  - **Amazon SES:** host `email-smtp.<region>.amazonaws.com`, port `587`, SES SMTP credentials.
+  The `JUGGLE_EMAIL_FROM_ADDRESS` must be a **verified sender** with the provider. Quick check after
+  wiring: trigger a booking confirmation (checkout → confirm) and confirm the message arrives.
+- **Enable `party_planner`** (only *after* real email is wired above): admin → Flags → turn on
+  `party_planner`. Its guest-facing emails (invites, reveal) go through the same gateway, so while
+  email is stubbed they are silently dropped — keep the flag OFF until SMTP is configured.
 - **Stripe** (when ready): set the three `JUGGLE_STRIPE_*` keys in `.env`, `up -d` again, and add a
   webhook in the Stripe dashboard to `https://<domain>/api/v1/booking/stripe/webhook`.
 
