@@ -20,7 +20,6 @@ Run inside the api container:
 """
 
 import secrets
-import uuid
 from datetime import UTC, date, datetime, timedelta
 
 from juggle.db import SessionLocal
@@ -149,7 +148,9 @@ def main() -> None:
             )
 
         # Birthday-party packages (PRD §9) with upcoming weekend afternoon slots.
-        party_base = datetime.now(UTC).replace(hour=2, minute=0, second=0, microsecond=0) + timedelta(days=9)
+        party_base = datetime.now(UTC).replace(
+            hour=2, minute=0, second=0, microsecond=0
+        ) + timedelta(days=9)
         for name, desc, price, cmin, cmax, vidx, outdoor, deposit in PARTIES:
             package = parties_service.create_package(
                 db, organisation_id=org.id, actor_id=provider.id,

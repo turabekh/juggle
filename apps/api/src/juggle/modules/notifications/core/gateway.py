@@ -42,11 +42,75 @@ class FakeEmailGateway:
         return SentMessage(id=message_id, to=to, subject=subject)
 
 
+@dataclass
+class SmtpEmailGateway:
+    """Sends real transactional email over SMTP (Postmark, Amazon SES, or any
+    provider). Selected when ``JUGGLE_EMAIL_SMTP_HOST`` + ``JUGGLE_EMAIL_FROM_ADDRESS``
+    are set (see ``get_email_gateway``).
+
+    ``smtplib``/``email``/``ssl`` are stdlib and imported lazily so the app boots
+    (and dev/tests run) without the email path ever being exercised — mirrors the
+    Twilio gateway. A message carrying an ``ics`` is attached as ``text/calendar``
+    so booking confirmations arrive as add-to-calendar invites.
+    """
+
+    host: str
+    port: int
+    username: str
+    password: str
+    from_address: str
+    from_name: str
+    use_starttls: bool = True
+
+    def send(
+        self, *, to: str, subject: str, body: str, ics: str | None = None
+    ) -> SentMessage:
+        import smtplib
+        import ssl
+        from email.message import EmailMessage
+        from email.utils import formataddr, make_msgid
+
+        message_id = make_msgid()
+        msg = EmailMessage()
+        msg["Message-ID"] = message_id
+        msg["From"] = formataddr((self.from_name, self.from_address))
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg.set_content(body)
+        if ics is not None:
+            msg.add_attachment(ics, subtype="calendar", filename="invite.ics")
+
+        with smtplib.SMTP(self.host, self.port, timeout=15) as smtp:
+            if self.use_starttls:
+                smtp.starttls(context=ssl.create_default_context())
+            if self.username:
+                smtp.login(self.username, self.password)
+            smtp.send_message(msg)
+        return SentMessage(id=message_id, to=to, subject=subject)
+
+
 _fake_gateway = FakeEmailGateway()
 
 
+def email_configured() -> bool:
+    """True when a real SMTP email provider is fully configured."""
+    s = get_settings()
+    return bool(s.email_smtp_host and s.email_from_address)
+
+
 def get_email_gateway() -> EmailGateway:
-    """Dependency provider. TODO(prod): return a PostmarkGateway when configured."""
+    """Real SMTP gateway when configured; the in-memory fake otherwise (dev/CI)."""
+    settings = get_settings()
+    if email_configured():
+        return SmtpEmailGateway(
+            host=settings.email_smtp_host,
+            port=settings.email_smtp_port,
+            username=settings.email_smtp_username,
+            password=settings.email_smtp_password,
+            from_address=settings.email_from_address,
+            from_name=settings.email_from_name,
+            use_starttls=settings.email_smtp_starttls,
+        )
     return _fake_gateway
 
 
