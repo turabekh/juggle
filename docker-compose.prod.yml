@@ -72,21 +72,37 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # Edge: serves the built SPA and reverse-proxies /api/* to the API.
-  # Auto-HTTPS when DOMAIN is a real hostname; plain HTTP on :80 otherwise.
-  web:
+  # Request-time SSR server (server.mjs): renders each page + per-page meta/JSON-LD
+  # and serves static assets from dist/client. Internal only; the web/Caddy edge
+  # proxies to it. On SSR error it falls back to the SPA shell (server.mjs).
+  ssr:
     build:
       context: ./apps/web
+      args:
+        # Inlined at build time. Absolute origin for canonical URLs (SEO).
+        VITE_PUBLIC_ORIGIN: ${JUGGLE_PUBLIC_BASE_URL:-https://kidspots.store}
+    restart: unless-stopped
+    depends_on:
+      - api
+    expose:
+      - "5173"          # internal only; the Caddy edge proxies to it
+
+  # Edge (TLS): reverse-proxies /api/* to the API and everything else to the SSR
+  # server. Auto-HTTPS when DOMAIN is a real hostname; plain HTTP on :80 otherwise.
+  web:
+    image: caddy:2-alpine
     environment:
       # Empty/unset DOMAIN -> ":80" (HTTP); a hostname -> Caddy auto-provisions HTTPS.
       SITE_ADDRESS: ${DOMAIN:-:80}
     restart: unless-stopped
     depends_on:
       - api
+      - ssr
     ports:
       - "80:80"
       - "443:443"
     volumes:
+      - ./apps/web/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data       # persists issued TLS certificates
       - caddy_config:/config
 

@@ -100,9 +100,13 @@ async function createProdServer() {
       res.setHeader('Content-Type', 'text/html')
       res.end(renderPage(template, html, head, state))
     } catch (err) {
-      console.error(err)
-      res.statusCode = 500
-      res.end('Internal error')
+      // SSR failed — degrade gracefully to the client shell (the SPA boots and
+      // renders client-side) rather than showing a broken page. Crawlers lose the
+      // pre-rendered HTML for this one request; users see the working app.
+      console.error('SSR render failed, serving SPA shell:', err)
+      res.statusCode = 200
+      res.setHeader('Content-Type', 'text/html')
+      res.end(template)
     }
   })
 }
