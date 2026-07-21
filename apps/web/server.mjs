@@ -8,20 +8,18 @@
 // assets and /api are left to Vite (dev) or served from dist/client (prod);
 // /api itself is expected to be reverse-proxied to the FastAPI backend in prod.
 //
-// ⚠️ KNOWN BLOCKER: rendering currently fails with `window is not defined`
-// because `@quasar/vite-plugin` only ships Quasar's CLIENT bundle (it touches
-// `window` at import) — Quasar SSR is officially supported *only* via the Quasar
-// CLI (`@quasar/app-vite`). Externalizing to Quasar's `node` export and DOM
-// shims were both tried and don't work cleanly. So this file + entry-server are
-// a *complete, correct pipeline blocked on the UI layer*: activating SSR needs a
-// Quasar-CLI migration (large) or swapping to an SSR-capable UI kit. Everything
-// else here (isomorphic app factory, SSR-safe storage/api, client/server entry
-// split) is real and keeps the SPA + PWA fully working. See docs/HANDOFF.md.
+// SSR is UNBLOCKED: the @quasar/vite-plugin `runMode: 'ssr-server'` build uses
+// Quasar's SSR-safe server bundle (no `window` at import) and the app factory
+// passes an ssrContext into Quasar's install — no Quasar-CLI migration needed.
+// See vite.config.ts (runMode via QUASAR_SSR) and src/app.ts (ssrContext).
 
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+// Tell vite.config to put the quasar plugin in SSR-server mode (see there).
+process.env.QUASAR_SSR = 'server'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isProd = process.env.NODE_ENV === 'production'
@@ -34,10 +32,18 @@ function stateScript(state) {
   return `<script>window.__PINIA__=${json}</script>`
 }
 
-function renderPage(template, appHtml, state) {
-  return template
+function renderPage(template, appHtml, headHtml, state) {
+  let html = template
     .replace('<!--ssr-outlet-->', appHtml)
     .replace('<!--ssr-state-->', stateScript(state))
+  if (headHtml) {
+    // The page set its own <head> — strip the static SEO defaults it supersedes
+    // (avoids a duplicate <title>/robots) and inject the page-specific tags.
+    html = html
+      .replace(/<!--seo-defaults-start-->[\s\S]*?<!--seo-defaults-end-->/, '')
+      .replace('</head>', `    ${headHtml}\n  </head>`)
+  }
+  return html
 }
 
 async function createDevServer() {
@@ -50,10 +56,10 @@ async function createDevServer() {
         let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8')
         template = await vite.transformIndexHtml(url, template)
         const { render } = await vite.ssrLoadModule('/src/entry-server.ts')
-        const { html, state, status } = await render(url)
+        const { html, head, state, status } = await render(url, req.headers)
         res.statusCode = status
         res.setHeader('Content-Type', 'text/html')
-        res.end(renderPage(template, html, state))
+        res.end(renderPage(template, html, head, state))
       } catch (err) {
         vite.ssrFixStacktrace(err)
         console.error(err)
@@ -89,10 +95,10 @@ async function createProdServer() {
       return
     }
     try {
-      const { html, state, status } = await render(req.url)
+      const { html, head, state, status } = await render(req.url, req.headers)
       res.statusCode = status
       res.setHeader('Content-Type', 'text/html')
-      res.end(renderPage(template, html, state))
+      res.end(renderPage(template, html, head, state))
     } catch (err) {
       console.error(err)
       res.statusCode = 500

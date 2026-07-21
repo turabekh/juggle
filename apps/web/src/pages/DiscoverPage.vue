@@ -198,7 +198,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import SessionCard from '@/components/SessionCard.vue'
 import { api, apiError } from '@/lib/api'
 import { CATEGORIES } from '@/lib/format'
-import { useHead } from '@/lib/head'
+import { siteOrigin, useHead } from '@/lib/head'
 import type { Category, SearchCard, SearchFilters } from '@/lib/types'
 
 const $q = useQuasar()
@@ -208,7 +208,7 @@ useHead(() => ({
   description:
     "Find and book kids' holiday programs and birthday parties near you — search " +
     'by suburb, date and age with live seat availability, all in one cart.',
-  canonical: `${window.location.origin}/`,
+  canonical: `${siteOrigin()}/`,
 }))
 
 const dayTypeOptions = [

@@ -253,6 +253,7 @@ import PartyPageEditor from '@/components/PartyPageEditor.vue'
 import StripePaymentPanel from '@/components/StripePaymentPanel.vue'
 import { api, apiError } from '@/lib/api'
 import { dayLabel, money, timeRange } from '@/lib/format'
+import { siteOrigin } from '@/lib/head'
 import { planDisplayTitle } from '@/lib/partyPage'
 import type { PartyPackageDetail, PlanOptionView, PlanView } from '@/lib/types'
 
@@ -282,7 +283,7 @@ const depositPending = ref(false)
 const confirmOptionId = ref<string | null>(null)
 const confirmHeadcount = ref<number | null>(null)
 
-const returnUrl = computed(() => `${window.location.origin}/parties/plans/${props.id}`)
+const returnUrl = computed(() => `${siteOrigin()}/parties/plans/${props.id}`)
 const liveOptions = computed(() => plan.value?.options.filter((o) => !o.voided) ?? [])
 const hasCustom = computed(() => liveOptions.value.some((o) => o.kind === 'custom'))
 const canOpen = computed(
@@ -302,7 +303,7 @@ const winner = computed(() =>
 )
 const shareUrl = computed(() =>
   plan.value?.share_token
-    ? `${window.location.origin}/parties/plan/${plan.value.share_token}`
+    ? `${siteOrigin()}/parties/plan/${plan.value.share_token}`
     : '',
 )
 const packageChoices = computed(() =>

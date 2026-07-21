@@ -4,7 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#3B6FE0" />
-    <meta name="robots" content="index, follow" />
     <!-- PWA: installable + offline app shell -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" href="/icon-192.png" />
@@ -12,20 +11,19 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Juggle" />
-    <meta
-      name="description"
-      content="Juggle — find and book kids' school-holiday activities and birthday parties near you, with live availability."
-    />
-    <!-- Social/Open Graph defaults (per-page values are set client-side). -->
-    <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Juggle" />
+    <!-- SEO defaults for the SPA / pages without per-page meta. When SSR renders a
+         page that sets its own <head> (useHead), server.mjs strips this whole block
+         so the page-specific title/meta/JSON-LD are authoritative (no duplicates). -->
+    <!--seo-defaults-start-->
+    <meta name="robots" content="index, follow" />
+    <meta name="description" content="Juggle — find and book kids' school-holiday activities and birthday parties near you, with live availability." />
+    <meta property="og:type" content="website" />
     <meta property="og:title" content="Juggle · Kids' holiday activities in Perth" />
-    <meta
-      property="og:description"
-      content="Find and book kids' school-holiday activities and birthday parties near you, with live availability."
-    />
+    <meta property="og:description" content="Find and book kids' school-holiday activities and birthday parties near you, with live availability." />
     <meta name="twitter:card" content="summary_large_image" />
     <title>Juggle · Kids' holiday activities</title>
+    <!--seo-defaults-end-->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
