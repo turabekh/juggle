@@ -81,6 +81,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import StripePaymentPanel from '@/components/StripePaymentPanel.vue'
 import { api, apiError } from '@/lib/api'
 import { dayLabel, money } from '@/lib/format'
+import { siteOrigin } from '@/lib/head'
 import type { Order } from '@/lib/types'
 import { useCartStore } from '@/stores/cart'
 
@@ -99,7 +100,7 @@ const resuming = ref(false)
 const idempotencyKey = ref(crypto.randomUUID())
 
 function returnUrl(paymentId: string): string {
-  return `${window.location.origin}/checkout?pid=${paymentId}`
+  return `${siteOrigin()}/checkout?pid=${paymentId}`
 }
 
 function finish(): void {

@@ -13,9 +13,10 @@ import 'quasar/src/css/index.sass'
 import '@/css/app.scss'
 
 import App from '@/App.vue'
+import { type HeadSink, SSR_HEAD_KEY } from '@/lib/head'
 import { createAppRouter } from '@/router'
 
-export function createApp() {
+export function createApp(ssrRequestHeaders: Record<string, string> = {}) {
   const onServer = import.meta.env.SSR
   const hydrating =
     !onServer &&
@@ -28,12 +29,29 @@ export function createApp() {
   const router = createAppRouter(onServer ? createMemoryHistory() : createWebHistory())
   const pinia = createPinia()
 
-  app.use(Quasar, {
-    plugins: { Notify, Dialog, Loading },
-    config: { notify: { position: 'top', timeout: 2600 } },
-  })
+  // Quasar's SSR server build populates ssrContext during install/render and reads
+  // req.headers for platform/user-agent detection — so give it a real req. Pages
+  // register their <head> config into headSink on the server; entry-server resolves
+  // it after serverPrefetch (see useHead / head.ts).
+  const ssrContext: Record<string, unknown> = { req: { headers: ssrRequestHeaders }, res: {} }
+  const headSink: HeadSink = { getter: null }
+  if (onServer) app.provide(SSR_HEAD_KEY, headSink)
+
+  // ssrContext is the THIRD arg to Quasar's install (app.use forwards extra args):
+  // the server build Object.assigns $q/_meta into it during install and reads
+  // req.headers for platform detection; the client build ignores it. This mirrors
+  // @quasar/app-vite. Vue's app.use() type only types one options arg, so widen it.
+  const use = app.use as (plugin: unknown, options: unknown, ssrContext?: unknown) => typeof app
+  use(
+    Quasar,
+    {
+      plugins: { Notify, Dialog, Loading },
+      config: { notify: { position: 'top', timeout: 2600 } },
+    },
+    ssrContext,
+  )
   app.use(pinia)
   app.use(router)
 
-  return { app, router, pinia }
+  return { app, router, pinia, ssrContext, headSink }
 }

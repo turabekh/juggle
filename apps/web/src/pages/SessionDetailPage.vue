@@ -298,7 +298,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onServerPrefetch, reactive, ref } from 'vue'
 import { useQuasar } from 'quasar'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -306,7 +306,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import StarRating from '@/components/StarRating.vue'
 import { api, apiError } from '@/lib/api'
 import { ageAt, categoryMeta, dayLabel, money, timeRange } from '@/lib/format'
-import { useHead } from '@/lib/head'
+import { siteOrigin, useHead } from '@/lib/head'
 import { rememberSession } from '@/lib/sessionMemo'
 import type { Child, ListingQuestion, ReviewList, SessionDetail, WaitlistEntry } from '@/lib/types'
 import { useAuthStore } from '@/stores/auth'
@@ -358,7 +358,7 @@ const addLabel = computed(() =>
 useHead(() => {
   const s = session.value
   if (!s) return null
-  const url = `${window.location.origin}/sessions/${s.id}`
+  const url = `${siteOrigin()}/sessions/${s.id}`
   const where = [s.suburb, s.postcode].filter(Boolean).join(' ') || 'Perth, WA'
   const description = (
     s.description ||
@@ -471,6 +471,29 @@ async function leaveWaitlist(): Promise<void> {
   }
 }
 
+// SSR: load only the public data the crawlable page + Event JSON-LD need — no
+// auth-gated calls (children/waitlist) or localStorage (rememberSession), which
+// aren't available server-side. The client re-runs the full load() on mount.
+async function loadPublicForSsr(): Promise<void> {
+  try {
+    session.value = await api.catalog.session(props.id)
+    const avail = await api.inventory.availability(props.id)
+    seatsLive.value = avail.seats_remaining
+    try {
+      reviews.value = await api.reviews.forProgram(session.value.program_id)
+    } catch {
+      reviews.value = null
+    }
+    try {
+      questions.value = await api.qanda.forProgram(session.value.program_id)
+    } catch {
+      questions.value = []
+    }
+  } catch {
+    session.value = null
+  }
+}
+
 async function load(): Promise<void> {
   loading.value = true
   try {
@@ -552,6 +575,7 @@ async function addToCart(): Promise<void> {
   }
 }
 
+onServerPrefetch(loadPublicForSsr)
 onMounted(load)
 </script>
 

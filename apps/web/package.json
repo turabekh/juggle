@@ -15,8 +15,8 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "ssr:dev": "node server.mjs",
-    "build:client": "vite build --ssrManifest --outDir dist/client",
-    "build:server": "vite build --ssr src/entry-server.ts --outDir dist/server",
+    "build:client": "QUASAR_SSR=client vite build --ssrManifest --outDir dist/client",
+    "build:server": "QUASAR_SSR=server vite build --ssr src/entry-server.ts --outDir dist/server",
     "build:ssr": "vue-tsc --noEmit && npm run build:client && npm run build:server",
     "ssr:serve": "NODE_ENV=production node server.mjs"
   },

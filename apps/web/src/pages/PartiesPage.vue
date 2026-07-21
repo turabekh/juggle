@@ -107,7 +107,7 @@ import { useRouter } from 'vue-router'
 import EmptyState from '@/components/EmptyState.vue'
 import { api, apiError } from '@/lib/api'
 import { money } from '@/lib/format'
-import { useHead } from '@/lib/head'
+import { siteOrigin, useHead } from '@/lib/head'
 import {
   planDisplayTitle, planGlyph, planStatusColor, planStatusLabel, planSummary,
 } from '@/lib/partyPage'
@@ -124,7 +124,7 @@ useHead(() => ({
   description:
     'Browse and instant-book birthday party packages from local Perth providers — ' +
     'per-head pricing, pick your date and guest count, reserve with a deposit.',
-  canonical: `${window.location.origin}/parties`,
+  canonical: `${siteOrigin()}/parties`,
 }))
 
 const packages = ref<PartyPackageDetail[]>([])

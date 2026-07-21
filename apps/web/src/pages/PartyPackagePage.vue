@@ -170,6 +170,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import StripePaymentPanel from '@/components/StripePaymentPanel.vue'
 import { api, apiError } from '@/lib/api'
 import { dayLabel, money, timeRange } from '@/lib/format'
+import { siteOrigin } from '@/lib/head'
 import type { PartyBooking, PartyPackageDetail, PartySlot } from '@/lib/types'
 import { useAuthStore } from '@/stores/auth'
 
@@ -196,7 +197,7 @@ const pending = ref<PartyBooking | null>(null) // reserved, awaiting deposit
 const booked = ref<PartyBooking | null>(null) // deposit confirmed
 const adjustCount = ref<number>(0)
 
-const returnUrl = computed(() => `${window.location.origin}/parties/packages/${props.id}`)
+const returnUrl = computed(() => `${siteOrigin()}/parties/packages/${props.id}`)
 
 const headcountValid = computed(
   () =>
@@ -222,7 +223,7 @@ const adjustValid = computed(
 
 async function reserve(): Promise<void> {
   if (!auth.isAuthed) {
-    void router.push({ name: 'login', query: { redirect: returnUrl.value.replace(window.location.origin, '') } })
+    void router.push({ name: 'login', query: { redirect: returnUrl.value.replace(siteOrigin(), '') } })
     return
   }
   if (!selectedSlot.value || typeof headcount.value !== 'number') return

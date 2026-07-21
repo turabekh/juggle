@@ -1,5 +1,6 @@
-// Client entry: mounts the SPA (empty #app) or hydrates server-rendered markup,
-// restoring any pinia state the server serialized. Also registers the PWA SW.
+// Client entry: mounts the SPA (empty #app) or hydrates server-rendered markup
+// (built with @quasar/vite-plugin runMode 'ssr-client'), restoring any pinia
+// state the server serialized. Also registers the PWA SW.
 
 import type { StateTree } from 'pinia'
 
