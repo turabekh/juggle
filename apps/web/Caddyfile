@@ -1,21 +1,22 @@
-# Edge server for the Juggle SPA. SITE_ADDRESS is set by compose from DOMAIN:
+# Edge server (TLS) for Juggle. SITE_ADDRESS is set by compose from DOMAIN:
 #   DOMAIN unset/empty -> ":80"  (plain HTTP on every host — fine for first boot / IP access)
 #   DOMAIN=host        -> automatic HTTPS via Let's Encrypt (needs 80/443 open + DNS A record)
+#
+# Caddy terminates TLS and reverse-proxies: /api/* to the API, everything else to
+# the SSR node server (server.mjs), which renders each page and serves static
+# assets from dist/client. (SSR errors fall back to the SPA shell in server.mjs.)
 {$SITE_ADDRESS::80} {
 	encode gzip zstd
 
-	# `handle` blocks are mutually exclusive and ordered, so the SPA's try_files rewrite
-	# never touches API requests. API calls from the SPA are same-origin (/api/v1/...).
+	# `handle` blocks are mutually exclusive and ordered. API calls from the app
+	# are same-origin (/api/v1/...) and go straight to the backend.
 	handle /api/* {
 		reverse_proxy api:8000
 	}
 
-	# Everything else: serve the built SPA with HTML5-history fallback so deep links
-	# (e.g. /parties/plan/<token>) resolve to index.html.
+	# Everything else -> the SSR server (HTML render + static assets + SPA fallback).
 	handle {
-		root * /srv
-		try_files {path} /index.html
-		file_server
+		reverse_proxy ssr:5173
 	}
 
 	header {
