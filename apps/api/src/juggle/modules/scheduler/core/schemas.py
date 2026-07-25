@@ -20,3 +20,4 @@ class JobSummary(BaseModel):
     plans_swept: int = 0
     plans_purged: int = 0
     auth_rows_pruned: int = 0
+    quotes_expired: int = 0

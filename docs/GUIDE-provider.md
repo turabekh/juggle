@@ -136,6 +136,38 @@ If you must cancel a session, use **Cancel** on the Program page:
 
 ---
 
+## 4b. Birthday parties
+
+**Provider org page → Party packages** — offer a party as a package (per-head price, a
+min/max guest band, an optional deposit % override) and add bookable **dates**. Each date is
+one party: capacity-1, so it can only ever be sold once.
+
+### Party enquiries — quoting for a bespoke party *(if enabled)*
+
+Families who want something your packages don't cover send a structured **enquiry**: date and
+time, suburb, kid count and age band, an optional budget, and a note. They appear under
+**Party enquiries** on your org page.
+
+For each one you can:
+- **Send a quote** — pick the venue, confirm the time, set the guest count and a per-head
+  price, and say what's included. The form pre-fills from their brief, so usually you're just
+  setting a price. Behind the scenes this creates a private package for that family — it is
+  **never** listed publicly, so your quoted price stays between you and them.
+- **Decline** it, if you can't help. They're told, and can ask someone else.
+
+The family may ask for **one** revision ("could you do $45/head?"), and you may send **one**
+revised quote in reply. Then it's accept or let it lapse — there's no back-and-forth thread,
+by design.
+
+Quotes **expire after 72 hours** by default. When a family accepts, they pay the same deposit
+as any party booking and the balance is charged automatically later — identical rails, so
+payouts, refunds and tax invoices all work exactly as they do for a package booking.
+
+> **A quote is a commitment.** The date is held for that family the moment they accept, so only
+> quote times you can actually host.
+
+---
+
 ## 5. Getting paid
 
 ### How the money splits

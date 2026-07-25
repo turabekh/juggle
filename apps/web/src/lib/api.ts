@@ -33,7 +33,11 @@ import type {
   PartyPackageCreate,
   PartyPackageDetail,
   PartyPagePatch,
+  PartyQuote,
+  PartyQuoteRequest,
   PartySlot,
+  QuotePayload,
+  QuoteRequestPayload,
   PlanInviteCreated,
   PlanOut,
   PlanRequest,
@@ -579,6 +583,63 @@ export const api = {
     },
     async cancel(bookingId: string): Promise<PartyBooking> {
       const { data } = await http.post<PartyBooking>(`/parties/bookings/${bookingId}/cancel`)
+      return data
+    },
+  },
+  // Request-to-quote parties (Milestone C). Every endpoint 404s while the `party_quotes`
+  // flag is off, so callers treat a 404 on the list as "feature not available" and hide it.
+  partyQuotes: {
+    async myRequests(): Promise<PartyQuoteRequest[]> {
+      const { data } = await http.get<PartyQuoteRequest[]>('/parties/quotes/requests')
+      return data
+    },
+    async createRequest(payload: QuoteRequestPayload): Promise<PartyQuoteRequest> {
+      const { data } = await http.post<PartyQuoteRequest>('/parties/quotes/requests', payload)
+      return data
+    },
+    async withdrawRequest(id: string): Promise<PartyQuoteRequest> {
+      const { data } = await http.post<PartyQuoteRequest>(
+        `/parties/quotes/requests/${id}/withdraw`,
+      )
+      return data
+    },
+    async requestRevision(quoteId: string, message: string): Promise<PartyQuote> {
+      const { data } = await http.post<PartyQuote>(
+        `/parties/quotes/${quoteId}/request-revision`,
+        { message },
+      )
+      return data
+    },
+    async accept(quoteId: string): Promise<PartyBooking> {
+      const { data } = await http.post<PartyBooking>(`/parties/quotes/${quoteId}/accept`)
+      return data
+    },
+    // --- Provider side ---
+    async orgRequests(orgId: string): Promise<PartyQuoteRequest[]> {
+      const { data } = await http.get<PartyQuoteRequest[]>(
+        `/parties/quotes/orgs/${orgId}/requests`,
+      )
+      return data
+    },
+    async sendQuote(requestId: string, payload: QuotePayload): Promise<PartyQuote> {
+      const { data } = await http.post<PartyQuote>(
+        `/parties/quotes/requests/${requestId}/quote`,
+        payload,
+      )
+      return data
+    },
+    async reviseQuote(quoteId: string, payload: QuotePayload): Promise<PartyQuote> {
+      const { data } = await http.put<PartyQuote>(`/parties/quotes/${quoteId}`, payload)
+      return data
+    },
+    async withdrawQuote(quoteId: string): Promise<PartyQuote> {
+      const { data } = await http.post<PartyQuote>(`/parties/quotes/${quoteId}/withdraw`)
+      return data
+    },
+    async declineRequest(requestId: string): Promise<PartyQuoteRequest> {
+      const { data } = await http.post<PartyQuoteRequest>(
+        `/parties/quotes/requests/${requestId}/decline`,
+      )
       return data
     },
   },

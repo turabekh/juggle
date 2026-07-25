@@ -46,6 +46,7 @@ KEY_PARTY_PLANNER_RSVP_RATE_PER_HOUR = "party_planner_rsvp_rate_per_hour"
 KEY_PARTY_PLANNER_CUSTOM_OPTION_MAXLEN = "party_planner_custom_option_maxlen"
 KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN = "party_planner_page_title_maxlen"
 KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN = "party_planner_page_message_maxlen"
+KEY_PARTY_QUOTE_EXPIRY_HOURS = "party_quote_expiry_hours"
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,10 @@ REGISTRY: dict[str, SettingSpec] = {
     KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN: SettingSpec(
         KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN, 280, int, 0, 1000,
         "Max length of the host-set party page welcome message (ADR-0011 party page)",
+    ),
+    KEY_PARTY_QUOTE_EXPIRY_HOURS: SettingSpec(
+        KEY_PARTY_QUOTE_EXPIRY_HOURS, 72, int, 12, 336,
+        "Hours a party quote stays acceptable before it expires (ADR-0009)",
     ),
 }
 
@@ -346,3 +351,7 @@ def party_planner_page_title_maxlen(db: Session) -> int:
 
 def party_planner_page_message_maxlen(db: Session) -> int:
     return int(get_value(db, KEY_PARTY_PLANNER_PAGE_MESSAGE_MAXLEN))
+
+
+def party_quote_expiry_hours(db: Session) -> int:
+    return int(get_value(db, KEY_PARTY_QUOTE_EXPIRY_HOURS))

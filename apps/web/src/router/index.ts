@@ -36,6 +36,12 @@ export function createAppRouter(history: RouterHistory) {
           props: true,
         },
         {
+          path: 'parties/quotes',
+          name: 'party-quotes',
+          component: () => import('@/pages/PartyQuotesPage.vue'),
+          meta: { requiresAuth: true },
+        },
+        {
           path: 'parties/plans',
           name: 'party-plans',
           component: () => import('@/pages/PartyPlansPage.vue'),

@@ -202,6 +202,22 @@ Anything that doesn't fit (age mismatch, sold out) is simply skipped.
 Browse **Birthday parties** to see party packages, open a package for details, and book a
 party slot.
 
+### Asking for a quote *(bespoke parties, if enabled)*
+Want something the packages don't cover — an entertainer at your place, a custom setup? Use
+**Get a quote**:
+
+1. Send a short **enquiry**: date and time, suburb, how many kids and their ages, an optional
+   budget, and anything else worth knowing. (Please don't put kids' names in the notes.)
+2. The provider replies with **one price**, the time, and what's included.
+3. You can ask for **one revision** — "could you do $45/head?" — and they can send **one**
+   revised quote back. That's the limit on purpose: it keeps things clear rather than turning
+   into a negotiation thread. There's no chat.
+4. **Accept** and you pay the same deposit as any party booking; the balance is charged later,
+   exactly like an instant-book party.
+
+Quotes **expire** (72 hours by default) so prices and dates stay honest. If yours lapses, just
+send a fresh enquiry. You can withdraw an enquiry any time before you accept.
+
 ### Party Planner — let the guests vote
 Can't decide on the party? The **Party Planner** lets your invitees help pick:
 

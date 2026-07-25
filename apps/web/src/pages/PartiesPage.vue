@@ -14,6 +14,11 @@
           icon="how_to_vote" label="Can't decide? Start a vote"
           :to="{ name: 'party-plans' }"
         />
+        <q-btn
+          flat color="white" no-caps class="q-mt-sm q-ml-sm"
+          icon="request_quote" label="Want something bespoke? Get a quote"
+          :to="{ name: 'party-quotes' }"
+        />
       </div>
     </section>
 

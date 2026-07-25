@@ -27,6 +27,11 @@ KIND_WHAT_TO_BRING = "what_to_bring"
 KIND_SEAT_UNAVAILABLE_REFUND = "seat_unavailable_refund"
 KIND_PARTY_PAYMENT_ACTION = "party_payment_action"
 KIND_PARTY_CANCELLED = "party_cancelled"
+KIND_QUOTE_REQUESTED = "party_quote_requested"
+KIND_QUOTE_RECEIVED = "party_quote_received"
+KIND_QUOTE_REVISION_REQUESTED = "party_quote_revision_requested"
+KIND_QUOTE_ACCEPTED = "party_quote_accepted"
+KIND_QUOTE_CLOSED = "party_quote_closed"
 KIND_PLANNER_INVITE = "planner_invite"
 KIND_PLANNER_RSVP = "planner_rsvp_confirmation"
 KIND_PLANNER_REVEAL = "planner_reveal"
@@ -201,6 +206,99 @@ def notify_party_cancelled(
         db, user_id=user_id, to_email=to_email, kind=KIND_PARTY_CANCELLED,
         subject=subject, detail={},
     )
+
+
+# --- Request-to-quote (Milestone C, ADR-0009) --------------------------------
+# One notification per state transition. Bodies carry the party's *shape* (date, kid count,
+# price) — never a child's name (INV-3); the brief has no field for one.
+
+
+def notify_quote_requested(
+    db: Session, *, user_id: uuid.UUID | None, to_email: str, when: str, kid_count: int,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """To the provider: a parent has sent a brief."""
+    subject = "New party enquiry"
+    body = (
+        f"A family has asked you to quote for a party on {when} for {kid_count} kids.\n\n"
+        "Open your provider dashboard to send a quote — enquiries expire, so reply quickly.\n\n"
+        "Powered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=user_id, to_email=to_email, kind=KIND_QUOTE_REQUESTED,
+                   subject=subject, detail={"kid_count": kid_count})
+
+
+def notify_quote_received(
+    db: Session, *, user_id: uuid.UUID, to_email: str, organisation_name: str,
+    total_cents: int, expires_at: str, revised: bool, gateway: EmailGateway,
+) -> NotificationLog:
+    """To the parent: a quote (or the one revised quote) has arrived."""
+    subject = (
+        f"Revised quote from {organisation_name}" if revised
+        else f"Your party quote from {organisation_name}"
+    )
+    body = (
+        f"{organisation_name} has sent {'a revised' if revised else 'a'} quote: "
+        f"${total_cents / 100:.2f} all-inclusive.\n\n"
+        f"It's yours to accept until {expires_at}. Open Juggle to see what's included.\n\n"
+        "Powered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=user_id, to_email=to_email, kind=KIND_QUOTE_RECEIVED,
+                   subject=subject, detail={"total_cents": total_cents, "revised": revised})
+
+
+def notify_quote_revision_requested(
+    db: Session, *, user_id: uuid.UUID | None, to_email: str, message: str,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """To the provider: the parent's single counter-offer (ADR-0009 — one round only)."""
+    subject = "A family asked about your party quote"
+    body = (
+        f"They asked:\n\n{message}\n\n"
+        "You can send one revised quote in reply — after that it's accept or let it lapse.\n\n"
+        "Powered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=user_id, to_email=to_email, kind=KIND_QUOTE_REVISION_REQUESTED,
+                   subject=subject, detail={})
+
+
+def notify_quote_accepted(
+    db: Session, *, user_id: uuid.UUID | None, to_email: str, when: str, total_cents: int,
+    gateway: EmailGateway,
+) -> NotificationLog:
+    """To the provider: the quote was accepted and the deposit is being taken."""
+    subject = "Your party quote was accepted 🎉"
+    body = (
+        f"The family accepted your quote for {when} (${total_cents / 100:.2f}). "
+        "The deposit is being processed and the date is now held for you.\n\n"
+        "Powered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=user_id, to_email=to_email, kind=KIND_QUOTE_ACCEPTED,
+                   subject=subject, detail={"total_cents": total_cents})
+
+
+def notify_quote_closed(
+    db: Session, *, user_id: uuid.UUID | None, to_email: str, organisation_name: str,
+    reason: str, gateway: EmailGateway,
+) -> NotificationLog:
+    """To the parent: the quote expired, was withdrawn, or the provider declined the brief."""
+    wording = {
+        "expired": "has expired",
+        "withdrawn": "was withdrawn by the provider",
+        "declined": "was declined by the provider",
+    }.get(reason, "is no longer available")
+    subject = f"Your party quote from {organisation_name} {wording}"
+    body = (
+        f"Your quote from {organisation_name} {wording}. You're welcome to send a fresh "
+        "enquiry, to them or to another provider.\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=user_id, to_email=to_email, kind=KIND_QUOTE_CLOSED,
+                   subject=subject, detail={"reason": reason})
 
 
 def notify_waitlist_offer(

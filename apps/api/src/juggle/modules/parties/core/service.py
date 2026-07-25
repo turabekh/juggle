@@ -135,13 +135,19 @@ def list_org_packages(
 
 
 def list_active_packages(db: Session, organisation_id: uuid.UUID) -> list[PartyPackage]:
-    """Public: an org's bookable party packages."""
+    """Public: an org's bookable party packages.
+
+    ``quote_only`` packages are bespoke offers made to one family (Milestone C) — they are
+    real, bookable packages but must never surface publicly, or a privately quoted price
+    would appear on the marketplace.
+    """
     return list(
         db.scalars(
             select(PartyPackage)
             .where(
                 PartyPackage.organisation_id == organisation_id,
                 PartyPackage.status == PartyPackageStatus.active,
+                PartyPackage.quote_only.is_(False),
             )
             .order_by(PartyPackage.created_at)
         )
@@ -156,7 +162,10 @@ def list_all_active_packages(db: Session) -> list[PartyPackage]:
     return list(
         db.scalars(
             select(PartyPackage)
-            .where(PartyPackage.status == PartyPackageStatus.active)
+            .where(
+                PartyPackage.status == PartyPackageStatus.active,
+                PartyPackage.quote_only.is_(False),  # bespoke quote packages stay private
+            )
             .order_by(PartyPackage.created_at.desc())
         )
     )

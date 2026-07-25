@@ -18,6 +18,7 @@ from juggle.modules.identity.ui import router as identity_router
 from juggle.modules.inventory.ui import router as inventory_router
 from juggle.modules.notifications.ui import router as notifications_router
 from juggle.modules.org.ui import router as org_router
+from juggle.modules.parties.ui import quote_router as parties_quote_router
 from juggle.modules.parties.ui import router as parties_router
 from juggle.modules.party_planner.ui import router as party_planner_router
 from juggle.modules.payments.ui import router as payments_router
@@ -40,6 +41,7 @@ for _router in (
     party_planner_router,
     planner_router,
     parties_router,
+    parties_quote_router,
     payments_router,
     reviews_router,
     qanda_router,
