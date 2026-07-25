@@ -1,6 +1,7 @@
-# Handoff — 2026-07-25 — Status audit, prod reality-check, planner test fixtures
+# Handoff — 2026-07-25 — Status audit, prod reality-check, green suite, user suspension
 
-Session on branch **`fix/planner-test-date-fixtures`** (base `main` @ `b2645e2`, nothing pushed).
+Session on branch **`fix/planner-test-date-fixtures`** (base `main` @ `b2645e2`, nothing pushed —
+the branch name undersells it; it also carries the payout-test fix and the suspension feature).
 Read `CLAUDE.md`, then this file. The prior handoff (`2026-07-19-planner-polish-ai-auth-hardening.md`)
 is **stale in one important way**: it says its work was unmerged on `feat/party-planner`. It merged
 that afternoon (PR #9), and **ten more PRs landed on 2026-07-19…21 with no handoff written**. §2
@@ -17,11 +18,18 @@ below is the missing record.
   **backend test suite was calling the real Claude API** on every run because `JUGGLE_ANTHROPIC_API_KEY`
   is now set in `.env`. The second is fixed here; the first is a decision for the next session.
 - **Fixed:** the 5 planner test failures — hardcoded `2026-07-20 → 2026-07-25` fixtures that expired on
-  the calendar, not a regression — plus the live-API leak that hid behind them.
-- **State:** `make check` = ruff + mypy strict + import-linter clean, **300 passed, 2 failed** — the
-  2 being the known pre-existing shared-DB payout pollution, unchanged and unrelated.
+  the calendar, not a regression — plus the live-API leak that hid behind them, and the two payout
+  failures that had been mis-diagnosed for weeks.
+- **State:** `make check` = ruff + mypy strict + import-linter clean, **312 passed, 0 failed** — the
+  two long-standing payout failures are fixed too (§3D), so the backend suite is green for the first
+  time in a while. Web: `vue-tsc` clean, build green, 27 Vitest units pass.
 
-New commits: `aaff682` fix(tests) planner date fixtures + planner-gateway override.
+- **Shipped:** admin **user suspension / reinstatement** — `UserStatus.suspended` was enforced in
+  three places but assignable from nowhere, so that enforcement was unreachable code. Now it isn't.
+
+New commits (oldest→newest): `aaff682` fix(tests) planner date fixtures + planner-gateway override ·
+`87220c9` fix(tests) scope payout assertions + CLAUDE.md status refresh ·
+`2d08ff7` docs this handoff · `5561738` feat(admin) suspend/reinstate a user account.
 
 ---
 
@@ -84,6 +92,41 @@ can never trigger a live send (or cost)". Applied the same treatment: it now ove
 `get_planner_gateway` → `RuleBasedPlannerGateway`. The Anthropic path keeps its own coverage against a
 mocked SDK, so nothing is lost.
 
+### D. Fixed the payout tests properly (`87220c9`)
+Not "shared-DB pollution that passes in isolation" (see §6) — they asserted on the **global** admin
+payout list, so they were really asserting the whole database is empty. Added `_org_payouts()` and
+scoped every assertion to the org the test creates. Two latent versions of the same bug fixed while
+there: `test_hold_blocks_release` took `scheduled[0]` off the global list (it could have put a *seed*
+payout on hold) and `test_future_payout_not_released` asserted a global `released == 0`. **No
+production code touched** — this is test scoping only, and the payments deferral is respected.
+
+### E. Admin user suspension / reinstatement (`5561738`)
+The auth-hardening batch (§2 of the prior handoff, item #5) made `UserStatus.suspended` enforced in
+three places — `authenticate` refuses a login, `rotate_refresh_token` refuses a refresh, `deps`
+re-checks live status on every request — but **nothing could assign it**, so the whole path was
+unreachable. Closed:
+
+- **`identity.set_account_status()`** flips `active ↔ suspended` and revokes every live refresh
+  token. The revoke is what makes suspension *immediate* rather than eventual — the access token
+  dies on its next request and there is nothing left to mint a replacement. (Belt and braces: even
+  if a concurrent login won the race and minted a token just before the flip committed, refresh and
+  every request re-check live status, so the surviving token is inert.)
+- **`deleted` is terminal in both directions** (`AccountDeleted`, 409): §10.2 anonymisation must go
+  through `delete_account`, and a data-deleted account has no PII left to restore.
+- **Guards**, mirroring the existing `CannotDeleteAdmin` precedent: no self-suspension, and admin
+  accounts cannot be suspended — they are provisioned/revoked at the DB layer (no admin-creation
+  endpoint by design), so allowing it would create an in-app lockout with no in-app recovery.
+- **Impersonation cannot reach it**: `create_impersonation_token` forces `adm=False`
+  (`security.py:108`), so `get_current_admin` rejects impersonation tokens outright and the audited
+  actor is always a real admin (INV-10).
+- Both actions audited with the true actor + the operator's reason. UI: status badge in the results
+  list, suspend (with reason prompt) / reinstate on the selected user. `GUIDE-admin.md §3` updated.
+- 10 new tests (`tests/test_user_suspension.py`) covering the three-way lockout, force-logout across
+  devices, reinstatement, every guard, and the audit detail.
+
+**Not adversarially reviewed by a subagent** (out of scope this session per instruction) — the
+self-review above is what it got. It touches auth, so a fresh skeptical pass before merge is worth it.
+
 ---
 
 ## 4. Findings that need a decision (not fixed here)
@@ -111,13 +154,21 @@ mocked SDK, so nothing is lost.
   plus the mocked-SDK payload assertion both still pass.
 - **INV-2 / INV-5** — no money code touched this session. But see §4.1: prod's current gateway state
   means INV-2's "money moves only through `payments`" is technically satisfied while *no money moves at all*.
-- **INV-10** — closed out by PR #10 (§2); the admin refresh token is now fail-closed under impersonation.
+- **INV-10** — closed out by PR #10 (§2); the admin refresh token is now fail-closed under
+  impersonation. Suspension respects it too: impersonation tokens can't reach the new routes
+  (`adm=False`), and every suspend/reinstate is audited with the true actor.
+- **INV-3** (again, suspension) — no child data involved; suspension touches only `user_account.status`
+  and refresh tokens, and the audit detail carries a status + operator reason, never PII.
 
 ---
 
 ## 6. Known gaps / next steps
 
-**Recommended next step: wire Stripe test keys and verify the live payment path end to end.** Needs a
+> Payments work was **explicitly deferred** by the operator this session, which is why the Stripe
+> verification below was not started and the suspension feature was picked up instead.
+
+**Recommended next step (when payments are back on the table): wire Stripe test keys and verify the
+live payment path end to end.** Needs a
 Stripe test-mode account (publishable + secret) and a webhook secret from
 `stripe listen --forward-to localhost:8001/api/v1/booking/stripe/webhook`, plus test-mode Connect
 Express. Then: provider onboarding → `account.updated` capability sync → Payment Element checkout →
@@ -125,30 +176,37 @@ Express. Then: provider onboarding → `account.updated` capability sync → Pay
 and Transfer-Reversal branches) → tax invoice; then party deposit + balance charge. Adversarial review
 on the diff per `CLAUDE.md`.
 
-In parallel / after:
-- **SMTP credentials** (Postmark or SES). Gateway code is done (#17); this is the hard dependency
-  keeping `party_planner` OFF in prod, and Stripe verification generates confirmation emails anyway.
-- **Milestone C** (request-to-quote) — the only unbuilt piece of the active gate.
-- **Pre-existing payout test failures** — `test_payouts.py::test_admin_runs_due_payouts` and
-  `::test_refund_before_release_claws_back_scheduled_payout`. **Correcting the prior handoff: these do
-  NOT "pass in isolation"** — running `pytest tests/test_payouts.py` alone still fails them. The cause
-  is that they assert **globally** (`assert scheduled == []` over the entire payout table,
-  `test_payouts.py:346`) while a committed seed payout (4895c) lives in the shared dev DB. So it is a
-  fixture-scope bug, not test interference. Fix: scope the assertions to the payouts the test created
-  (the same fix already applied to the planner's cross-plan count queries), **not** by deleting
-  committed financial data. ~15 minutes, deliberately left out of this diff to keep it scoped.
-- Carried over: post-tie final-pick notice to invitees; admin "suspend user" action (`UserStatus.suspended`
-  is enforced but never assigned); SSR prefetch serialization to avoid the client hydration re-fetch;
-  deploy hardening (Cloud SQL + Secret Manager + scheduled GCS backups, `DEPLOY.md §9`); party-page
-  counter limits hardcoded client-side.
+**Non-payment work, in the order I'd take it:**
+- **SMTP credentials** (Postmark or SES) — needs an account, not code. Gateway is done (#17) and it is
+  the hard dependency keeping `party_planner` OFF in prod. Highest value per effort of anything left.
+- **Milestone C** (request-to-quote) — the only unbuilt piece of the active gate, but note its
+  definition of done ends in a deposit on Milestone B's rails, so the last leg is payments work.
+  The brief → quote → accept state machine and its expiry job can be built without touching money.
+- **Post-tie final-pick notice** and the **party-page config-driven counter limits** — small, contained.
+- ~~Pre-existing payout test failures~~ — **fixed** in §3D. Worth recording why they survived so long:
+  every prior handoff repeated that they "pass in isolation" and blamed shared-DB pollution. They do
+  not pass in isolation, and the pollution was not the bug — the tests asserted on the global payout
+  table, so any committed payout anywhere broke them. The inherited diagnosis is what kept them open.
+- Carried over: SSR prefetch serialization to avoid the client hydration re-fetch; deploy hardening
+  (Cloud SQL + Secret Manager + scheduled GCS backups, `DEPLOY.md §9`).
 - **Shared-DB e2e gotcha** (unchanged): Playwright specs that create seat holds leave dangling browsing
   holds that trip `test_reserved_seat_survives_the_ttl_sweep`. Clean up with `inventory.service.force_release`.
+- **New gotcha — don't run `make worker-loop` while running the suite.** One full run here produced a
+  non-reproducing `ERROR tests/test_party_planner.py::test_removing_voted_option_voids_its_tally`
+  (passes alone, passes with its file, passes with its neighbours, and did not recur). The `db`
+  fixture opens each test with `DELETE FROM party_plan / platform_setting / feature_flag` inside its
+  transaction, holding table locks for the test's duration, while the worker tick writes `party_plan`
+  (`resolve_due_plans` / `sweep_stale_resolved` / `purge_expired_plan_pii`) against the same dev DB
+  every 5 minutes. **Confirmed:** with the worker stopped, the same suite is **312 passed, 0 failed,
+  0 errors**. Stop the worker before `make check`.
 
 ---
 
 ## 7. Where to look
 
-- This session's diff: `apps/api/tests/test_planner.py`, `apps/api/tests/conftest.py`.
+- This session's diff: `apps/api/tests/{test_planner,conftest,test_payouts,test_user_suspension}.py`;
+  `identity/core/service.py` (`set_account_status`), `admin/core/{service,schemas}.py`,
+  `admin/ui/routes.py`, `apps/web/src/pages/admin/AdminUsersPage.vue`, `apps/web/src/lib/{api,types}.ts`.
 - Why the fixtures expired: `apps/api/src/juggle/modules/search/core/service.py:86` (`starts_at >= now`)
   and `:43` (`_day_start`, UTC day bounds).
 - Gateway selection points: `planner/core/gateway.py:187` (`get_planner_gateway`),
