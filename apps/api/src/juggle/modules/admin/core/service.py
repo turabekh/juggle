@@ -21,7 +21,7 @@ from juggle.modules.catalog.core import service as catalog_service
 from juggle.modules.catalog.core.models import Program
 from juggle.modules.config.core import service as config_service
 from juggle.modules.identity.core import service as identity_service
-from juggle.modules.identity.core.models import Child, GuardianLink, UserAccount
+from juggle.modules.identity.core.models import Child, GuardianLink, UserAccount, UserStatus
 from juggle.modules.inventory.core.models import SeatHold
 from juggle.modules.notifications.core.models import NotificationLog
 from juggle.modules.org.core import service as org_service
@@ -106,6 +106,81 @@ def delete_user(db: Session, *, user_id: uuid.UUID, actor_id: uuid.UUID) -> None
     if user.is_admin:
         raise CannotDeleteAdmin(str(user_id))
     identity_service.delete_account(db, user_id=user_id, actor_id=actor_id)
+
+
+class CannotSuspendAdmin(Exception):
+    """Refuse to suspend an admin account."""
+
+
+class CannotSuspendSelf(Exception):
+    """Refuse to let an admin suspend themselves."""
+
+
+def _set_user_status(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    status: UserStatus,
+    actor_id: uuid.UUID,
+    action: str,
+    reason: str | None,
+) -> UserAccount:
+    user = db.get(UserAccount, user_id)
+    if user is None:
+        raise UserNotFound(str(user_id))
+    if status is UserStatus.suspended:
+        if user_id == actor_id:
+            raise CannotSuspendSelf(str(user_id))
+        if user.is_admin:
+            # Admin accounts are provisioned and revoked at the database level (there
+            # is no admin-creation endpoint by design), so allowing this would only
+            # turn the console into an admin-lockout weapon with no in-app recovery.
+            raise CannotSuspendAdmin(str(user_id))
+    updated = identity_service.set_account_status(db, user_id=user_id, status=status)
+    if updated is None:
+        raise UserNotFound(str(user_id))
+    audit_service.record(
+        db,
+        action=action,
+        actor_id=actor_id,
+        entity_type="user_account",
+        entity_id=str(user_id),
+        detail={"status": status.value, "reason": reason},
+    )
+    return updated
+
+
+def suspend_user(
+    db: Session, *, user_id: uuid.UUID, actor_id: uuid.UUID, reason: str | None = None
+) -> UserAccount:
+    """Suspend a user: they cannot log in, refresh, or continue an open session.
+
+    Reversible (unlike §10.2 deletion) — no PII is touched, so ``reinstate_user``
+    restores the account intact. Audited with the true actor.
+    """
+    return _set_user_status(
+        db,
+        user_id=user_id,
+        status=UserStatus.suspended,
+        actor_id=actor_id,
+        action="admin.user.suspend",
+        reason=reason,
+    )
+
+
+def reinstate_user(
+    db: Session, *, user_id: uuid.UUID, actor_id: uuid.UUID, reason: str | None = None
+) -> UserAccount:
+    """Lift a suspension. The user logs in again normally (they were force-logged-out,
+    so they need fresh credentials in hand, not a stale token)."""
+    return _set_user_status(
+        db,
+        user_id=user_id,
+        status=UserStatus.active,
+        actor_id=actor_id,
+        action="admin.user.reinstate",
+        reason=reason,
+    )
 
 
 class CannotMergeSelf(Exception):

@@ -30,8 +30,12 @@
               <q-item-label>{{ u.full_name || '—' }}</q-item-label>
               <q-item-label caption>{{ u.email }}</q-item-label>
             </q-item-section>
-            <q-item-section side v-if="u.is_admin">
-              <q-badge color="primary" label="admin" />
+            <q-item-section side v-if="u.is_admin || u.status !== 'active'">
+              <q-badge v-if="u.is_admin" color="primary" label="admin" />
+              <q-badge
+                v-else-if="u.status === 'suspended'" color="negative" label="suspended"
+              />
+              <q-badge v-else color="grey-7" label="deleted" />
             </q-item-section>
           </q-item>
           <q-item v-if="query && !results.length && !searching">
@@ -50,7 +54,30 @@
             {{ bookings.length }} booking{{ bookings.length === 1 ? '' : 's' }}
           </div>
 
-          <template v-if="!selected.is_admin">
+          <template v-if="!selected.is_admin && selected.status !== 'deleted'">
+            <q-separator class="q-my-md" />
+            <div class="text-weight-600 q-mb-sm">Account access</div>
+            <p class="jg-muted text-caption">
+              <template v-if="selected.status === 'suspended'">
+                Suspended — they cannot sign in, and every open session was ended.
+                Reinstating restores the account exactly as it was.
+              </template>
+              <template v-else>
+                Suspending blocks sign-in and ends every open session immediately.
+                It touches no data and can be lifted at any time.
+              </template>
+            </p>
+            <q-btn
+              v-if="selected.status === 'suspended'"
+              flat no-caps color="positive" icon="lock_open" label="Reinstate account"
+              :loading="statusBusy" @click="reinstate"
+            />
+            <q-btn
+              v-else
+              flat no-caps color="warning" icon="block" label="Suspend account"
+              :loading="statusBusy" @click="confirmSuspend"
+            />
+
             <q-separator class="q-my-md" />
             <div class="text-weight-600 q-mb-sm">Duplicate-account merge</div>
             <p class="jg-muted text-caption">
@@ -68,8 +95,11 @@
               @click="confirmDelete"
             />
           </template>
+          <div v-else-if="selected.is_admin" class="jg-faint text-caption q-mt-md">
+            Admin account — protected from suspension, deletion and merge.
+          </div>
           <div v-else class="jg-faint text-caption q-mt-md">
-            Admin account — protected from deletion and merge.
+            This account has been data-deleted (PRD §10.2) — nothing further to manage.
           </div>
         </div>
         <div v-else class="jg-card q-pa-xl text-center jg-muted">
@@ -137,6 +167,7 @@ const mergeQuery = ref('')
 const mergeResults = ref<UserSummary[]>([])
 const mergeSource = ref<UserSummary | null>(null)
 const merging = ref(false)
+const statusBusy = ref(false)
 
 async function search(): Promise<void> {
   if (!query.value) {
@@ -186,6 +217,49 @@ async function doMerge(): Promise<void> {
     $q.notify({ type: 'negative', message: apiError(err, 'Could not merge accounts') })
   } finally {
     merging.value = false
+  }
+}
+
+/** Replace the user in both the selection and the result list so the badge and the
+ * action buttons reflect the new status without a re-search. */
+function applyStatus(updated: UserSummary): void {
+  selected.value = updated
+  const idx = results.value.findIndex((u) => u.id === updated.id)
+  if (idx !== -1) results.value[idx] = updated
+}
+
+function confirmSuspend(): void {
+  if (!selected.value) return
+  const user = selected.value
+  $q.dialog({
+    title: 'Suspend this account?',
+    message: `${user.email} will be signed out everywhere and blocked from signing in.`,
+    prompt: { model: '', type: 'text', label: 'Reason (recorded in the audit trail)' },
+    cancel: true,
+    ok: { label: 'Suspend', color: 'warning', unelevated: true, noCaps: true },
+  }).onOk(async (reason: string) => {
+    statusBusy.value = true
+    try {
+      applyStatus(await api.admin.suspendUser(user.id, reason || null))
+      $q.notify({ type: 'info', message: 'Account suspended.' })
+    } catch (err) {
+      $q.notify({ type: 'negative', message: apiError(err, 'Could not suspend account') })
+    } finally {
+      statusBusy.value = false
+    }
+  })
+}
+
+async function reinstate(): Promise<void> {
+  if (!selected.value) return
+  statusBusy.value = true
+  try {
+    applyStatus(await api.admin.reinstateUser(selected.value.id))
+    $q.notify({ type: 'positive', message: 'Account reinstated.' })
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not reinstate account') })
+  } finally {
+    statusBusy.value = false
   }
 }
 

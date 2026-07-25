@@ -508,6 +508,7 @@ export interface UserSummary {
   email: string
   full_name: string | null
   is_admin: boolean
+  status: 'active' | 'suspended' | 'deleted'
 }
 
 // --- Provider console -------------------------------------------------------
