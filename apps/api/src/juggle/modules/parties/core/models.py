@@ -76,6 +76,11 @@ class PartyPackage(UUIDPkMixin, TimestampMixin, Base):
         default=PartyPackageStatus.active,
         nullable=False,
     )
+    # A bespoke package created to fulfil ONE request-to-quote (Milestone C). It is a real
+    # package so the whole deposit/balance/payout/invoice chain works unchanged, but it is
+    # private to that quote — every public listing query excludes it, or a price quoted to one
+    # family would show up on the marketplace.
+    quote_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class PartyBookingStatus(enum.StrEnum):
@@ -157,5 +162,126 @@ class PartyBooking(UUIDPkMixin, TimestampMixin, Base):
     status: Mapped[PartyBookingStatus] = mapped_column(
         Enum(PartyBookingStatus, name="party_booking_status"),
         default=PartyBookingStatus.pending_deposit,
+        nullable=False,
+    )
+
+
+# --- Request-to-quote (Milestone C, PRD §9 / ADR-0009) -----------------------
+
+
+class QuoteRequestStatus(enum.StrEnum):
+    submitted = "submitted"    # brief sent to the provider, no quote yet
+    quoted = "quoted"          # a live quote exists (see PartyQuote for its state)
+    accepted = "accepted"      # the parent accepted; a party booking exists
+    declined = "declined"      # the provider passed on it
+    withdrawn = "withdrawn"    # the parent pulled the brief
+    expired = "expired"        # the quote lapsed and was never re-requested
+
+
+class QuoteStatus(enum.StrEnum):
+    sent = "sent"
+    revision_requested = "revision_requested"  # the parent's ONE counter (ADR-0009)
+    revised = "revised"                        # the provider's ONE revised offer
+    accepted = "accepted"
+    expired = "expired"
+    withdrawn = "withdrawn"
+
+
+class PartyQuoteRequest(UUIDPkMixin, TimestampMixin, Base):
+    """A parent's structured brief for a bespoke party (PRD §9 request-to-quote).
+
+    Structured fields only — there is no chat (EXT-1 §10). INV-3: the brief describes the
+    party by **kid count and an age band**; it never carries a child's name or date of birth,
+    and none of it is copied into analytics events.
+    """
+
+    __tablename__ = "party_quote_request"
+    __table_args__ = (
+        CheckConstraint("kid_count >= 1", name="ck_quote_req_kid_count"),
+        CheckConstraint(
+            "child_age_max >= child_age_min", name="ck_quote_req_age_band"
+        ),
+        CheckConstraint(
+            "budget_cents IS NULL OR budget_cents >= 0", name="ck_quote_req_budget_nonneg"
+        ),
+        CheckConstraint("ends_at > starts_at", name="ck_quote_req_time_order"),
+    )
+
+    guardian_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_account.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    organisation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organisation.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    suburb: Mapped[str] = mapped_column(String(120), nullable=False)
+    kid_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    child_age_min: Mapped[int] = mapped_column(Integer, nullable=False)
+    child_age_max: Mapped[int] = mapped_column(Integer, nullable=False)
+    budget_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)  # one field, not a thread
+    status: Mapped[QuoteRequestStatus] = mapped_column(
+        Enum(QuoteRequestStatus, name="party_quote_request_status"),
+        default=QuoteRequestStatus.submitted,
+        nullable=False,
+    )
+
+
+class PartyQuote(UUIDPkMixin, TimestampMixin, Base):
+    """A provider's priced offer against a brief.
+
+    The offer *is* a bespoke ``PartyPackage`` + one ``PartySlot`` (see
+    ``docs/PLANS/milestone-C-request-to-quote.md``): accepting books that slot through the
+    unchanged deposit rails, so no money code is duplicated here.
+
+    Revisions happen in place and are capped at one (ADR-0009) — negotiation is bounded, not
+    a chat. ``revision_count`` is the enforcement point and the DB CHECK is the backstop.
+    """
+
+    __tablename__ = "party_quote"
+    __table_args__ = (
+        CheckConstraint("total_cents >= 0", name="ck_party_quote_total_nonneg"),
+        CheckConstraint("headcount >= 1", name="ck_party_quote_headcount"),
+        CheckConstraint(
+            "revision_count >= 0 AND revision_count <= 1", name="ck_party_quote_one_revision"
+        ),
+        # One live quote per brief; superseded/withdrawn ones don't block a fresh offer.
+        Index(
+            "uq_party_quote_active_per_request",
+            "request_id",
+            unique=True,
+            postgresql_where=text("status NOT IN ('withdrawn', 'expired')"),
+        ),
+    )
+
+    request_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("party_quote_request.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    organisation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organisation.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    # The bespoke package/slot this offer is made of — booked as-is on accept.
+    package_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("party_package.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    slot_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("party_slot.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    headcount: Mapped[int] = mapped_column(Integer, nullable=False)
+    per_head_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)  # GST-inclusive
+    total_cents: Mapped[int] = mapped_column(Integer, nullable=False)           # GST-inclusive
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)          # inclusions, 1 field
+    revision_message: Mapped[str | None] = mapped_column(Text, nullable=True)  # the parent's ask
+    revision_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=False
+    )
+    booking_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("party_booking.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[QuoteStatus] = mapped_column(
+        Enum(QuoteStatus, name="party_quote_status"),
+        default=QuoteStatus.sent,
         nullable=False,
     )

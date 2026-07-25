@@ -312,6 +312,70 @@ export interface PlanHostInvite {
   avatar_key: string | null
 }
 
+// --- Request-to-quote parties (Milestone C, ADR-0009) -----------------------
+
+export interface PartyQuote {
+  id: string
+  request_id: string
+  organisation_id: string
+  package_id: string
+  slot_id: string
+  headcount: number
+  per_head_price_cents: number
+  total_cents: number
+  message: string | null
+  revision_message: string | null
+  revision_count: number
+  expires_at: string
+  booking_id: string | null
+  status: 'sent' | 'revision_requested' | 'revised' | 'accepted' | 'expired' | 'withdrawn'
+  starts_at: string
+  ends_at: string
+  venue_name: string
+  organisation_name: string
+  deposit_cents: number
+  can_request_revision: boolean
+}
+
+export interface PartyQuoteRequest {
+  id: string
+  guardian_id: string
+  organisation_id: string
+  starts_at: string
+  ends_at: string
+  suburb: string
+  kid_count: number
+  child_age_min: number
+  child_age_max: number
+  budget_cents: number | null
+  notes: string | null
+  status: 'submitted' | 'quoted' | 'accepted' | 'declined' | 'withdrawn' | 'expired'
+  organisation_name: string
+  quote: PartyQuote | null
+}
+
+export interface QuoteRequestPayload {
+  organisation_id: string
+  starts_at: string
+  ends_at: string
+  suburb: string
+  kid_count: number
+  child_age_min: number
+  child_age_max: number
+  budget_cents: number | null
+  notes: string | null
+}
+
+export interface QuotePayload {
+  venue_id: string
+  starts_at: string
+  ends_at: string
+  headcount: number
+  per_head_price_cents: number
+  message: string | null
+  deposit_pct: number | null
+}
+
 export interface PlanLimits {
   page_title_maxlen: number
   page_message_maxlen: number

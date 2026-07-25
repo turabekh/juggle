@@ -27,6 +27,7 @@ from juggle.modules.inventory.core import service as inventory_service
 from juggle.modules.notifications.core import service as notifications_service
 from juggle.modules.notifications.core.gateway import EmailGateway, get_email_gateway
 from juggle.modules.org.core import service as org_service
+from juggle.modules.parties.core import quotes as parties_quotes
 from juggle.modules.parties.core import service as parties_service
 from juggle.modules.party_planner.core import service as party_planner_service
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
@@ -197,6 +198,9 @@ def run_due_jobs(
     party_planner_service.send_planner_nudges(db, now=now, email_gateway=gateway)
     plans_swept = party_planner_service.sweep_stale_resolved(db, now=now)
     plans_purged = party_planner_service.purge_expired_plan_pii(db, now=now)
+    # Request-to-quote (ADR-0009): lapse quotes past their window so a stale price can never
+    # be accepted, and free the bespoke slot behind them.
+    quotes_expired = parties_quotes.expire_due_quotes(db, now=now, email_gateway=gateway)
     # Bound the auth tables: drop expired refresh tokens / OTP challenges / throttle windows.
     auth_rows_pruned = identity_service.prune_expired_auth(db, now=now)
 
@@ -215,4 +219,5 @@ def run_due_jobs(
         plans_swept=plans_swept,
         plans_purged=plans_purged,
         auth_rows_pruned=auth_rows_pruned,
+        quotes_expired=quotes_expired,
     )

@@ -157,6 +157,62 @@
         </div>
       </section>
 
+      <!-- Party enquiries — request-to-quote (Milestone C · ADR-0009). Hidden entirely when
+           the party_quotes flag is off, since every endpoint 404s. -->
+      <section v-if="quotesAvailable" class="q-mt-xl">
+        <div class="row items-center justify-between q-mb-sm">
+          <h2 class="text-h6 q-my-none">Party enquiries</h2>
+          <span v-if="openEnquiries" class="jg-pill">{{ openEnquiries }} awaiting a quote</span>
+        </div>
+        <div v-if="enquiries.length" class="jg-list">
+          <div v-for="e in enquiries" :key="e.id" class="jg-card q-pa-md">
+            <div class="row items-start justify-between q-gutter-sm">
+              <div>
+                <div class="text-weight-600">
+                  {{ dayLabel(e.starts_at) }} · {{ timeRange(e.starts_at, e.ends_at) }}
+                </div>
+                <div class="jg-faint text-caption">
+                  {{ e.kid_count }} kids, ages {{ ageBand(e.child_age_min, e.child_age_max) }}
+                  · {{ e.suburb }}
+                  <template v-if="e.budget_cents">
+                    · budget {{ money(e.budget_cents) }}
+                  </template>
+                </div>
+                <p v-if="e.notes" class="q-mt-xs q-mb-none text-body2">{{ e.notes }}</p>
+                <div v-if="e.quote" class="jg-faint text-caption q-mt-xs">
+                  Quoted {{ money(e.quote.total_cents) }} · {{ e.quote.status.replace('_', ' ') }}
+                  <template v-if="e.quote.revision_message">
+                    — they asked: “{{ e.quote.revision_message }}”
+                  </template>
+                </div>
+              </div>
+              <div class="column items-end q-gutter-xs">
+                <q-chip dense square :color="enquiryColor(e.status)" text-color="white"
+                        :label="e.status" />
+                <q-btn
+                  v-if="e.status === 'submitted'"
+                  flat dense no-caps size="sm" color="primary" icon="request_quote"
+                  label="Send quote" @click="openQuote(e)"
+                />
+                <q-btn
+                  v-if="e.quote && e.quote.status === 'revision_requested'"
+                  flat dense no-caps size="sm" color="primary" icon="edit_note"
+                  label="Send revised quote" @click="openQuote(e, e.quote)"
+                />
+                <q-btn
+                  v-if="e.status === 'submitted'"
+                  flat dense no-caps size="sm" color="grey-7" label="Decline"
+                  @click="declineEnquiry(e)"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="jg-muted text-caption">
+          No enquiries yet. Families who want something bespoke will land here.
+        </div>
+      </section>
+
       <!-- Earnings -->
       <section class="q-mt-xl">
         <div class="row items-center justify-between q-mb-sm">
@@ -511,6 +567,64 @@
       </q-card>
     </q-dialog>
 
+    <!-- Send / revise a party quote (Milestone C) -->
+    <q-dialog v-model="showQuote">
+      <q-card style="min-width: 440px; border-radius: 18px">
+        <q-card-section>
+          <div class="text-h6">{{ revisingQuoteId ? 'Send revised quote' : 'Send a quote' }}</div>
+          <div v-if="quoteFor" class="jg-faint text-caption">
+            {{ dayLabel(quoteFor.starts_at) }} · {{ quoteFor.kid_count }} kids ·
+            {{ quoteFor.suburb }}
+            <template v-if="quoteFor.budget_cents">
+              · their budget {{ money(quoteFor.budget_cents) }}
+            </template>
+          </div>
+          <div v-if="revisingQuoteId" class="jg-faint text-caption q-mt-xs">
+            This is your one revision — after it, they accept or it lapses.
+          </div>
+        </q-card-section>
+        <q-card-section class="q-gutter-md">
+          <q-select
+            v-model="quoteForm.venue_id" outlined dense :options="venueOptions"
+            emit-value map-options label="Venue"
+          />
+          <q-input v-model="quoteForm.date" outlined dense type="date" label="Date" />
+          <div class="row q-col-gutter-md">
+            <q-input v-model="quoteForm.start" class="col" outlined dense type="time" label="Start" />
+            <q-input v-model="quoteForm.end" class="col" outlined dense type="time" label="End" />
+          </div>
+          <div class="row q-col-gutter-md">
+            <q-input
+              v-model.number="quoteForm.headcount" class="col" outlined dense type="number"
+              label="Guests" min="1"
+            />
+            <q-input
+              v-model.number="quoteForm.per_head_dollars" class="col" outlined dense
+              type="number" label="Price per head ($)" min="0"
+            />
+          </div>
+          <div class="jg-faint text-caption">
+            Total {{ money(quoteTotalCents) }} — the family sees this GST-inclusive price.
+          </div>
+          <q-input
+            v-model="quoteForm.message" outlined dense type="textarea" autogrow maxlength="1000"
+            label="What's included" hint="One message — there's no back-and-forth chat"
+          />
+          <q-input
+            v-model.number="quoteForm.deposit_pct" outlined dense type="number"
+            label="Deposit % (blank = default)" min="10" max="100"
+          />
+        </q-card-section>
+        <q-card-actions align="right" class="q-pb-md q-pr-md">
+          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn
+            unelevated no-caps color="primary" label="Send"
+            :loading="saving" :disable="!quoteValid" @click="sendQuote"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <!-- Add party slots dialog -->
     <q-dialog v-model="showSlots">
       <q-card style="min-width: 440px; border-radius: 18px">
@@ -606,7 +720,9 @@ import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '@/components/EmptyState.vue'
 import StarRating from '@/components/StarRating.vue'
 import { api, apiError } from '@/lib/api'
-import { CATEGORIES, categoryMeta, dayLabel, money, payoutSetupDisplay } from '@/lib/format'
+import {
+  ageBand, CATEGORIES, categoryMeta, dayLabel, money, payoutSetupDisplay, timeRange,
+} from '@/lib/format'
 import type {
   ConnectStatus,
   InsuranceDoc,
@@ -616,6 +732,8 @@ import type {
   Org,
   OrgAnalytics,
   PartyPackage,
+  PartyQuote,
+  PartyQuoteRequest,
   Payout,
   Program,
   Review,
@@ -644,6 +762,24 @@ const analytics = ref<OrgAnalytics | null>(null)
 const questions = ref<ListingQuestion[]>([])
 const showAnswer = ref(false)
 const answerForm = reactive({ questionId: '', text: '' })
+
+// --- Party enquiries (Milestone C). `quotesAvailable` stays false when the party_quotes
+// flag is off, which is how the whole section disappears rather than erroring.
+const enquiries = ref<PartyQuoteRequest[]>([])
+const quotesAvailable = ref(false)
+const showQuote = ref(false)
+const quoteFor = ref<PartyQuoteRequest | null>(null)
+const revisingQuoteId = ref<string | null>(null)
+const quoteForm = reactive({
+  venue_id: '',
+  date: '',
+  start: '10:00',
+  end: '12:00',
+  headcount: 10,
+  per_head_dollars: 45,
+  message: '',
+  deposit_pct: null as number | null,
+})
 const unansweredCount = computed(() => questions.value.filter((q) => !q.answer).length)
 const saving = ref(false)
 const savingAbn = ref(false)
@@ -765,6 +901,14 @@ async function load(): Promise<void> {
       partyPackages.value = await api.parties.providerPackages(props.id)
     } catch {
       partyPackages.value = [] // non-fatal
+    }
+    try {
+      enquiries.value = await api.partyQuotes.orgRequests(props.id)
+      quotesAvailable.value = true
+    } catch {
+      // 404 = the party_quotes flag is off; anything else is equally non-fatal here.
+      enquiries.value = []
+      quotesAvailable.value = false
     }
   } catch (err) {
     $q.notify({ type: 'negative', message: apiError(err) })
@@ -942,6 +1086,94 @@ function resetPartyForm(): void {
     max_headcount: 20,
     deposit_pct: null,
     outdoor: false,
+  })
+}
+
+// --- Party enquiries / quotes (Milestone C, ADR-0009) -----------------------
+
+const openEnquiries = computed(
+  () => enquiries.value.filter((e) => e.status === 'submitted').length,
+)
+const quoteTotalCents = computed(
+  () => Math.round(quoteForm.per_head_dollars * 100) * quoteForm.headcount,
+)
+const quoteValid = computed(
+  () =>
+    !!quoteForm.venue_id && !!quoteForm.date && !!quoteForm.start && !!quoteForm.end &&
+    quoteForm.headcount >= 1 && quoteForm.per_head_dollars >= 0,
+)
+
+function enquiryColor(status: PartyQuoteRequest['status']): string {
+  return {
+    submitted: 'primary', quoted: 'indigo-5', accepted: 'positive',
+    declined: 'grey-6', withdrawn: 'grey-6', expired: 'grey-6',
+  }[status]
+}
+
+/** Pre-fill from the family's brief — their date, their headcount — so quoting is one edit. */
+function openQuote(enquiry: PartyQuoteRequest, revising: PartyQuote | null = null): void {
+  quoteFor.value = enquiry
+  revisingQuoteId.value = revising?.id ?? null
+  const starts = new Date(revising?.starts_at ?? enquiry.starts_at)
+  const ends = new Date(revising?.ends_at ?? enquiry.ends_at)
+  const hhmm = (d: Date): string =>
+    `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  quoteForm.venue_id = venues.value[0]?.id ?? ''
+  quoteForm.date = [
+    starts.getFullYear(),
+    String(starts.getMonth() + 1).padStart(2, '0'),
+    String(starts.getDate()).padStart(2, '0'),
+  ].join('-')
+  quoteForm.start = hhmm(starts)
+  quoteForm.end = hhmm(ends)
+  quoteForm.headcount = revising?.headcount ?? enquiry.kid_count
+  quoteForm.per_head_dollars = revising ? revising.per_head_price_cents / 100 : 45
+  quoteForm.message = revising?.message ?? ''
+  quoteForm.deposit_pct = null
+  showQuote.value = true
+}
+
+async function sendQuote(): Promise<void> {
+  if (!quoteFor.value) return
+  saving.value = true
+  try {
+    const payload = {
+      venue_id: quoteForm.venue_id,
+      starts_at: new Date(`${quoteForm.date}T${quoteForm.start}`).toISOString(),
+      ends_at: new Date(`${quoteForm.date}T${quoteForm.end}`).toISOString(),
+      headcount: quoteForm.headcount,
+      per_head_price_cents: Math.round(quoteForm.per_head_dollars * 100),
+      message: quoteForm.message || null,
+      deposit_pct: quoteForm.deposit_pct,
+    }
+    if (revisingQuoteId.value) {
+      await api.partyQuotes.reviseQuote(revisingQuoteId.value, payload)
+    } else {
+      await api.partyQuotes.sendQuote(quoteFor.value.id, payload)
+    }
+    showQuote.value = false
+    $q.notify({ type: 'positive', message: 'Quote sent.' })
+    await load()
+  } catch (err) {
+    $q.notify({ type: 'negative', message: apiError(err, 'Could not send the quote') })
+  } finally {
+    saving.value = false
+  }
+}
+
+function declineEnquiry(enquiry: PartyQuoteRequest): void {
+  $q.dialog({
+    title: 'Decline this enquiry?',
+    message: 'The family is told you passed, and can ask another provider.',
+    cancel: true,
+    ok: { label: 'Decline', color: 'negative', unelevated: true, noCaps: true },
+  }).onOk(async () => {
+    try {
+      await api.partyQuotes.declineRequest(enquiry.id)
+      await load()
+    } catch (err) {
+      $q.notify({ type: 'negative', message: apiError(err) })
+    }
   })
 }
 
