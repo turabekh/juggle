@@ -198,7 +198,7 @@
 
     <!-- Add package option dialog -->
     <q-dialog v-model="showAddPkg">
-      <q-card style="min-width: 400px; border-radius: 18px">
+      <q-card style="min-width: min(400px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">Add a party option</div></q-card-section>
         <q-card-section class="q-gutter-md">
           <q-select v-model="pkgSel" :options="packageChoices" emit-value map-options outlined dense
@@ -229,7 +229,7 @@
 
     <!-- Custom option dialog -->
     <q-dialog v-model="showCustom">
-      <q-card style="min-width: 380px; border-radius: 18px">
+      <q-card style="min-width: min(380px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">Custom option</div></q-card-section>
         <q-card-section>
           <q-input v-model="customText" outlined dense autofocus maxlength="80"

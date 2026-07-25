@@ -40,7 +40,7 @@
     </EmptyState>
 
     <q-dialog v-model="showCreate">
-      <q-card style="min-width: 360px; border-radius: 18px">
+      <q-card style="min-width: min(360px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">New organisation</div></q-card-section>
         <q-card-section>
           <q-input v-model="newName" outlined dense label="Organisation name" autofocus @keyup.enter="create" />

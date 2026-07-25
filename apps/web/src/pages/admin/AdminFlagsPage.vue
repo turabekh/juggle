@@ -41,7 +41,7 @@
     </EmptyState>
 
     <q-dialog v-model="showEditor">
-      <q-card style="min-width: 400px; border-radius: 18px">
+      <q-card style="min-width: min(400px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">{{ editing ? 'Edit flag' : 'New flag' }}</div>
         </q-card-section>

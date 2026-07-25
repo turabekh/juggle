@@ -110,7 +110,7 @@
 
     <!-- Merge dialog: pick the duplicate (source) to fold into the selected user -->
     <q-dialog v-model="showMerge">
-      <q-card style="min-width: 460px; border-radius: 18px">
+      <q-card style="min-width: min(460px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Merge a duplicate</div>
           <div class="jg-faint text-caption">

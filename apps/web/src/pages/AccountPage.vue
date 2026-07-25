@@ -76,7 +76,7 @@
     </section>
 
     <q-dialog v-model="showInvite">
-      <q-card style="min-width: 360px; border-radius: 18px">
+      <q-card style="min-width: min(360px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Add a co-guardian</div>
           <div class="jg-faint text-caption">They need a Juggle account with this email.</div>
@@ -98,7 +98,7 @@
     </q-dialog>
 
     <q-dialog v-model="showAddChild">
-      <q-card style="min-width: 340px; border-radius: 18px">
+      <q-card style="min-width: min(340px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Add a child</div>
         </q-card-section>

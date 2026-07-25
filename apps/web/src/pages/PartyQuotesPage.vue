@@ -131,7 +131,7 @@
 
     <!-- Brief form -->
     <q-dialog v-model="showForm">
-      <q-card style="min-width: 460px; border-radius: 18px">
+      <q-card style="min-width: min(460px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Request a quote</div>
           <div class="jg-faint text-caption">

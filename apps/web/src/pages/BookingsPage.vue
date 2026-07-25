@@ -95,7 +95,7 @@
 
     <!-- Claim waitlist seat dialog -->
     <q-dialog v-model="showClaim">
-      <q-card style="min-width: 380px; max-width: 460px; border-radius: 18px">
+      <q-card style="min-width: min(380px, 92vw); max-width: 460px; border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Claim your seat</div>
           <div class="jg-faint text-caption">{{ claimEntry?.program_title }}</div>
@@ -121,7 +121,7 @@
 
     <!-- Leave a review dialog -->
     <q-dialog v-model="showReview">
-      <q-card style="min-width: 380px; max-width: 460px; border-radius: 18px">
+      <q-card style="min-width: min(380px, 92vw); max-width: 460px; border-radius: 18px">
         <q-card-section>
           <div class="text-h6">How was it?</div>
           <div class="jg-faint text-caption">

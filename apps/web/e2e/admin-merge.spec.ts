@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { api, loginUI, signup } from './helpers'
+import { API, api, loginUI, signup } from './helpers'
 
 test('admin merges a duplicate account into a primary (§10.2)', async ({ page }) => {
   // A duplicate (source) with a child, and the primary (target) to keep.
@@ -26,7 +26,8 @@ test('admin merges a duplicate account into a primary (§10.2)', async ({ page }
   await expect(page.locator('.q-notification')).toContainText('merged')
 
   // The duplicate can no longer log in; the child moved to the target.
-  const login = await fetch('http://localhost:8000/api/v1/identity/login', {
+  // Use the shared API base, not a hardcoded port — this spec ignored E2E_API_URL.
+  const login = await fetch(`${API}/identity/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email: source.email, password: 'supersecret' }),

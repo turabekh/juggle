@@ -271,7 +271,7 @@
 
     <!-- Add child dialog -->
     <q-dialog v-model="showAddChild">
-      <q-card style="min-width: 340px; border-radius: 18px">
+      <q-card style="min-width: min(340px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Add a child</div>
           <div class="jg-faint text-caption">First name and date of birth only.</div>

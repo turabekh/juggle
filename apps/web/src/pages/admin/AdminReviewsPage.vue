@@ -59,7 +59,7 @@
 
     <!-- Reject reason dialog -->
     <q-dialog v-model="showReject">
-      <q-card style="min-width: 380px; border-radius: 18px">
+      <q-card style="min-width: min(380px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">Reject review</div></q-card-section>
         <q-card-section>
           <q-input

@@ -211,6 +211,12 @@ onMounted(load)
 
 <style scoped>
 .jg-imp-form { display: flex; gap: 12px; align-items: flex-start; }
+
+@media (max-width: 599px) {
+  /* The user search plus a fixed 200px Mode select overflowed the viewport. */
+  .jg-imp-form { flex-direction: column; }
+  .jg-imp-form > :deep(.q-field) { width: 100% !important; }
+}
 .jg-imp-created {
   display: flex;
   align-items: center;

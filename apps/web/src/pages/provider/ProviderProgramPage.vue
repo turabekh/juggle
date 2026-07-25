@@ -79,7 +79,7 @@
 
     <!-- Add session dialog -->
     <q-dialog v-model="showSession">
-      <q-card style="min-width: 420px; border-radius: 18px">
+      <q-card style="min-width: min(420px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">Add session</div></q-card-section>
         <q-card-section class="q-gutter-md">
           <q-select v-model="sessionForm.venue_id" outlined dense :options="venueOptions" emit-value map-options label="Venue" />
@@ -114,7 +114,7 @@
 
     <!-- Duplicate-to-new-dates dialog (PRD §8.2) -->
     <q-dialog v-model="showDuplicate">
-      <q-card style="min-width: 380px; border-radius: 18px">
+      <q-card style="min-width: min(380px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Duplicate to new dates</div>
           <div class="jg-faint text-caption">
@@ -148,7 +148,7 @@
 
     <!-- Add several (bulk over a date range, PRD §8.2) -->
     <q-dialog v-model="showBulk">
-      <q-card style="min-width: 440px; border-radius: 18px">
+      <q-card style="min-width: min(440px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Add several sessions</div>
           <div class="jg-faint text-caption">One session per day from the first date.</div>
@@ -190,7 +190,7 @@
 
     <!-- Roster dialog -->
     <q-dialog v-model="showRoster">
-      <q-card style="min-width: 520px; border-radius: 18px">
+      <q-card style="min-width: min(520px, 92vw); border-radius: 18px">
         <q-card-section class="row items-center">
           <div>
             <div class="text-h6">Roster ({{ roster?.count ?? 0 }})</div>
@@ -234,7 +234,7 @@
 
     <!-- Broadcast (message families) dialog -->
     <q-dialog v-model="showBroadcast">
-      <q-card style="min-width: 460px; max-width: 540px; border-radius: 18px">
+      <q-card style="min-width: min(460px, 92vw); max-width: 540px; border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Message families</div>
           <div class="jg-faint text-caption">

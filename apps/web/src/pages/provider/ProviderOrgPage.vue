@@ -386,7 +386,7 @@
 
     <!-- Tax invoice detail -->
     <q-dialog v-model="showInvoice">
-      <q-card style="min-width: 480px; max-width: 680px; border-radius: 18px">
+      <q-card style="min-width: min(480px, 92vw); max-width: 680px; border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Tax invoice</div>
           <div v-if="invoice" class="jg-faint text-caption">
@@ -454,7 +454,7 @@
 
     <!-- Answer a question dialog -->
     <q-dialog v-model="showAnswer">
-      <q-card style="min-width: 400px; border-radius: 18px">
+      <q-card style="min-width: min(400px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">Answer this question</div></q-card-section>
         <q-card-section>
           <q-input
@@ -474,7 +474,7 @@
 
     <!-- Reply to review dialog -->
     <q-dialog v-model="showReply">
-      <q-card style="min-width: 400px; border-radius: 18px">
+      <q-card style="min-width: min(400px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">Reply to review</div></q-card-section>
         <q-card-section>
           <q-input
@@ -494,7 +494,7 @@
 
     <!-- Add venue dialog -->
     <q-dialog v-model="showVenue">
-      <q-card style="min-width: 380px; border-radius: 18px">
+      <q-card style="min-width: min(380px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">Add venue</div></q-card-section>
         <q-card-section class="q-gutter-md">
           <q-input v-model="venueForm.name" outlined dense label="Venue name" autofocus />
@@ -517,7 +517,7 @@
 
     <!-- New program dialog -->
     <q-dialog v-model="showProgram">
-      <q-card style="min-width: 380px; border-radius: 18px">
+      <q-card style="min-width: min(380px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">New program</div></q-card-section>
         <q-card-section class="q-gutter-md">
           <q-input v-model="programForm.title" outlined dense label="Title" autofocus />
@@ -533,7 +533,7 @@
 
     <!-- New / edit party package dialog -->
     <q-dialog v-model="showParty">
-      <q-card style="min-width: 400px; border-radius: 18px">
+      <q-card style="min-width: min(400px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">{{ editingPartyId ? 'Edit party package' : 'New party package' }}</div>
         </q-card-section>
@@ -569,7 +569,7 @@
 
     <!-- Send / revise a party quote (Milestone C) -->
     <q-dialog v-model="showQuote">
-      <q-card style="min-width: 440px; border-radius: 18px">
+      <q-card style="min-width: min(440px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">{{ revisingQuoteId ? 'Send revised quote' : 'Send a quote' }}</div>
           <div v-if="quoteFor" class="jg-faint text-caption">
@@ -627,7 +627,7 @@
 
     <!-- Add party slots dialog -->
     <q-dialog v-model="showSlots">
-      <q-card style="min-width: 440px; border-radius: 18px">
+      <q-card style="min-width: min(440px, 92vw); border-radius: 18px">
         <q-card-section>
           <div class="text-h6">Add party dates</div>
           <div class="jg-faint text-caption">
@@ -681,7 +681,7 @@
 
     <!-- Add WWCC dialog -->
     <q-dialog v-model="showWwcc">
-      <q-card style="min-width: 360px; border-radius: 18px">
+      <q-card style="min-width: min(360px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">Add WWCC record</div></q-card-section>
         <q-card-section class="q-gutter-md">
           <q-input v-model="wwccForm.staff_name" outlined dense label="Staff member name" autofocus />
@@ -697,7 +697,7 @@
 
     <!-- Add insurance dialog -->
     <q-dialog v-model="showInsurance">
-      <q-card style="min-width: 360px; border-radius: 18px">
+      <q-card style="min-width: min(360px, 92vw); border-radius: 18px">
         <q-card-section><div class="text-h6">Add insurance certificate</div></q-card-section>
         <q-card-section class="q-gutter-md">
           <q-input v-model="insForm.file_ref" outlined dense label="Certificate link / reference" autofocus hint="Paste a link to your certificate" />

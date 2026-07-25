@@ -47,7 +47,7 @@
     </div>
 
     <q-dialog v-model="showHistory">
-      <q-card style="min-width: 380px; border-radius: 18px">
+      <q-card style="min-width: min(380px, 92vw); border-radius: 18px">
         <q-card-section class="row items-center">
           <div class="text-h6">History · <code>{{ historyKey }}</code></div>
           <q-space />
@@ -139,5 +139,16 @@ onMounted(load)
   padding: 14px 18px;
 }
 .jg-setting__edit { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 599px) {
+  /* The description and the 120px input + Save button can't share a row on a
+     phone — they pushed the page into horizontal scroll. Stack them instead. */
+  .jg-setting {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .jg-setting__edit :deep(.q-field) { flex: 1 1 auto; width: auto !important; }
+}
 code { background: #eef0f5; padding: 1px 6px; border-radius: 6px; font-size: 12px; }
 </style>

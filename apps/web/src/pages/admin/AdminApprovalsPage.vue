@@ -81,7 +81,7 @@
 
     <!-- Verification review dialog -->
     <q-dialog v-model="showReview">
-      <q-card style="min-width: 520px; max-width: 600px; border-radius: 18px">
+      <q-card style="min-width: min(520px, 92vw); max-width: 600px; border-radius: 18px">
         <q-card-section class="row items-center">
           <div>
             <div class="text-h6">{{ review?.name }}</div>
