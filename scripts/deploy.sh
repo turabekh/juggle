@@ -16,6 +16,12 @@
 #   scripts/deploy.sh --branch foo    # deploy a different local branch
 #   scripts/deploy.sh --backup        # pg_dump the DB on the VM before deploying
 #   scripts/deploy.sh --logs          # tail api logs after deploy (Ctrl-C to stop)
+#   scripts/deploy.sh --iap           # tunnel SSH/SCP through IAP
+#
+# SSH to the VM is IP-restricted (firewall `kidspots-ssh-allow`), and home IPs move.
+# Rather than reopening the firewall every time yours changes, use --iap: the allowlist
+# already includes Google's IAP range (35.235.240.0/20), so the tunnel works from
+# anywhere you can authenticate. Needs roles/iap.tunnelResourceAccessor.
 #
 # Overridable via environment:
 #   KIDSPOTS_INSTANCE  (default: kidspots)
@@ -40,16 +46,22 @@ REMOTE_TARBALL="juggle-deploy.tar.gz"
 
 DO_BACKUP=false
 TAIL_LOGS=false
+USE_IAP="${KIDSPOTS_USE_IAP:-false}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --branch) BRANCH="${2:?--branch needs a value}"; shift 2 ;;
     --backup) DO_BACKUP=true; shift ;;
     --logs)   TAIL_LOGS=true; shift ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    --iap)    USE_IAP=true; shift ;;
+    -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+# Passed to every gcloud compute ssh/scp call.
+IAP_FLAG=()
+[ "$USE_IAP" = "true" ] && IAP_FLAG=(--tunnel-through-iap)
 
 command -v gcloud >/dev/null 2>&1 || { echo "gcloud CLI not found." >&2; exit 1; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Run from inside the repo." >&2; exit 1; }
@@ -69,13 +81,13 @@ git -C "$REPO_ROOT" archive --format=tar.gz -o "$TARBALL" "$BRANCH"
 echo "    $(du -h "$TARBALL" | cut -f1) tarball"
 
 echo "==> Copying to VM"
-gcloud compute scp "$TARBALL" "${INSTANCE}:~/${REMOTE_TARBALL}" --zone="${ZONE}"
+gcloud compute scp "${IAP_FLAG[@]}" "$TARBALL" "${INSTANCE}:~/${REMOTE_TARBALL}" --zone="${ZONE}"
 
 # ---------------------------------------------------------------------------
 # Remote deploy: extract over the checkout (.env is not in the archive, so it
 # survives), rebuild, restart, then gate on the api container's own healthcheck.
 # ---------------------------------------------------------------------------
-gcloud compute ssh "${INSTANCE}" --zone="${ZONE}" --command="$(cat <<REMOTE
+gcloud compute ssh "${IAP_FLAG[@]}" "${INSTANCE}" --zone="${ZONE}" --command="$(cat <<REMOTE
 set -euo pipefail
 cd "${REPO_DIR}"
 COMPOSE="sudo docker compose -f ${COMPOSE_FILE}"
@@ -129,6 +141,6 @@ echo "   /api/v1/flags            -> ${api}   (expect 401 = alive, auth-gated)"
 
 if [ "$TAIL_LOGS" = "true" ]; then
   echo ">> Tailing api logs (Ctrl-C to stop)"
-  gcloud compute ssh "${INSTANCE}" --zone="${ZONE}" \
+  gcloud compute ssh "${IAP_FLAG[@]}" "${INSTANCE}" --zone="${ZONE}" \
     --command="cd ${REPO_DIR} && sudo docker compose -f ${COMPOSE_FILE} logs -f --tail=20 api"
 fi

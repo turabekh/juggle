@@ -56,13 +56,15 @@
             aria-label="Notifications"
             class="jg-nav__link"
           />
+          <!-- Cart and Sign in are tabs on mobile, so the header drops them there
+               rather than showing the same destination twice. -->
           <q-btn
             flat
             round
             icon="shopping_bag"
             :to="{ name: 'cart' }"
             aria-label="Cart"
-            class="jg-nav__link"
+            class="jg-nav__link gt-xs"
           >
             <q-badge v-if="cart.count > 0" color="secondary" floating rounded>
               {{ cart.count }}
@@ -124,15 +126,35 @@
             color="primary"
             label="Sign in"
             :to="{ name: 'login' }"
-            class="jg-signin"
+            class="jg-signin gt-xs"
           />
         </div>
       </div>
     </q-header>
 
-    <q-page-container>
+    <q-page-container class="jg-main">
       <router-view />
     </q-page-container>
+
+    <!-- Mobile primary nav. The header's `jg-nav` is `gt-xs`, so without this phones
+         have no primary navigation at all — signed-out visitors especially. Pure CSS
+         breakpoints (Quasar's `lt-sm`), so it renders correctly under SSR too. -->
+    <nav class="jg-tabbar lt-sm" aria-label="Primary">
+      <router-link
+        v-for="tab in tabs"
+        :key="tab.key"
+        :to="{ name: tab.route }"
+        class="jg-tabbar__item"
+        :class="{ 'jg-tabbar__item--on': isActive(tab) }"
+        :aria-current="isActive(tab) ? 'page' : undefined"
+      >
+        <span class="jg-tabbar__icon">
+          <q-icon :name="tab.icon" size="23px" />
+          <q-badge v-if="tab.badge" color="secondary" floating rounded>{{ tab.badge }}</q-badge>
+        </span>
+        <span class="jg-tabbar__label">{{ tab.label }}</span>
+      </router-link>
+    </nav>
 
     <q-footer class="jg-footer">
       <div class="jg-footer__inner">
@@ -145,7 +167,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
@@ -153,6 +175,54 @@ import { useCartStore } from '@/stores/cart'
 const auth = useAuthStore()
 const cart = useCartStore()
 const router = useRouter()
+const route = useRoute()
+
+interface Tab {
+  key: string
+  route: string
+  label: string
+  icon: string
+  /** Route names this tab "owns" — a detail page keeps its parent tab lit. */
+  owns: string[]
+  badge?: number
+}
+
+/** Four or five tabs, the native ceiling. Signed-out visitors get Sign in where a
+ *  signed-in parent gets Bookings + Account, so the bar is never a dead end. */
+const tabs = computed<Tab[]>(() => {
+  const discover: Tab = {
+    key: 'discover', route: 'discover', label: 'Discover', icon: 'search',
+    owns: ['discover', 'session', 'planner'],
+  }
+  const parties: Tab = {
+    key: 'parties', route: 'parties', label: 'Parties', icon: 'celebration',
+    owns: ['parties', 'party-package', 'party-plans', 'party-plan-manage', 'party-quotes'],
+  }
+  const cartTab: Tab = {
+    key: 'cart', route: 'cart', label: 'Cart', icon: 'shopping_bag',
+    owns: ['cart', 'checkout'],
+    badge: cart.count > 0 ? cart.count : undefined,
+  }
+  if (!auth.isAuthed) {
+    return [
+      discover, parties, cartTab,
+      { key: 'signin', route: 'login', label: 'Sign in', icon: 'person_outline', owns: ['login', 'signup'] },
+    ]
+  }
+  return [
+    discover,
+    parties,
+    { key: 'bookings', route: 'bookings', label: 'Bookings', icon: 'confirmation_number', owns: ['bookings'] },
+    cartTab,
+    { key: 'account', route: 'account', label: 'Account', icon: 'person', owns: ['account', 'notifications'] },
+  ]
+})
+
+/** Explicit matching rather than router-link-active: `discover` is `/`, which is a
+ *  prefix of every route, so the built-in active class would light it up everywhere. */
+function isActive(tab: Tab): boolean {
+  return tab.owns.includes(String(route.name ?? ''))
+}
 
 const displayName = computed(() => auth.user?.full_name || auth.user?.email?.split('@')[0] || 'You')
 const initials = computed(() => displayName.value.slice(0, 1).toUpperCase())
@@ -239,7 +309,68 @@ async function exitImpersonation(): Promise<void> {
   justify-content: space-between;
   font-size: 13px;
 }
+
+/* --- Mobile bottom tab bar ------------------------------------------------ */
+.jg-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2500; /* above q-footer, below dialogs (6000+) */
+  display: flex;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: saturate(1.4) blur(10px);
+  border-top: 1px solid var(--jg-line);
+  /* Keeps the row 58px tall and lifts it clear of the iOS home indicator. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.jg-tabbar__item {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  text-decoration: none;
+  color: var(--jg-ink-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s ease;
+}
+.jg-tabbar__item--on { color: var(--jg-primary); }
+.jg-tabbar__icon { position: relative; display: inline-flex; }
+.jg-tabbar__label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A short bar above the active tab — the usual "you are here" cue, and it survives
+   for users who can't distinguish the active tint. */
+.jg-tabbar__item--on::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 26px;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: var(--jg-primary);
+}
+.jg-tabbar__item { position: relative; }
+
+@media (prefers-reduced-motion: reduce) {
+  .jg-tabbar__item { transition: none; }
+}
+
 @media (max-width: 599px) {
   .jg-footer__inner { flex-direction: column; gap: 4px; }
+  /* The footer is a sibling of the page container, not inside it, so padding the
+     container alone still leaves the document ending underneath the fixed bar.
+     Padding the footer — the last element — is what actually clears it. */
+  .jg-footer { padding-bottom: var(--jg-tabbar-h); }
 }
 </style>

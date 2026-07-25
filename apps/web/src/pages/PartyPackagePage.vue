@@ -336,7 +336,8 @@ onMounted(async () => {
 }
 .jg-pay {
   position: sticky;
-  bottom: 12px;
+  /* Clear the mobile tab bar (0 on desktop) — this is the deposit CTA. */
+  bottom: calc(12px + var(--jg-tabbar-h, 0px));
 }
 .jg-slot-active {
   background: rgba(25, 118, 210, 0.08);
