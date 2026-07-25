@@ -1009,17 +1009,26 @@ def confirm_booking(
     plan.booking_id = booking.id
     plan.status = PlanStatus.booked
     db.flush()
-    # If the host overrode a real announced winner, tell the guests it changed (edge 4).
-    if (
-        email_gateway is not None and announced_winner is not None
-        and option.id != announced_winner
+    # Close the loop with the guests. Two distinct cases:
+    #   - a real winner was announced and the host overrode it -> change of plans (edge 4);
+    #   - the reveal said "a tie — the host will decide" -> tell them what was decided.
+    # (No email when the host simply books the winner the reveal already announced.)
+    if email_gateway is not None and (
+        announced_winner is None or option.id != announced_winner
     ):
         label = _option_label(db, option)
         for invite in _approved_invites(db, plan.id):
-            notifications_service.notify_planner_change(
-                db, to_email=invite.email, new_label=label,
-                link=_share_link(plan, invite.token), gateway=email_gateway,
-            )
+            link = _share_link(plan, invite.token)
+            if announced_winner is None:
+                notifications_service.notify_planner_final_pick(
+                    db, to_email=invite.email, winner_label=label,
+                    link=link, gateway=email_gateway,
+                )
+            else:
+                notifications_service.notify_planner_change(
+                    db, to_email=invite.email, new_label=label,
+                    link=link, gateway=email_gateway,
+                )
     return plan, booking, intent
 
 
@@ -1114,6 +1123,16 @@ def host_plan_view(db: Session, plan: PartyPlan) -> schemas.PlanView:
         rsvp_yes_headcount=_approved_yes_headcount(db, plan.id),
         deadline_warnings=deadline_warnings(db, plan),
         page=_page_view(plan),
+        limits=_plan_limits(db),
+    )
+
+
+def _plan_limits(db: Session) -> schemas.PlanLimits:
+    """The caps `_sanitise_public_text` will actually apply, read live from config."""
+    return schemas.PlanLimits(
+        page_title_maxlen=config_service.party_planner_page_title_maxlen(db),
+        page_message_maxlen=config_service.party_planner_page_message_maxlen(db),
+        custom_option_maxlen=config_service.party_planner_custom_option_maxlen(db),
     )
 
 

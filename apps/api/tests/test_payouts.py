@@ -3,6 +3,7 @@ to a scheduled payout; an admin releases due payouts; hold/release works."""
 
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -10,6 +11,23 @@ from sqlalchemy.orm import Session
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _org_payouts(
+    client: TestClient, admin: str, *, org_id: str, status: str
+) -> list[dict[str, Any]]:
+    """The admin payout list, narrowed to one organisation.
+
+    ``GET /admin/payouts`` is deliberately global, and the dev database is shared —
+    it carries committed payouts from seeds and earlier sessions. Asserting on the
+    unfiltered list ("no scheduled payouts exist") therefore tests the state of the
+    whole DB rather than the behaviour under test. Every assertion scopes to the org
+    the test just created.
+    """
+    rows = client.get(
+        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": status}
+    ).json()
+    return [p for p in rows if p["organisation_id"] == org_id]
 
 
 def _signup(client: TestClient) -> str:
@@ -204,9 +222,7 @@ def test_refund_before_release_claws_back_scheduled_payout(
         starts="2027-12-01T01:00:00Z", ends="2027-12-01T07:00:00Z",  # future → still scheduled
     )
     payment_id = _book_confirm(client, guardian, session_id)
-    scheduled = client.get(
-        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "scheduled"}
-    ).json()
+    scheduled = _org_payouts(client, admin, org_id=org_id, status="scheduled")
     assert any(p["amount_cents"] == 8900 for p in scheduled)
 
     refund = client.post(
@@ -215,12 +231,8 @@ def test_refund_before_release_claws_back_scheduled_payout(
     )
     assert refund.status_code == 200
     # The provider hadn't been paid → the scheduled payout is decremented to zero (reversed).
-    assert client.get(
-        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "scheduled"}
-    ).json() == []
-    reversed_ = client.get(
-        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "reversed"}
-    ).json()
+    assert _org_payouts(client, admin, org_id=org_id, status="scheduled") == []
+    reversed_ = _org_payouts(client, admin, org_id=org_id, status="reversed")
     assert len(reversed_) == 1 and reversed_[0]["amount_cents"] == 0
 
 
@@ -329,56 +341,55 @@ def test_clawback_is_exact_after_a_fee_config_change(
 
 def test_admin_runs_due_payouts(client: TestClient, make_admin: Callable[[], str]) -> None:
     owner, guardian, admin = _signup(client), _signup(client), make_admin()
-    _, session_id = _org_with_session(
+    org_id, session_id = _org_with_session(
         client, owner, price_cents=8000, starts="2026-01-05T01:00:00Z", ends="2026-01-05T07:00:00Z"
     )
     _book_and_pay(client, guardian, session_id)
 
     run = client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
     assert run.status_code == 200
-    assert run.json()["released"] == 1
-    assert run.json()["total_cents"] == 7120  # 8000 − 10% fee − GST on the fee (ADR-0002)
+    # The run is a global sweep, so other due payouts in the shared DB may ride along;
+    # what this test owns is that ITS payout moved scheduled → paid at the right amount.
+    assert run.json()["released"] >= 1
 
-    # Now it's paid, not scheduled.
-    scheduled = client.get(
-        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "scheduled"}
-    ).json()
-    assert scheduled == []
-    paid = client.get(
-        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "paid"}
-    ).json()
-    assert any(p["amount_cents"] == 7120 for p in paid)
+    assert _org_payouts(client, admin, org_id=org_id, status="scheduled") == []
+    paid = _org_payouts(client, admin, org_id=org_id, status="paid")
+    # 8000 − 10% fee − GST on the fee (ADR-0002).
+    assert [p["amount_cents"] for p in paid] == [7120]
 
 
 def test_future_payout_not_released(client: TestClient, make_admin: Callable[[], str]) -> None:
     owner, guardian, admin = _signup(client), _signup(client), make_admin()
     # Session far in the future → payout not yet due.
-    _, session_id = _org_with_session(
+    org_id, session_id = _org_with_session(
         client, owner, price_cents=5000, starts="2027-12-01T01:00:00Z", ends="2027-12-01T07:00:00Z"
     )
     _book_and_pay(client, guardian, session_id)
-    run = client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
-    assert run.json()["released"] == 0
+    client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
+    # Still scheduled after the sweep — T+2 hasn't arrived for this session.
+    assert len(_org_payouts(client, admin, org_id=org_id, status="scheduled")) == 1
+    assert _org_payouts(client, admin, org_id=org_id, status="paid") == []
 
 
 def test_hold_blocks_release(client: TestClient, make_admin: Callable[[], str]) -> None:
     owner, guardian, admin = _signup(client), _signup(client), make_admin()
-    _, session_id = _org_with_session(
+    org_id, session_id = _org_with_session(
         client, owner, price_cents=6000, starts="2026-01-05T01:00:00Z", ends="2026-01-05T07:00:00Z"
     )
     _book_and_pay(client, guardian, session_id)
-    scheduled = client.get(
-        "/api/v1/admin/payouts", headers=_auth(admin), params={"status": "scheduled"}
-    ).json()
+    # Scoped: picking scheduled[0] off the global list could hold a seed payout.
+    scheduled = _org_payouts(client, admin, org_id=org_id, status="scheduled")
+    assert len(scheduled) == 1
     payout_id = scheduled[0]["id"]
 
     client.post(f"/api/v1/admin/payouts/{payout_id}/hold", headers=_auth(admin))
-    run = client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
-    assert run.json()["released"] == 0  # held payouts aren't paid
+    client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
+    assert _org_payouts(client, admin, org_id=org_id, status="paid") == []  # held → not paid
 
     client.post(f"/api/v1/admin/payouts/{payout_id}/release", headers=_auth(admin))
-    run = client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
-    assert run.json()["released"] == 1
+    client.post("/api/v1/admin/payouts/run", headers=_auth(admin))
+    paid = _org_payouts(client, admin, org_id=org_id, status="paid")
+    assert [p["id"] for p in paid] == [payout_id]
 
 
 def test_payouts_require_membership(client: TestClient) -> None:

@@ -63,13 +63,23 @@ your safety net for abuse, PII, or off-topic content.
 
 Search users by email or name, then per user:
 - **Booking history** — look up a user's bookings to help with support (PRD §10.2).
+- **Suspend / reinstate** — block an account (fraud, abuse, chargebacks) without touching any data.
+  The effect is immediate and total: they are signed out of every device, an already-issued token
+  stops working on its next request, and they can neither refresh nor sign in again. Reinstating
+  restores the account exactly as it was — they just sign in fresh. You are asked for a reason, and
+  it is written to the audit trail.
 - **Delete account (APP)** — action an Australian Privacy Principles data-erasure request. This
   permanently removes the account and personal data.
 - **Merge duplicates** — fold a duplicate account into the primary one (the duplicate is
   deactivated, the primary kept).
 
-> **Guardrail:** admin accounts are **protected** — they cannot be data-deleted or merged. The UI
-> hides those controls for admin accounts and the API refuses (409).
+> **Suspension vs deletion:** suspension is a reversible access decision; deletion is an
+> irreversible privacy action. A data-deleted account can no longer be suspended or reinstated
+> (the API returns 409) — there is nothing left to restore.
+
+> **Guardrail:** admin accounts are **protected** — they cannot be suspended, data-deleted, or
+> merged, and you cannot suspend yourself. The UI hides those controls and the API refuses (409).
+> Admin access is granted and revoked at the database level by design (see Appendix A).
 
 ---
 
@@ -256,7 +266,8 @@ See `docs/DEPLOY-kidspots.md §7` for the deployment context.
 - **Config:** every change is bounded, versioned, and audited — no deploy needed.
 - **Impersonation:** view-as is read-only, act-as is fully audited, never self/admin, time-boxed,
   token can't refresh, can't escalate.
-- **Users:** admin accounts are protected from deletion and merge.
+- **Users:** admin accounts are protected from suspension, deletion and merge; suspension is
+  reversible and immediate everywhere, deletion is not reversible at all.
 - **Payouts:** skipped safely when a provider isn't payouts-enabled; hold/release under your control.
 - **Everything consequential is in the Audit log** with the true actor.
 

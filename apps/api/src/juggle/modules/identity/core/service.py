@@ -452,6 +452,39 @@ def add_child(session: Session, *, guardian_id: uuid.UUID, data: ChildCreate) ->
     return child
 
 
+class AccountDeleted(Exception):
+    """A data-deleted account cannot be suspended or reinstated — §10.2 deletion is
+    irreversible, and the row no longer carries the PII a real account needs."""
+
+
+def set_account_status(
+    session: Session, *, user_id: uuid.UUID, status: UserStatus
+) -> UserAccount | None:
+    """Move an account between ``active`` and ``suspended``.
+
+    Suspension is enforced in three places already — ``authenticate`` refuses a
+    login, ``rotate_refresh_token`` refuses a refresh, and ``deps`` re-checks live
+    status on *every* request — so this only has to flip the column and pull the
+    live sessions. Revoking the refresh tokens is what makes it immediate rather
+    than eventual: the access token dies on its next request, and there is nothing
+    left to mint a new one with.
+
+    ``deleted`` is a terminal state in both directions (raises ``AccountDeleted``).
+    """
+    if status is UserStatus.deleted:
+        raise AccountDeleted("use delete_account for §10.2 deletion")
+    user = session.get(UserAccount, user_id)
+    if user is None:
+        return None
+    if user.status is UserStatus.deleted:
+        raise AccountDeleted(str(user_id))
+    user.status = status
+    if status is UserStatus.suspended:
+        revoke_all_refresh_tokens(session, user_id=user_id)
+    session.flush()
+    return user
+
+
 def deactivate_account(session: Session, *, user_id: uuid.UUID) -> bool:
     """Anonymise + disable a login (no PII, can't authenticate). Keeps the row —
     bookings/audit reference it. Shared by delete (§10.2) and merge. No audit."""

@@ -861,6 +861,16 @@ export const api = {
     async deleteUser(userId: string): Promise<void> {
       await http.post(`/admin/users/${userId}/delete`)
     },
+    async suspendUser(userId: string, reason: string | null): Promise<UserSummary> {
+      const { data } = await http.post<UserSummary>(`/admin/users/${userId}/suspend`, { reason })
+      return data
+    },
+    async reinstateUser(userId: string): Promise<UserSummary> {
+      const { data } = await http.post<UserSummary>(`/admin/users/${userId}/reinstate`, {
+        reason: null,
+      })
+      return data
+    },
     async mergeUsers(sourceId: string, targetId: string): Promise<void> {
       await http.post('/admin/users/merge', { source_id: sourceId, target_id: targetId })
     },

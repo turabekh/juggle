@@ -79,9 +79,14 @@ class PagePatchIn(BaseModel):
     title/message are untrusted host text (sanitised server-side), template/hero_avatar/widgets are
     validated against closed allow-lists."""
 
+    # These outer bounds are a payload-size guard, not the product rule — the real caps are
+    # `party_planner_page_{title,message}_maxlen` in config and the service truncates to them.
+    # They are set to the *upper bound of those config specs* (120 / 1000) so that anything an
+    # admin could legitimately configure truncates cleanly; before, a 200-char title fell in the
+    # gap and 422'd while a 100-char one silently truncated.
     template: str = Field(default="default", max_length=40)
-    title: str = Field(default="", max_length=200)
-    message: str = Field(default="", max_length=2000)
+    title: str = Field(default="", max_length=120)
+    message: str = Field(default="", max_length=1000)
     hero_avatar: str | None = Field(default=None, max_length=40)
     widgets: list[str] = Field(default_factory=list, max_length=16)
 
@@ -142,6 +147,18 @@ class HostInviteView(BaseModel):
     avatar_key: str | None = None
 
 
+class PlanLimits(BaseModel):
+    """The live `config` caps the server will apply to host-authored text (INV-11).
+
+    Echoed to the host so the editor's counters follow the runtime setting instead of
+    duplicating the numbers client-side and drifting when an admin changes them.
+    """
+
+    page_title_maxlen: int
+    page_message_maxlen: int
+    custom_option_maxlen: int
+
+
 class PlanView(BaseModel):
     """Host-facing view — includes the approval queue + board, never votes-by-invite."""
 
@@ -159,6 +176,7 @@ class PlanView(BaseModel):
     invites: list[HostInviteView]
     rsvp_yes_headcount: int
     page: PartyPageView
+    limits: PlanLimits
     deadline_warnings: list[str] = []
     # Transient — populated only by the confirm response so the host can settle the deposit
     # (live: mount the Payment Element; dev: dev-confirm the booking).

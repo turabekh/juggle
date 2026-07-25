@@ -12,6 +12,7 @@ from juggle.deps import CurrentAdmin
 from juggle.modules.admin.core import schemas, service
 from juggle.modules.booking.core.schemas import BookingOut, OrderOut
 from juggle.modules.catalog.core import service as catalog_service
+from juggle.modules.identity.core import service as identity_service
 from juggle.modules.org.core.models import OrgStatus, VerificationStatus
 from juggle.modules.org.core.schemas import InsuranceOut, WwccOut
 from juggle.modules.payments.core.gateway import PaymentGateway, get_payment_gateway
@@ -66,6 +67,57 @@ def delete_user(user_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep) ->
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Admin accounts cannot be data-deleted here"
         ) from exc
+
+
+@router.post("/users/{user_id}/suspend", response_model=schemas.UserSummary)
+def suspend_user(
+    user_id: uuid.UUID,
+    payload: schemas.SuspendUserIn,
+    admin: CurrentAdmin,
+    session: SessionDep,
+) -> schemas.UserSummary:
+    """Suspend an account: no login, no refresh, and open sessions die on their next
+    request. Reversible — unlike §10.2 deletion it touches no PII. Audited."""
+    try:
+        user = service.suspend_user(
+            session, user_id=user_id, actor_id=admin.user_id, reason=payload.reason
+        )
+    except service.UserNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found") from exc
+    except service.CannotSuspendSelf as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "You cannot suspend your own account"
+        ) from exc
+    except service.CannotSuspendAdmin as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Admin accounts cannot be suspended here"
+        ) from exc
+    except identity_service.AccountDeleted as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This account has been data-deleted"
+        ) from exc
+    return schemas.UserSummary.model_validate(user)
+
+
+@router.post("/users/{user_id}/reinstate", response_model=schemas.UserSummary)
+def reinstate_user(
+    user_id: uuid.UUID,
+    payload: schemas.SuspendUserIn,
+    admin: CurrentAdmin,
+    session: SessionDep,
+) -> schemas.UserSummary:
+    """Lift a suspension. Audited."""
+    try:
+        user = service.reinstate_user(
+            session, user_id=user_id, actor_id=admin.user_id, reason=payload.reason
+        )
+    except service.UserNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found") from exc
+    except identity_service.AccountDeleted as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This account has been data-deleted"
+        ) from exc
+    return schemas.UserSummary.model_validate(user)
 
 
 @router.post("/users/merge", status_code=status.HTTP_204_NO_CONTENT)

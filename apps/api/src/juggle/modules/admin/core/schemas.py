@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from juggle.modules.org.core.schemas import InsuranceOut, WwccOut
 
@@ -28,6 +28,11 @@ class UserSummary(BaseModel):
     email: str
     full_name: str | None
     is_admin: bool
+    status: str
+
+
+class SuspendUserIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class MergeUsersIn(BaseModel):

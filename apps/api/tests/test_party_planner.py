@@ -680,6 +680,95 @@ def test_override_emails_change_of_plans(
                for m in gw.outbox)
 
 
+def test_plan_view_echoes_the_live_config_limits(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    """The editor's counters read these, so they must track config, not a duplicated constant."""
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    pid = _build_open_plan(client, host, package_id, slots)["id"]
+
+    limits = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()["limits"]
+    assert limits["page_title_maxlen"] == 60  # config default
+    assert limits["page_message_maxlen"] == 280
+
+    config_service.set_value(
+        db, key=config_service.KEY_PARTY_PLANNER_PAGE_TITLE_MAXLEN, value=25, changed_by_id=None
+    )
+    db.flush()
+    limits = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()["limits"]
+    assert limits["page_title_maxlen"] == 25
+
+    # And the server actually truncates to the new cap rather than rejecting.
+    saved = client.put(
+        f"{PREFIX}/plans/{pid}/page", headers=_auth(host),
+        json={"template": "dino", "title": "x" * 100, "message": "", "widgets": []},
+    )
+    assert saved.status_code == 200
+    assert len(saved.json()["page"]["title"]) == 25
+
+
+def _approve_without_voting(client: TestClient, pid: str, token: str, host: str, *,
+                            email: str) -> str:
+    """RSVP + approve a guest but cast no vote — leaves every option tied at 0."""
+    inv = _rsvp(client, token, email=email)
+    view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
+    client.post(f"{PREFIX}/plans/{pid}/invites/{view['invites'][0]['id']}/approve",
+                headers=_auth(host))
+    return inv
+
+
+def test_tie_then_host_pick_emails_the_final_choice(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    """After an unbroken tie the reveal says "the host will decide" — the guests must be
+    told what was actually decided. The change-of-plans notice can't cover this: it only
+    fires when a *real* announced winner is overridden."""
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots, custom=False)  # no ranking
+    pid, token = opened["id"], opened["share_token"]
+    _approve_without_voting(client, pid, token, host, email="tied@example.com")
+
+    plan = db.get(PartyPlan, uuid.UUID(pid))
+    assert plan is not None
+    _resolve(db, datetime.now(UTC) + timedelta(days=3))
+    db.refresh(plan)
+    assert plan.winning_option_id is None  # genuine tie
+
+    view = client.get(f"{PREFIX}/plans/{pid}", headers=_auth(host)).json()
+    opt = next(o["id"] for o in view["options"] if o["kind"] == "package")
+    gw = FakeEmailGateway()
+    planner_service.confirm_booking(
+        db, plan_id=uuid.UUID(pid), actor_id=plan.host_user_id, gateway=FakeGateway(),
+        option_id=uuid.UUID(opt), headcount=10, email_gateway=gw,
+    )
+    picked = [m for m in gw.outbox if m["to"] == "tied@example.com"]
+    assert len(picked) == 1
+    assert "picked" in (picked[0]["subject"] or "").lower()
+
+
+def test_booking_the_announced_winner_sends_no_further_email(
+    client: TestClient, db: Session, flag_on: None
+) -> None:
+    """The reveal already told them this option won — don't email the same news twice."""
+    host = _signup(client)
+    package_id, slots = _package_with_slots(client, host)
+    opened = _build_open_plan(client, host, package_id, slots)
+    pid, token = opened["id"], opened["share_token"]
+    _inv, winner_opt = _approve_and_vote(client, pid, token, host, email="quiet@example.com")
+    _resolve(db, datetime.now(UTC) + timedelta(days=3))
+
+    plan = db.get(PartyPlan, uuid.UUID(pid))
+    assert plan is not None and plan.winning_option_id == uuid.UUID(winner_opt)
+    gw = FakeEmailGateway()
+    planner_service.confirm_booking(
+        db, plan_id=uuid.UUID(pid), actor_id=plan.host_user_id, gateway=FakeGateway(),
+        headcount=10, email_gateway=gw,
+    )
+    assert gw.outbox == []
+
+
 def test_low_rsvp_nudge_fires_once(client: TestClient, db: Session, flag_on: None) -> None:
     host = _signup(client)
     package_id, slots = _package_with_slots(client, host)

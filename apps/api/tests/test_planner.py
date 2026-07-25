@@ -3,7 +3,8 @@
 import sys
 import types
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,11 +23,32 @@ from juggle.modules.planner.core.schemas import (
     PlanRequest,
 )
 
-# Future (relative to the seed clock) Perth-morning sessions on distinct days.
-MON = ("2026-07-20T01:00:00Z", "2026-07-20T03:00:00Z")
-TUE = ("2026-07-21T01:00:00Z", "2026-07-21T03:00:00Z")
-WED_A = ("2026-07-22T01:00:00Z", "2026-07-22T03:00:00Z")
-WED_B = ("2026-07-22T02:00:00Z", "2026-07-22T04:00:00Z")  # overlaps WED_A
+PERTH = ZoneInfo("Australia/Perth")
+
+
+def _window(days_ahead: int, *, start_hour: int = 9, hours: int = 2) -> tuple[datetime, datetime]:
+    """A Perth-morning session window `days_ahead` from today, as aware UTC datetimes.
+
+    Relative, never hardcoded: ``search_sessions`` filters ``starts_at >= now``, so a
+    fixed calendar date silently expires and the whole planner suite starts failing on
+    a date boundary rather than on a real defect. Morning windows keep the Perth and
+    UTC calendar dates identical (09:00 Perth = 01:00 UTC), which matters because the
+    search date filter bounds on UTC days (INV-7).
+    """
+    day = datetime.now(PERTH).date() + timedelta(days=days_ahead)
+    starts_at = datetime.combine(day, time(start_hour), tzinfo=PERTH).astimezone(UTC)
+    return starts_at, starts_at + timedelta(hours=hours)
+
+
+# Future Perth-morning sessions on distinct days.
+DAY_1 = _window(1)
+DAY_2 = _window(2)
+DAY_3_A = _window(3)
+DAY_3_B = _window(3, start_hour=10)  # overlaps DAY_3_A
+
+# A brief window wide enough to contain all of the above.
+PLAN_FROM = datetime.now(PERTH).date()
+PLAN_TO = PLAN_FROM + timedelta(days=5)
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -48,7 +70,7 @@ def _publish(
     suburb: str,
     category: str = "art",
     price_cents: int = 5000,
-    window: tuple[str, str],
+    window: tuple[datetime, datetime],
 ) -> str:
     org_id = client.post(
         "/api/v1/org", headers=_auth(token), json={"name": f"Org {uuid.uuid4().hex[:5]}"}
@@ -76,8 +98,8 @@ def _publish(
         headers=_auth(token),
         json={
             "venue_id": venue_id,
-            "starts_at": starts_at,
-            "ends_at": ends_at,
+            "starts_at": starts_at.isoformat(),
+            "ends_at": ends_at.isoformat(),
             "capacity": 10,
             "price_cents": price_cents,
             "age_min": 5,
@@ -102,8 +124,8 @@ def _suburb() -> str:
 def _brief(suburb: str, **over: object) -> PlanRequest:
     base: dict[str, object] = {
         "ages": [8],
-        "date_from": date(2026, 7, 20),
-        "date_to": date(2026, 7, 25),
+        "date_from": PLAN_FROM,
+        "date_to": PLAN_TO,
         "suburb": suburb,
     }
     base.update(over)
@@ -126,7 +148,11 @@ def test_plan_endpoint_is_flag_gated(client: TestClient) -> None:
     resp = client.post(
         "/api/v1/planner/plan",
         headers=_auth(token),
-        json={"ages": [8], "date_from": "2026-07-20", "date_to": "2026-07-25"},
+        json={
+            "ages": [8],
+            "date_from": PLAN_FROM.isoformat(),
+            "date_to": PLAN_TO.isoformat(),
+        },
     )
     assert resp.status_code == 404  # flag off
 
@@ -135,20 +161,25 @@ def test_plan_builds_from_live_sessions(client: TestClient, db: Session) -> None
     token = _signup(client)
     _enable(db)
     suburb = _suburb()
-    s_mon = _publish(client, token, title="Monday Art", suburb=suburb, window=MON)
-    s_tue = _publish(
-        client, token, title="Tuesday Sport", suburb=suburb, category="sport", window=TUE
+    s_day1 = _publish(client, token, title="Day One Art", suburb=suburb, window=DAY_1)
+    s_day2 = _publish(
+        client, token, title="Day Two Sport", suburb=suburb, category="sport", window=DAY_2
     )
 
     resp = client.post(
         "/api/v1/planner/plan",
         headers=_auth(token),
-        json={"ages": [8], "date_from": "2026-07-20", "date_to": "2026-07-25", "suburb": suburb},
+        json={
+            "ages": [8],
+            "date_from": PLAN_FROM.isoformat(),
+            "date_to": PLAN_TO.isoformat(),
+            "suburb": suburb,
+        },
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     ids = {it["session"]["session_id"] for day in body["days"] for it in day["items"]}
-    assert {s_mon, s_tue} <= ids
+    assert {s_day1, s_day2} <= ids
     assert body["generated_by"] == "rules"
     assert body["total_cents"] == 10000
 
@@ -159,7 +190,7 @@ def test_plan_builds_from_live_sessions(client: TestClient, db: Session) -> None
 def test_hallucinated_session_is_dropped(client: TestClient, db: Session) -> None:
     token = _signup(client)
     suburb = _suburb()
-    real = _publish(client, token, title="Real", suburb=suburb, window=MON)
+    real = _publish(client, token, title="Real", suburb=suburb, window=DAY_1)
     draft = PlanDraft(
         items=[
             PlanDraftItem(session_id=uuid.UUID(real), for_ages=[8], reason="real"),
@@ -175,8 +206,12 @@ def test_hallucinated_session_is_dropped(client: TestClient, db: Session) -> Non
 def test_overlapping_and_over_budget_picks_are_pruned(client: TestClient, db: Session) -> None:
     token = _signup(client)
     suburb = _suburb()
-    a = _publish(client, token, title="Wed A", suburb=suburb, price_cents=4000, window=WED_A)
-    b = _publish(client, token, title="Wed B", suburb=suburb, price_cents=4000, window=WED_B)
+    a = _publish(
+        client, token, title="Day Three A", suburb=suburb, price_cents=4000, window=DAY_3_A
+    )
+    b = _publish(
+        client, token, title="Day Three B", suburb=suburb, price_cents=4000, window=DAY_3_B
+    )
     draft = PlanDraft(
         items=[
             PlanDraftItem(session_id=uuid.UUID(a), for_ages=[8], reason="a"),
@@ -186,7 +221,7 @@ def test_overlapping_and_over_budget_picks_are_pruned(client: TestClient, db: Se
     )
     out = service.build_plan(db, request=_brief(suburb), gateway=_FakeGateway(draft))
     picks = [it for day in out.days for it in day.items]
-    assert len(picks) == 1  # WED_B overlaps WED_A → one survives
+    assert len(picks) == 1  # DAY_3_B overlaps DAY_3_A → one survives
 
     # Budget below a single session prunes everything.
     broke = service.build_plan(
@@ -202,7 +237,7 @@ def _publish_multi(
     *,
     title: str,
     suburb: str,
-    windows: list[tuple[str, str]],
+    windows: list[tuple[datetime, datetime]],
     category: str = "art",
 ) -> tuple[str, list[str]]:
     """One program with several sessions (same program_id) on different days."""
@@ -233,8 +268,8 @@ def _publish_multi(
             headers=_auth(token),
             json={
                 "venue_id": venue_id,
-                "starts_at": starts_at,
-                "ends_at": ends_at,
+                "starts_at": starts_at.isoformat(),
+                "ends_at": ends_at.isoformat(),
                 "capacity": 10,
                 "price_cents": 5000,
                 "age_min": 5,
@@ -254,16 +289,16 @@ def test_rule_based_plan_varies_activities_across_days(
     token = _signup(client)
     _enable(db)
     suburb = _suburb()
-    # "Repeaty" runs Mon + Tue; "Variety" runs Tue only.
-    _publish_multi(client, token, title="Repeaty", suburb=suburb, windows=[MON, TUE])
+    # "Repeaty" runs on day 1 + day 2; "Variety" runs on day 2 only.
+    _publish_multi(client, token, title="Repeaty", suburb=suburb, windows=[DAY_1, DAY_2])
     _, variety_sessions = _publish_multi(
-        client, token, title="Variety", suburb=suburb, windows=[TUE], category="sport"
+        client, token, title="Variety", suburb=suburb, windows=[DAY_2], category="sport"
     )
 
     out = service.build_plan(db, request=_brief(suburb), gateway=RuleBasedPlannerGateway())
     titles = {it.session.title for day in out.days for it in day.items}
     ids = {str(it.session.session_id) for day in out.days for it in day.items}
-    # Tuesday should switch to "Variety" rather than repeat "Repeaty".
+    # Day 2 should switch to "Variety" rather than repeat "Repeaty".
     assert titles == {"Repeaty", "Variety"}
     assert variety_sessions[0] in ids
 
@@ -271,7 +306,7 @@ def test_rule_based_plan_varies_activities_across_days(
 def test_rule_based_gateway_needs_no_llm(client: TestClient, db: Session) -> None:
     token = _signup(client)
     suburb = _suburb()
-    _publish(client, token, title="Solo", suburb=suburb, window=MON)
+    _publish(client, token, title="Solo", suburb=suburb, window=DAY_1)
     out = service.build_plan(db, request=_brief(suburb), gateway=RuleBasedPlannerGateway())
     assert out.candidate_count >= 1
     assert out.summary  # deterministic, non-empty
@@ -289,8 +324,8 @@ def _candidate(**over: object) -> CandidateSession:
         organisation_name="Org",
         venue_name="Venue",
         suburb="Perth",
-        starts_at=datetime(2026, 7, 20, 1, 0, tzinfo=UTC),
-        ends_at=datetime(2026, 7, 20, 3, 0, tzinfo=UTC),
+        starts_at=DAY_1[0],
+        ends_at=DAY_1[1],
         price_cents=5000,
         age_min=5,
         age_max=12,
@@ -335,7 +370,7 @@ def test_anthropic_gateway_composes_from_parsed_output(
         api_key="k", model="claude-opus-4-8", fallback=RuleBasedPlannerGateway()
     )
     result = gateway.compose(
-        PlanRequest(ages=[8], date_from=date(2026, 7, 20), date_to=date(2026, 7, 25)), [cand]
+        PlanRequest(ages=[8], date_from=PLAN_FROM, date_to=PLAN_TO), [cand]
     )
     assert result.summary == "An AI-composed day out."
     assert [i.session_id for i in result.items] == [cand.session_id]
@@ -352,7 +387,7 @@ def test_anthropic_gateway_falls_back_on_error(monkeypatch: pytest.MonkeyPatch) 
         api_key="k", model="claude-opus-4-8", fallback=RuleBasedPlannerGateway()
     )
     result = gateway.compose(
-        PlanRequest(ages=[8], date_from=date(2026, 7, 20), date_to=date(2026, 7, 25)), [cand]
+        PlanRequest(ages=[8], date_from=PLAN_FROM, date_to=PLAN_TO), [cand]
     )
     # Degrades to the deterministic gateway, which still picks the live candidate.
     assert [i.session_id for i in result.items] == [cand.session_id]
