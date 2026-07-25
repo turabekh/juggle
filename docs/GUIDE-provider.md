@@ -1,7 +1,7 @@
 # Provider Guide — kidspots.store
 
-> **Note:** parents and admins now have long-form manuals in [`manuals/`](manuals/).
-> There is no provider manual yet — this guide remains the provider reference.
+> **Looking for the full manual?** This is the short orientation guide.
+> [`manuals/provider-manual.md`](manuals/provider-manual.md) is the comprehensive version.
 
 
 **Who this is for:** activity providers — the businesses and organisers who list kids'
