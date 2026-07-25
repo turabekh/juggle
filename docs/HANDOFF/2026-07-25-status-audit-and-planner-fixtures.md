@@ -1,0 +1,163 @@
+# Handoff — 2026-07-25 — Status audit, prod reality-check, planner test fixtures
+
+Session on branch **`fix/planner-test-date-fixtures`** (base `main` @ `b2645e2`, nothing pushed).
+Read `CLAUDE.md`, then this file. The prior handoff (`2026-07-19-planner-polish-ai-auth-hardening.md`)
+is **stale in one important way**: it says its work was unmerged on `feat/party-planner`. It merged
+that afternoon (PR #9), and **ten more PRs landed on 2026-07-19…21 with no handoff written**. §2
+below is the missing record.
+
+---
+
+## 1. TL;DR
+
+- **Juggle is live in production at https://kidspots.store**, serving **request-time SSR** (verified:
+  fully rendered markup + `window.__PINIA__` in the response), with the API on `/api/v1/*`.
+- **Two live hazards found by inspection** (§4): prod runs the **`FakeGateway`** (no Stripe keys), so a
+  real checkout there confirms a booking and accrues a payout against money never collected; and the
+  **backend test suite was calling the real Claude API** on every run because `JUGGLE_ANTHROPIC_API_KEY`
+  is now set in `.env`. The second is fixed here; the first is a decision for the next session.
+- **Fixed:** the 5 planner test failures — hardcoded `2026-07-20 → 2026-07-25` fixtures that expired on
+  the calendar, not a regression — plus the live-API leak that hid behind them.
+- **State:** `make check` = ruff + mypy strict + import-linter clean, **300 passed, 2 failed** — the
+  2 being the known pre-existing shared-DB payout pollution, unchanged and unrelated.
+
+New commits: `aaff682` fix(tests) planner date fixtures + planner-gateway override.
+
+---
+
+## 2. The missing record — PRs #10–#20 (2026-07-19 → 07-21)
+
+Ten PRs merged to `main` after the last handoff was written. In order:
+
+| PR | Commit | What |
+| --- | --- | --- |
+| #10 | `94839bc` | **fix(web): close impersonation fail-open + reload logout (INV-10).** The admin's *refresh* token is now pulled out of play for the duration of an impersonation (backed up to `juggle.adminRefresh`, nulled in memory/storage, restored on exit). The api layer already refused to refresh an impersonation session, but that guard is a client-side JWT decode — nulling the refresh token is the fail-closed backstop. Closes the prior handoff's last open item. |
+| #11 | `208bd08` | **chore(deploy): target kidspots.store apex + run sheet** — `docs/DEPLOY-kidspots.md` (VM, firewall, Namecheap apex A record, admin promotion), `.env.production.example`. |
+| #12 | `fec8cf4` | **fix(settings): don't crash resolving repo root in a shallow container tree.** |
+| #13 | `c9321f6` | **docs: admin / provider / parent user guides** (`docs/GUIDE-{admin,provider,user}.md`, ~740 lines). |
+| #14 | `83c1585` | **chore(deploy): `scripts/deploy.sh`** for the GCE VM. |
+| #15 | `15b9927` | **fix(deploy): archive-push model + container healthcheck gate.** The repo is private and the VM has no GitHub credentials, so deploys **ship a `git archive` tarball** of a local branch and extract it over the VM checkout — there is no `git pull` on the VM. The VM's `.env` is never in the archive. |
+| #16 | `dc3f53a` | **chore(seed): `apps/api/scripts/seed_prod_catalog.py`** — catalog-only, production-safe supply data (1 org, 3 venues, 5 programs, 3 party packages). Creates no admin, no families/bookings, changes no flags; idempotent (INV-9). |
+| #17 | `e0685b3` | **feat(notifications): real SMTP email gateway behind the Protocol.** `SmtpEmailGateway` (Postmark/SES/any), selected when `JUGGLE_EMAIL_SMTP_HOST` + `JUGGLE_EMAIL_FROM_ADDRESS` are set, else the fake. stdlib `smtplib`, imported lazily. Tests in `test_email_gateway.py`. |
+| #18 | `39a5fe2` | **chore(ops): `scripts/kidspots-backup.sh` + `kidspots-restore-test.sh`** + `DEPLOY.md §9`. |
+| #19 | `be63885` | **feat(web): unblock request-time SSR — no Quasar-CLI migration.** `@quasar/vite-plugin` has a built-in `runMode: 'ssr-server'`; older handoffs claiming SSR needed a CLI migration were **wrong**. Per-page meta + Event JSON-LD render server-side; SEO pages use `onServerPrefetch`. |
+| #20 | `0e52d13` | **feat(deploy): serve SSR in production.** Caddy now reverse-proxies `/api/*` → api:8000 and everything else → the **`ssr` node service (`server.mjs`, :5173)**, which renders HTML and serves `dist/client`, with an SPA-shell fallback on SSR error. |
+
+Prod topology is now: `db → migrate (one-shot alembic) → api + worker → ssr → web (Caddy/TLS)` in
+`docker-compose.prod.yml`, on one GCE VM in `australia-southeast1`.
+
+---
+
+## 3. What this session did
+
+### A. Restarted the stack + audited where the project actually is
+Ports (defaults are taken on this machine): db `:5433`, API `:8001`, web `:9000`, worker looping.
+Migrations at head (`96db45824a80`). Verified against the **active gate** (ADR-0006):
+
+| Milestone | State |
+| --- | --- |
+| A — any-day one-off sessions | **Done** — `weekend`/`weekday`/`after_school` facets, `/search/feeds/this-weekend`, `/feeds/after-school`, `admin.reject_listing(recurring_enrolment)` |
+| B — parties instant-book | **Done** — packages, capacity-1 slots, deposit, T-7d balance, adjust/cancel (ADRs 0007–0010) |
+| C — parties request-to-quote | **NOT STARTED.** ADR-0009 decided quote expiry/counters, but `grep -ril quote` over `apps/api/src`, `apps/web/src`, `apps/api/tests` returns **zero hits** |
+| D — G2 party planner | **Done** — vote-to-book, RSVP, flag on |
+
+### B. Fixed the planner test fixtures (`tests/test_planner.py`)
+5 failures, all one cause: `MON/TUE/WED_A/WED_B` were hardcoded to `2026-07-20…22` and `_brief()` to
+`2026-07-20 → 25`. `search_sessions` filters `starts_at >= now` (`search/core/service.py:86`), so once
+the calendar passed those dates every planner candidate query returned empty (`candidate_count == 0`).
+A **date time-bomb, not a regression** — it would have failed identically on `main` with no code change.
+
+Replaced with a relative `_window(days_ahead, start_hour=9, hours=2)` helper returning aware UTC
+datetimes for Perth-morning windows, plus `PLAN_FROM`/`PLAN_TO` (today → +5d). Perth-morning windows
+are deliberate: 09:00 Perth = 01:00 UTC keeps the Perth and UTC **calendar dates identical**, and the
+search date filter bounds on UTC days (INV-7). Constants renamed `DAY_1`/`DAY_2`/`DAY_3_A`/`DAY_3_B`
+(the old weekday names would now be lies), with titles/comments following.
+
+### C. Fixed a live-API leak in the test suite (`tests/conftest.py`)
+With the fixtures repaired, one test still failed — `generated_by == 'ai'`, not `'rules'`. Cause:
+`JUGGLE_ANTHROPIC_API_KEY` is now set in `.env`, so `get_planner_gateway()` returned the
+**`AnthropicPlannerGateway`** and **every planner test made a real, billable Claude call** (the run
+took 7.1s; after the fix, 1.9s).
+
+The `client` fixture already forced the fake SMS gateway "so a developer's real Twilio creds in `.env`
+can never trigger a live send (or cost)". Applied the same treatment: it now overrides
+`get_planner_gateway` → `RuleBasedPlannerGateway`. The Anthropic path keeps its own coverage against a
+mocked SDK, so nothing is lost.
+
+---
+
+## 4. Findings that need a decision (not fixed here)
+
+1. **Prod is running the FakeGateway.** `https://kidspots.store/api/v1/payments/config` returns
+   `{"live":false,"publishable_key":null}` — no `JUGGLE_STRIPE_*` on the VM. The checkout flow there
+   will happily confirm a booking, accrue a provider payout, and send a confirmation email for money
+   that was never taken (the sync `confirm()` endpoint is only 409-gated *under live Stripe*). Either
+   put test/live keys on the VM or gate checkout in prod until they exist. **This is the top item.**
+2. **`CLAUDE.md`'s Status paragraph is stale** — it still says SSR is "not yet wired into the prod
+   deploy" and lists "real email integration" as a remaining gap. Both landed (PRs #17, #19, #20).
+   Worth a docs pass on merge.
+3. **The payments track has never touched real Stripe.** F-PAY-1…6 are complete and tested, but every
+   test runs on `FakeGateway`: webhook signature verification, the `stripe_event` ledger, Connect
+   Express onboarding, T+2 `Transfer`, and Transfer Reversal on refund are verified by contract only.
+   Building Milestone C on those rails widens untested surface — do the Stripe test-mode pass first.
+
+---
+
+## 5. Invariants
+
+- **INV-7** — the new fixture helper is explicitly Perth-aware and documents why morning windows keep
+  the UTC and Perth calendar dates aligned against the UTC-day search bound.
+- **INV-3** — untouched; the planner still sends ages only, and `test_planner_request_carries_no_child_pii`
+  plus the mocked-SDK payload assertion both still pass.
+- **INV-2 / INV-5** — no money code touched this session. But see §4.1: prod's current gateway state
+  means INV-2's "money moves only through `payments`" is technically satisfied while *no money moves at all*.
+- **INV-10** — closed out by PR #10 (§2); the admin refresh token is now fail-closed under impersonation.
+
+---
+
+## 6. Known gaps / next steps
+
+**Recommended next step: wire Stripe test keys and verify the live payment path end to end.** Needs a
+Stripe test-mode account (publishable + secret) and a webhook secret from
+`stripe listen --forward-to localhost:8001/api/v1/booking/stripe/webhook`, plus test-mode Connect
+Express. Then: provider onboarding → `account.updated` capability sync → Payment Element checkout →
+`payment_intent.succeeded` → confirm → payout accrual → refund + clawback (both the scheduled-decrement
+and Transfer-Reversal branches) → tax invoice; then party deposit + balance charge. Adversarial review
+on the diff per `CLAUDE.md`.
+
+In parallel / after:
+- **SMTP credentials** (Postmark or SES). Gateway code is done (#17); this is the hard dependency
+  keeping `party_planner` OFF in prod, and Stripe verification generates confirmation emails anyway.
+- **Milestone C** (request-to-quote) — the only unbuilt piece of the active gate.
+- **Pre-existing payout test failures** — `test_payouts.py::test_admin_runs_due_payouts` and
+  `::test_refund_before_release_claws_back_scheduled_payout`. **Correcting the prior handoff: these do
+  NOT "pass in isolation"** — running `pytest tests/test_payouts.py` alone still fails them. The cause
+  is that they assert **globally** (`assert scheduled == []` over the entire payout table,
+  `test_payouts.py:346`) while a committed seed payout (4895c) lives in the shared dev DB. So it is a
+  fixture-scope bug, not test interference. Fix: scope the assertions to the payouts the test created
+  (the same fix already applied to the planner's cross-plan count queries), **not** by deleting
+  committed financial data. ~15 minutes, deliberately left out of this diff to keep it scoped.
+- Carried over: post-tie final-pick notice to invitees; admin "suspend user" action (`UserStatus.suspended`
+  is enforced but never assigned); SSR prefetch serialization to avoid the client hydration re-fetch;
+  deploy hardening (Cloud SQL + Secret Manager + scheduled GCS backups, `DEPLOY.md §9`); party-page
+  counter limits hardcoded client-side.
+- **Shared-DB e2e gotcha** (unchanged): Playwright specs that create seat holds leave dangling browsing
+  holds that trip `test_reserved_seat_survives_the_ttl_sweep`. Clean up with `inventory.service.force_release`.
+
+---
+
+## 7. Where to look
+
+- This session's diff: `apps/api/tests/test_planner.py`, `apps/api/tests/conftest.py`.
+- Why the fixtures expired: `apps/api/src/juggle/modules/search/core/service.py:86` (`starts_at >= now`)
+  and `:43` (`_day_start`, UTC day bounds).
+- Gateway selection points: `planner/core/gateway.py:187` (`get_planner_gateway`),
+  `payments/core/gateway.py:356` (`get_payment_gateway`), `notifications/core/gateway.py` (email + SMS).
+- Prod: `scripts/deploy.sh`, `docker-compose.prod.yml`, `apps/web/Caddyfile`, `docs/DEPLOY-kidspots.md`.
+- Active gate: `docs/PLANS/always-on-marketplace.md`, `docs/ADR/0006`, `0007`–`0011`.
+
+## 8. How to run
+
+`make db` (Postgres :5433) · API `uv run uvicorn juggle.main:app --reload --port 8001` ·
+web `VITE_API_TARGET=http://localhost:8001 npm run dev` (:9000) · `make worker-loop`.
+Sanity: `curl localhost:8001/health`. Prod: `scripts/deploy.sh --backup`.
