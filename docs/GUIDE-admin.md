@@ -1,5 +1,10 @@
 # Admin Guide — kidspots.store
 
+> **Looking for the full manual?** This is the short orientation guide.
+> [`manuals/admin-manual.md`](manuals/admin-manual.md) is the comprehensive version,
+> including every runtime setting with its real bounds and an operational runbook.
+
+
 **Who this is for:** kidspots operators with an admin account. The admin console is the control
 room for the marketplace: approving providers, verifying compliance, running bookings and payout
 operations, tuning runtime configuration, managing feature flags, handling privacy requests, and

@@ -1,5 +1,9 @@
 # Parent Guide — kidspots.store
 
+> **Looking for the full manual?** This is the short orientation guide.
+> [`manuals/user-manual.md`](manuals/user-manual.md) is the comprehensive version.
+
+
 **Who this is for:** parents and guardians booking kids' activities — school-holiday
 programs, weekend & after-school one-offs, and birthday parties — in and around Perth.
 

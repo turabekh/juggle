@@ -1,5 +1,9 @@
 # Provider Guide — kidspots.store
 
+> **Note:** parents and admins now have long-form manuals in [`manuals/`](manuals/).
+> There is no provider manual yet — this guide remains the provider reference.
+
+
 **Who this is for:** activity providers — the businesses and organisers who list kids'
 activities on kidspots, manage capacity and rosters, and get paid.
 
