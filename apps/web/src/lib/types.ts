@@ -312,6 +312,12 @@ export interface PlanHostInvite {
   avatar_key: string | null
 }
 
+export interface PlanLimits {
+  page_title_maxlen: number
+  page_message_maxlen: number
+  custom_option_maxlen: number
+}
+
 export interface PlanView {
   id: string
   status: 'draft' | 'open' | 'resolved' | 'booked' | 'expired_unbooked'
@@ -327,6 +333,8 @@ export interface PlanView {
   invites: PlanHostInvite[]
   rsvp_yes_headcount: number
   page: PartyPageView
+  /** Live server-side caps for host-authored text (runtime config, INV-11). */
+  limits?: PlanLimits
   deadline_warnings: string[]
   deposit_client_secret: string | null
   deposit_payment_id: string | null

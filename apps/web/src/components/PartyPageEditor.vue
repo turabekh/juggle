@@ -73,8 +73,11 @@ const props = defineProps<{ plan: PlanView }>()
 const emit = defineEmits<{ saved: [plan: PlanView] }>()
 const $q = useQuasar()
 
-const TITLE_MAX = 60
-const MESSAGE_MAX = 280
+// The caps are runtime config (INV-11) — the server sends the live values on the plan, so
+// the counters follow an admin's change instead of drifting from a duplicated constant.
+// The fallbacks match the config defaults and only apply to a plan fetched before this shipped.
+const TITLE_MAX = computed(() => props.plan.limits?.page_title_maxlen ?? 60)
+const MESSAGE_MAX = computed(() => props.plan.limits?.page_message_maxlen ?? 280)
 const WIDGET_KEYS: PartyWidgetKey[] = ['welcome', 'countdown', 'board', 'reveal_venue']
 
 const saving = ref(false)

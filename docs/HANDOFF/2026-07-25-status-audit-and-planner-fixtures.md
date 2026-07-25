@@ -127,6 +127,21 @@ unreachable. Closed:
 **Not adversarially reviewed by a subagent** (out of scope this session per instruction) — the
 self-review above is what it got. It touches auth, so a fresh skeptical pass before merge is worth it.
 
+### F. Two carried-over party-planner nits closed
+- **Post-tie final-pick notice** (open since the 2026-07-12 handoff). When a vote ended in an
+  unbroken tie the reveal told invitees "a tie — the host will decide", and then **nothing**: the
+  change-of-plans email only fires when a *real* announced winner is overridden, so guests never
+  learned the outcome. `confirm_booking` now branches — tie → new `notify_planner_final_pick`
+  ("the host has picked"), overridden winner → the existing change notice, and booking the winner
+  the reveal already announced stays silent (no duplicate news). Two tests, including the silence case.
+- **Party-page counter limits** were hardcoded client-side (`TITLE_MAX = 60`, `MESSAGE_MAX = 280` in
+  `PartyPageEditor.vue`) while the real caps are runtime config (INV-11) — an admin change would have
+  left the editor lying. `PlanView` now carries a `limits` block read live from `config`, and the
+  editor's counters follow it. The related half of the nit is fixed too: `PagePatchIn`'s outer
+  `max_length` was 200/2000, looser than the config bounds, so a 150-char title 422'd while a
+  100-char one silently truncated — the outer bounds are now the config specs' own maxima (120/1000),
+  so anything an admin could configure truncates cleanly and the payload guard stays honest.
+
 ---
 
 ## 4. Findings that need a decision (not fixed here)
@@ -182,7 +197,7 @@ on the diff per `CLAUDE.md`.
 - **Milestone C** (request-to-quote) — the only unbuilt piece of the active gate, but note its
   definition of done ends in a deposit on Milestone B's rails, so the last leg is payments work.
   The brief → quote → accept state machine and its expiry job can be built without touching money.
-- **Post-tie final-pick notice** and the **party-page config-driven counter limits** — small, contained.
+- ~~Post-tie final-pick notice / party-page config-driven counter limits~~ — **both done** (§3F).
 - ~~Pre-existing payout test failures~~ — **fixed** in §3D. Worth recording why they survived so long:
   every prior handoff repeated that they "pass in isolation" and blamed shared-DB pollution. They do
   not pass in isolation, and the pollution was not the bug — the tests asserted on the global payout
@@ -204,9 +219,12 @@ on the diff per `CLAUDE.md`.
 
 ## 7. Where to look
 
-- This session's diff: `apps/api/tests/{test_planner,conftest,test_payouts,test_user_suspension}.py`;
+- This session's diff: `apps/api/tests/{test_planner,conftest,test_payouts,test_user_suspension,test_party_planner}.py`;
   `identity/core/service.py` (`set_account_status`), `admin/core/{service,schemas}.py`,
-  `admin/ui/routes.py`, `apps/web/src/pages/admin/AdminUsersPage.vue`, `apps/web/src/lib/{api,types}.ts`.
+  `admin/ui/routes.py`, `party_planner/core/{service,schemas}.py` (final-pick notice + `PlanLimits`),
+  `notifications/core/service.py` (`notify_planner_final_pick`),
+  `apps/web/src/pages/admin/AdminUsersPage.vue`, `apps/web/src/components/PartyPageEditor.vue`,
+  `apps/web/src/lib/{api,types}.ts`.
 - Why the fixtures expired: `apps/api/src/juggle/modules/search/core/service.py:86` (`starts_at >= now`)
   and `:43` (`_day_start`, UTC day bounds).
 - Gateway selection points: `planner/core/gateway.py:187` (`get_planner_gateway`),

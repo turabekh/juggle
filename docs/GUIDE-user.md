@@ -213,7 +213,9 @@ Can't decide on the party? The **Party Planner** lets your invitees help pick:
    show (countdown, who's-coming board, etc.).
 4. **Open** it for voting and **invite guests by email**, or just share the invite **link**.
 5. When the deadline passes, **confirm the winning option and headcount** — this books the
-   party and takes a deposit.
+   party and takes a deposit. If the vote **tied**, guests are told you'll decide; once you
+   pick, everyone who RSVP'd is emailed your final choice. (Overriding a clear winner emails
+   them a change-of-plans notice instead.)
 
 **As an invited guest (no account needed):**
 1. Open the **invite link**.

@@ -31,6 +31,7 @@ KIND_PLANNER_INVITE = "planner_invite"
 KIND_PLANNER_RSVP = "planner_rsvp_confirmation"
 KIND_PLANNER_REVEAL = "planner_reveal"
 KIND_PLANNER_CHANGE = "planner_change_of_plans"
+KIND_PLANNER_FINAL_PICK = "planner_final_pick"
 KIND_PLANNER_LOW_RSVP = "planner_low_rsvp"
 KIND_PLANNER_REVOTE = "planner_revote"
 
@@ -364,6 +365,22 @@ def notify_planner_change(
     )
     gateway.send(to=to_email, subject=subject, body=body)
     return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_CHANGE,
+                   subject=subject, detail={})
+
+
+def notify_planner_final_pick(
+    db: Session, *, to_email: str, winner_label: str, link: str, gateway: EmailGateway,
+) -> NotificationLog:
+    """Sent after an unbroken tie, where the reveal told invitees "the host will decide".
+    Without this they never learn what was decided — the change-of-plans notice only fires
+    when a *real* announced winner was overridden."""
+    subject = "🎊 The host has picked the party"
+    body = (
+        f"The vote ended in a tie, so the host chose — the party is: {winner_label}.\n\n"
+        f"See the details: {link}\n\nPowered by Juggle."
+    )
+    gateway.send(to=to_email, subject=subject, body=body)
+    return _record(db, user_id=None, to_email=to_email, kind=KIND_PLANNER_FINAL_PICK,
                    subject=subject, detail={})
 
 
