@@ -2,6 +2,10 @@
   <q-layout view="lHh LpR fff">
     <q-header class="jg-adminhdr">
       <div class="jg-adminhdr__inner">
+        <q-btn
+          flat dense round icon="menu" class="lt-md"
+          aria-label="Menu" @click="drawer = !drawer"
+        />
         <div class="row items-center">
           <span class="jg-adminhdr__mark">🤹</span>
           <span class="jg-adminhdr__title">Juggle&nbsp;<span class="jg-adminhdr__tag">Admin</span></span>
@@ -13,7 +17,9 @@
       </div>
     </q-header>
 
-    <q-drawer :model-value="true" :width="236" bordered class="jg-adminnav">
+    <!-- `show-if-above`: pinned open on desktop, dismissable overlay on phones. It
+         was `:model-value="true"`, so on mobile it covered the console permanently. -->
+    <q-drawer v-model="drawer" show-if-above :width="236" bordered class="jg-adminnav">
       <q-list padding>
         <q-item
           v-for="n in nav"
@@ -22,6 +28,7 @@
           :to="{ name: n.name }"
           active-class="jg-adminnav__active"
           class="jg-adminnav__item"
+          @click="closeOnMobile"
         >
           <q-item-section avatar><q-icon :name="n.icon" /></q-item-section>
           <q-item-section>{{ n.label }}</q-item-section>
@@ -36,12 +43,27 @@
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useQuasar } from 'quasar'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+const $q = useQuasar()
+
+/** Only consulted below the drawer breakpoint — `show-if-above` pins it open on desktop. */
+const drawer = ref(false)
+
+// The mobile drawer is an overlay over the console, so picking a page must dismiss
+// it — on tap rather than only on route change, so re-tapping the current page also
+// gets the overlay out of the way.
+function closeOnMobile(): void {
+  if ($q.screen.lt.md) drawer.value = false
+}
+watch(() => route.fullPath, closeOnMobile)
 
 const nav = [
   { name: 'admin-approvals', label: 'Approvals', icon: 'verified' },

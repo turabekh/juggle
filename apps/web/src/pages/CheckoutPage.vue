@@ -203,5 +203,7 @@ onMounted(async () => {
   align-items: flex-start;
   padding: 8px 0;
 }
-.jg-pay { position: sticky; bottom: 12px; }
+/* Offset by the mobile tab bar (0 on desktop) so the Pay button is never hidden
+   behind it — this is the last step of checkout, it has to stay reachable. */
+.jg-pay { position: sticky; bottom: calc(12px + var(--jg-tabbar-h, 0px)); }
 </style>

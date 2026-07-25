@@ -23,6 +23,17 @@
   --jg-gap: 16px;
 
   --jg-maxw: 1120px;
+
+  /* Height of the mobile bottom tab bar, including the iOS home-indicator inset.
+     0 on desktop, where there is no bar. Anything pinned to the bottom of the
+     viewport (sticky "Pay" CTAs) offsets by this so the tab bar never covers it. */
+  --jg-tabbar-h: 0px;
+}
+
+@media (max-width: 599px) {
+  :root {
+    --jg-tabbar-h: calc(58px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 html,

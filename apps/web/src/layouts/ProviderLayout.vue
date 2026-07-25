@@ -14,6 +14,10 @@
       </div>
 
       <div class="jg-provhdr__inner">
+        <q-btn
+          flat dense round icon="menu" class="lt-md"
+          aria-label="Menu" @click="drawer = !drawer"
+        />
         <div class="row items-center no-wrap">
           <span class="jg-provhdr__mark">🤹</span>
           <span class="jg-provhdr__title">Juggle&nbsp;<span class="jg-provhdr__tag">for providers</span></span>
@@ -43,7 +47,10 @@
       </div>
     </q-header>
 
-    <q-drawer :model-value="true" :width="248" bordered class="jg-provnav">
+    <!-- `show-if-above` keeps it pinned open on desktop and turns it into a
+         dismissable overlay on phones. It was previously `:model-value="true"`,
+         which meant the overlay covered the console with no way to close it. -->
+    <q-drawer v-model="drawer" show-if-above :width="248" bordered class="jg-provnav">
       <q-list padding>
         <q-item
           clickable
@@ -51,6 +58,7 @@
           exact
           active-class="jg-provnav__active"
           class="jg-provnav__item"
+          @click="closeOnMobile"
         >
           <q-item-section avatar><q-icon name="dashboard" /></q-item-section>
           <q-item-section>Dashboard</q-item-section>
@@ -65,6 +73,7 @@
           :to="{ name: 'provider-org', params: { id: org.id } }"
           active-class="jg-provnav__active"
           class="jg-provnav__item"
+          @click="closeOnMobile"
         >
           <q-item-section avatar>
             <q-avatar size="26px" color="primary" text-color="white" class="jg-provnav__orgmark">
@@ -85,6 +94,7 @@
           clickable
           :to="{ name: 'provider' }"
           class="jg-provnav__item jg-provnav__new"
+          @click="closeOnMobile"
         >
           <q-item-section avatar><q-icon name="add" /></q-item-section>
           <q-item-section>New organisation</q-item-section>
@@ -99,8 +109,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref, watch } from 'vue'
+import { useQuasar } from 'quasar'
+import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
@@ -108,9 +119,22 @@ import type { Org } from '@/lib/types'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+const $q = useQuasar()
 
 const orgs = ref<Org[]>([])
 const loading = ref(true)
+/** Only consulted below the drawer breakpoint — `show-if-above` pins it open on desktop. */
+const drawer = ref(false)
+
+// On a phone the drawer is an overlay covering the page, so picking a destination
+// has to dismiss it; otherwise you navigate and still can't see where you landed.
+// Closing on tap (not only on route change) also covers tapping the page you're
+// already on, which is a no-op navigation but should still get you out of the way.
+function closeOnMobile(): void {
+  if ($q.screen.lt.md) drawer.value = false
+}
+watch(() => route.fullPath, closeOnMobile)
 
 async function loadOrgs(): Promise<void> {
   loading.value = true
